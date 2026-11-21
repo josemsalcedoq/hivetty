@@ -14,13 +14,34 @@ COMMANDS:
     conpty-fetch    Download, verify and install the bundled ConPTY next to the exe
                     (Windows; --profile debug|release, default debug)
     dist            Build release packages                     (phase F6)
-    bench           Run performance benchmarks                 (phase F1)
+    bench           Run performance benchmarks (release build)
 ";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("ci") => ci(),
+        Some("bench") => {
+            let ok = Command::new("cargo")
+                .args([
+                    "test",
+                    "--release",
+                    "-p",
+                    "hv-term",
+                    "--lib",
+                    "bench_",
+                    "--",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .status()
+                .is_ok_and(|s| s.success());
+            if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
         Some("conpty-fetch") => match conpty::fetch(&args[1..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
@@ -28,7 +49,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Some(cmd @ ("golden-update" | "fixtures" | "dist" | "bench")) => {
+        Some(cmd @ ("golden-update" | "fixtures" | "dist")) => {
             println!("xtask {cmd}: not implemented yet (see docs/backlog.md)");
             ExitCode::FAILURE
         }

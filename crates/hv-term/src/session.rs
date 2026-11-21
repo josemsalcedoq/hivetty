@@ -637,6 +637,88 @@ mod tests {
         assert!(session.selection_text().is_none());
     }
 
+    /// Throughput benchmark (F1-28). Run with `cargo xtask bench`.
+    #[test]
+    #[ignore = "benchmark; run with cargo xtask bench"]
+    fn bench_throughput_and_snapshot() {
+        // ~64 MB of realistic output: colored log lines, unicode and some OSC sequences.
+        let mut chunk = Vec::new();
+        for i in 0..2000 {
+            let line = format!(
+                "\x1b[32m[ok]\x1b[0m line {i:05} compiling crate \x1b[1;34mhv-term\x1b[0m ñ 日本 ✓ {}\r\n",
+                "x".repeat(i % 60)
+            );
+            chunk.extend_from_slice(line.as_bytes());
+            if i % 500 == 0 {
+                chunk.extend_from_slice(b"\x1b]133;A\x07\x1b]7;file://h/tmp\x07");
+            }
+        }
+        let repeats = (64 * 1024 * 1024) / chunk.len();
+        let (tx, _rx) = mpsc::channel();
+        let config = Config {
+            scrolling_history: 10_000,
+            ..Config::default()
+        };
+        let mut term = Term::new(
+            config,
+            &Dims {
+                cols: 200,
+                rows: 60,
+            },
+            EventProxy(tx),
+        );
+        let mut processor: Processor<StdSyncHandler> = Processor::new();
+        let mut interceptor = Interceptor::new();
+
+        let start = Instant::now();
+        let mut events = 0;
+        for _ in 0..repeats {
+            for piece in chunk.chunks(64 * 1024) {
+                events += interceptor.feed(piece).len();
+                processor.advance(&mut term, piece);
+            }
+        }
+        let secs = start.elapsed().as_secs_f64();
+        let mb = (repeats * chunk.len()) as f64 / (1024.0 * 1024.0);
+        println!(
+            "BENCH throughput: {:.0} MB/s ({mb:.0} MB in {secs:.2} s, {events} OSC events)",
+            mb / secs
+        );
+
+        // Baseline: the emulator alone (what Alacritty itself does), to see the interceptor cost.
+        let (tx, _rx) = mpsc::channel();
+        let mut bare = Term::new(
+            Config::default(),
+            &Dims {
+                cols: 200,
+                rows: 60,
+            },
+            EventProxy(tx),
+        );
+        let mut bare_processor: Processor<StdSyncHandler> = Processor::new();
+        let start = Instant::now();
+        for _ in 0..repeats {
+            for piece in chunk.chunks(64 * 1024) {
+                bare_processor.advance(&mut bare, piece);
+            }
+        }
+        let bare_secs = start.elapsed().as_secs_f64();
+        println!(
+            "BENCH emulator only: {:.0} MB/s -> hivetty is {:.0}% of the bare emulator",
+            mb / bare_secs,
+            bare_secs / secs * 100.0
+        );
+
+        let start = Instant::now();
+        let n = 200;
+        for _ in 0..n {
+            std::hint::black_box(snapshot::take(&term));
+        }
+        let per = start.elapsed().as_secs_f64() * 1000.0 / f64::from(n);
+        println!("BENCH snapshot 200x60: {per:.3} ms");
+        assert!(events > 0);
+    }
+
     #[test]
     fn wide_characters_take_two_cells() {
         let snap = render("日本".as_bytes(), 10, 1);
