@@ -7,6 +7,8 @@ Tamaño: **XS** ≤ 0.5 días · **S** ≈ 1 día · **M** ≈ 2–3 días · **
 
 ## SP — Spikes de riesgo (antes de F1, 2 semanas)
 
+**Estado (2026-11-21):** ✅ SP-1 ([nota](spikes/SP-1.md)), 🟡 SP-2 (falta Windows 10; [nota](spikes/SP-2.md)), ✅ SP-5 (coincidencia exacta con ccusage; [nota](spikes/SP-5.md)). Pendientes: SP-1b, SP-3, SP-4, SP-6 y SP-7.
+
 Cada spike es código desechable en la rama `spike/…` y termina con una nota en `docs/spikes/<id>.md`: qué se probó, resultado y decisión.
 
 | ID | Spike | Pregunta que responde | Tam. |
@@ -44,6 +46,11 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | F0-12 | Subcomando `hivetty --doctor` (esqueleto) | F0-02 | XS | imprime la versión, el SO y la GPU |
 
 ## F1 — Terminal mínimo usable
+
+**Estado (2026-11-21):**
+- ✅ Hechas (primera versión): F1-01, F1-03, F1-04, F1-05, F1-06, F1-07, F1-08 (DX12 en Windows, pérdida de superficie), F1-10 (box-drawing y bloques; faltan las esquinas redondeadas y las uniones dobles), F1-11 (parcial: subrayado simple), F1-14 (xterm + Shift+Enter), F1-15 (IME, sin pintar el preedit), F1-16, F1-17, F1-18, F1-19, F1-22, F1-24, F1-25 (parcial: falta arrastrar archivos), F1-29, F1-31, F1-32 y F1-33 (resolución de programas con PATHEXT; el fork de portable-pty sigue pendiente).
+- ⏳ Pendientes: F1-02, F1-09 (atlas propio), F1-12 (damage tracking), F1-13 (renderer por software), F1-20 (OSC 52), F1-21 (búsqueda), F1-23, F1-26, F1-27, F1-28 y F1-30 (teclado de Kitty).
+- Herramientas nuevas: `hivetty --screenshot` (render headless; el CI sube capturas de los 3 SO), `--events`, `--scroll` y `hivetty usage`.
 
 | ID | Tarea | Req | Depende | Tam. | Aceptación |
 |---|---|---|---|---|---|
