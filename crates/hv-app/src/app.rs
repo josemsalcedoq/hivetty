@@ -116,27 +116,25 @@ impl App {
             m.control_key() && m.shift_key()
         };
 
-        if primary {
-            if let Key::Character(c) = &event.logical_key {
-                match c.to_lowercase().as_str() {
-                    "v" => {
-                        paste_clipboard(&ui.session);
-                        return;
-                    }
-                    "=" | "+" => {
-                        zoom(ui, 1.0);
-                        return;
-                    }
-                    "-" => {
-                        zoom(ui, -1.0);
-                        return;
-                    }
-                    "0" => {
-                        zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size());
-                        return;
-                    }
-                    _ => {}
+        if primary && let Key::Character(c) = &event.logical_key {
+            match c.to_lowercase().as_str() {
+                "v" => {
+                    paste_clipboard(&ui.session);
+                    return;
                 }
+                "=" | "+" => {
+                    zoom(ui, 1.0);
+                    return;
+                }
+                "-" => {
+                    zoom(ui, -1.0);
+                    return;
+                }
+                "0" => {
+                    zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size());
+                    return;
+                }
+                _ => {}
             }
         }
         if cfg!(target_os = "macos") && m.super_key() {

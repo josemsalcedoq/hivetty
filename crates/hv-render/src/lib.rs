@@ -643,7 +643,9 @@ fn measure_cell(fs: &mut FontSystem, family: &str, font_px: f32) -> (f32, f32) {
         .layout_runs()
         .next()
         .map_or(font_px * 6.0, |run| run.line_w);
-    let cell_w = (width / sample.len() as f32).round().max(1.0);
+    // Keep the exact (fractional) advance: rounding it makes text drift away from the cell
+    // backgrounds by a fraction of a pixel per column (e.g. Menlo is 8.43 px at 14 px).
+    let cell_w = (width / sample.len() as f32).max(1.0);
     (cell_w, line_h)
 }
 

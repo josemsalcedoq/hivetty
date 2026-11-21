@@ -18,6 +18,8 @@ pub(crate) struct Capture {
     /// Maximum time to wait for the program to exit.
     pub(crate) wait: Duration,
     pub(crate) font_size: f32,
+    /// Print the terminal events (titles, OSC 7/9/133/777/7501…) seen during the run.
+    pub(crate) print_events: bool,
 }
 
 impl Default for Capture {
@@ -27,6 +29,7 @@ impl Default for Capture {
             rows: 30,
             wait: Duration::from_secs(5),
             font_size: 14.0,
+            print_events: false,
         }
     }
 }
@@ -47,9 +50,17 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
     let session = Session::spawn(spec, grid, || {})?;
     let deadline = Instant::now() + opts.wait;
     let mut exited = false;
+    let mut events = Vec::new();
     while !exited && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(50));
-        exited = session.drain_events().contains(&SessionEvent::Exited);
+        let batch = session.drain_events();
+        exited = batch.contains(&SessionEvent::Exited);
+        events.extend(batch);
+    }
+    if opts.print_events {
+        for event in &events {
+            println!("event: {event:?}");
+        }
     }
     // Let the last output settle and close any open synchronized update.
     std::thread::sleep(Duration::from_millis(150));

@@ -26,6 +26,7 @@ OPTIONS:
     --screenshot <FILE>  Run without a window and save the final screen as a PNG
     --size <COLSxROWS>   Grid size for --screenshot (default 100x30)
     --wait <SECONDS>     Max time --screenshot waits for the program to exit (default 5)
+    --events             With --screenshot, print the terminal events seen (OSC 7/9/133/777/7501)
     --doctor             Print diagnostic information about this system
     -V, --version        Print version
     -h, --help           Print help
@@ -44,6 +45,7 @@ enum Command {
         cols: u16,
         rows: u16,
         wait: Duration,
+        events: bool,
     },
     Doctor,
     Version,
@@ -54,6 +56,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut spec = SpawnSpec::default();
     let mut screenshot: Option<PathBuf> = None;
     let (mut cols, mut rows, mut wait) = (100, 30, Duration::from_secs(5));
+    let mut events = false;
     let mut i = 0;
     while i < args.len() {
         let value = |i: usize| {
@@ -84,6 +87,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 }
                 i += 1;
             }
+            "--events" => events = true,
             "--wait" => {
                 let secs: f64 = value(i)?.parse().map_err(|_| "invalid --wait")?;
                 wait = Duration::from_secs_f64(secs.clamp(0.0, 600.0));
@@ -100,6 +104,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             cols,
             rows,
             wait,
+            events,
         },
         None => Command::Run(spec),
     })
@@ -138,11 +143,13 @@ fn main() -> ExitCode {
             cols,
             rows,
             wait,
+            events,
         } => {
             let opts = headless::Capture {
                 cols,
                 rows,
                 wait,
+                print_events: events,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))
@@ -161,12 +168,31 @@ fn main() -> ExitCode {
 /// Builds the `--doctor` report. GPU, hook and ConPTY checks are added in later phases.
 fn doctor_report() -> String {
     let (shell, _) = hv_pty::default_shell();
-    format!(
+    let mut report = format!(
         "hivetty {VERSION}\nos: {}\narch: {}\nfamily: {}\nshell: {shell}\n",
         std::env::consts::OS,
         std::env::consts::ARCH,
         std::env::consts::FAMILY,
-    )
+    );
+    if cfg!(windows) {
+        report.push_str(&format!("conpty: {}\n", conpty_status()));
+    }
+    report
+}
+
+/// Which ConPTY host will be used (docs/platforms.md: the bundled one is preferred).
+fn conpty_status() -> &'static str {
+    let dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+    let has = |name: &str| dir.as_ref().is_some_and(|d| d.join(name).is_file());
+    match (has("conpty.dll"), has("OpenConsole.exe")) {
+        (true, true) => "bundled (conpty.dll + OpenConsole.exe)",
+        (true, false) => {
+            "WARNING: conpty.dll without OpenConsole.exe; falls back to the system conhost"
+        }
+        _ => "system (run `cargo xtask conpty-fetch` to bundle the newer one)",
+    }
 }
 
 #[cfg(test)]
@@ -207,6 +233,7 @@ mod tests {
             rows,
             wait,
             spec,
+            ..
         }) = parse_args(&args("--screenshot a.png --size 80x24 --wait 2 -e echo hi"))
         else {
             panic!()

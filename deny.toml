@@ -25,6 +25,8 @@ allow = [
     "OFL-1.1",
     "CC0-1.0",
     "BSL-1.0",
+    # Data license of the Mozilla CA root list (webpki-roots), used by xtask downloads only.
+    "CDLA-Permissive-2.0",
 ]
 
 [licenses.private]

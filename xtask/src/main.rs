@@ -1,5 +1,7 @@
 //! `cargo xtask <command>`: project automation that should work the same on every OS.
 
+mod conpty;
+
 use std::process::{Command, ExitCode};
 
 const HELP: &str = "\
@@ -9,7 +11,8 @@ COMMANDS:
     ci              Run the same checks as CI: fmt, clippy, tests, cargo-deny
     golden-update   Regenerate golden render images            (phase F1)
     fixtures        Refresh agent log / hook fixtures           (phase F4-F5)
-    conpty-fetch    Download and verify the bundled ConPTY      (phase F1, Windows)
+    conpty-fetch    Download, verify and install the bundled ConPTY next to the exe
+                    (Windows; --profile debug|release, default debug)
     dist            Build release packages                     (phase F6)
     bench           Run performance benchmarks                 (phase F1)
 ";
@@ -18,7 +21,14 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("ci") => ci(),
-        Some(cmd @ ("golden-update" | "fixtures" | "conpty-fetch" | "dist" | "bench")) => {
+        Some("conpty-fetch") => match conpty::fetch(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                println!("xtask conpty-fetch: {err:#}");
+                ExitCode::FAILURE
+            }
+        },
+        Some(cmd @ ("golden-update" | "fixtures" | "dist" | "bench")) => {
             println!("xtask {cmd}: not implemented yet (see docs/backlog.md)");
             ExitCode::FAILURE
         }

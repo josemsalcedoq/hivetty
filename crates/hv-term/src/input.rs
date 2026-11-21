@@ -75,18 +75,19 @@ pub fn encode_key(key: &Key, mods: Mods, modes: KeyModes) -> Option<Vec<u8>> {
             if text.is_empty() {
                 return None;
             }
-            if mods.ctrl && !mods.alt {
-                if let Some(b) = ctrl_byte(text) {
-                    return Some(vec![b]);
-                }
+            if mods.ctrl
+                && !mods.alt
+                && let Some(b) = ctrl_byte(text)
+            {
+                return Some(vec![b]);
             }
             if mods.alt {
                 out.push(0x1b);
-                if mods.ctrl {
-                    if let Some(b) = ctrl_byte(text) {
-                        out.push(b);
-                        return Some(out);
-                    }
+                if mods.ctrl
+                    && let Some(b) = ctrl_byte(text)
+                {
+                    out.push(b);
+                    return Some(out);
                 }
             }
             out.extend_from_slice(text.as_bytes());

@@ -86,7 +86,8 @@ impl Pty {
             Some(p) => (p.clone(), spec.args.clone()),
             None => default_shell(),
         };
-        let mut cmd = CommandBuilder::new(&program);
+        let resolved = resolve_program(&program);
+        let mut cmd = CommandBuilder::new(&resolved);
         cmd.args(&args);
         if let Some(cwd) = spec.cwd.clone().or_else(home_dir) {
             cmd.cwd(cwd);
@@ -181,6 +182,32 @@ pub fn find_in_path(name: &str) -> Option<PathBuf> {
         .find(|p| is_file(p))
 }
 
+/// Resolves a bare program name (`claude`, `sh`, `git`) to a full path.
+///
+/// On Windows this also tries the `PATHEXT` extensions, so `claude` finds the `claude.cmd`
+/// shim that npm installs and `sh` finds `sh.exe`. Names with a directory are returned as is,
+/// and names that cannot be found are returned unchanged (the spawn error reports them).
+pub fn resolve_program(name: &str) -> PathBuf {
+    let path = Path::new(name);
+    if path.components().count() > 1 || path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let candidates: Vec<String> = if cfg!(windows) && path.extension().is_none() {
+        let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
+        pathext
+            .split(';')
+            .filter(|e| !e.is_empty())
+            .map(|ext| format!("{name}{}", ext.to_ascii_lowercase()))
+            .collect()
+    } else {
+        vec![name.to_owned()]
+    };
+    candidates
+        .iter()
+        .find_map(|candidate| find_in_path(candidate))
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 fn is_file(path: &Path) -> bool {
     path.metadata().is_ok_and(|m| m.is_file())
 }
@@ -201,6 +228,26 @@ mod tests {
     fn default_shell_is_not_empty() {
         let (shell, _) = default_shell();
         assert!(!shell.is_empty());
+    }
+
+    #[test]
+    fn resolve_program_finds_shell_and_keeps_paths() {
+        let shell = if cfg!(windows) { "cmd" } else { "sh" };
+        let resolved = resolve_program(shell);
+        assert!(
+            resolved.is_absolute(),
+            "{shell} resolved to {}",
+            resolved.display()
+        );
+        assert!(resolved.is_file());
+        assert_eq!(
+            resolve_program("./local-tool"),
+            PathBuf::from("./local-tool")
+        );
+        assert_eq!(
+            resolve_program("no-such-program-xyz"),
+            PathBuf::from("no-such-program-xyz")
+        );
     }
 
     #[test]
