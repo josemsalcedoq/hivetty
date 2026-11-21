@@ -31,6 +31,8 @@ const APP_TITLE: &str = "hivetty";
 pub(crate) enum AppEvent {
     /// The PTY reader produced output or an event.
     Wakeup,
+    /// The config file changed on disk.
+    ConfigChanged,
 }
 
 /// Runs the terminal window until the shell exits or the window is closed.
@@ -38,7 +40,29 @@ pub(crate) fn run(spec: SpawnSpec) -> Result<()> {
     let event_loop = EventLoop::<AppEvent>::with_user_event()
         .build()
         .context("cannot start event loop")?;
-    let mut app = App::new(spec, event_loop.create_proxy());
+    let config_path = hv_config::default_path();
+    let (config, config_error) = config_path
+        .as_deref()
+        .map_or_else(|| (hv_config::Config::default(), None), hv_config::load);
+    if let Some(err) = config_error {
+        log::warn!("{err}");
+    }
+    // An explicit `-e PROGRAM` wins over the configured shell.
+    let mut spec = spec;
+    if spec.program.is_none() && config.shell.program.is_some() {
+        spec.program = config.shell.program.clone();
+        spec.args = config.shell.args.clone();
+    }
+    let proxy = event_loop.create_proxy();
+    let _watcher = config_path.as_deref().and_then(|path| {
+        let proxy = proxy.clone();
+        hv_config::watch(path, move || {
+            let _ = proxy.send_event(AppEvent::ConfigChanged);
+        })
+    });
+    let mut app = App::new(spec, proxy);
+    app.config = config;
+    app.config_path = config_path;
     event_loop.run_app(&mut app).context("event loop failed")?;
     if let Some(err) = app.fatal.take() {
         return Err(err);
@@ -63,6 +87,8 @@ struct App {
     mouse: MouseState,
     /// An input method is composing text; raw key presses belong to it, not to the program.
     ime_composing: bool,
+    config: hv_config::Config,
+    config_path: Option<std::path::PathBuf>,
 }
 
 /// Pointer position and click tracking for selection.
@@ -95,6 +121,8 @@ impl App {
             fatal: None,
             mouse: MouseState::default(),
             ime_composing: false,
+            config: hv_config::Config::default(),
+            config_path: None,
         }
     }
 
@@ -129,12 +157,19 @@ impl App {
                 let _ = proxy.send_event(AppEvent::Wakeup);
             }
         };
-        let session = Session::spawn(&self.spec, grid, wake)?;
-        Ok(Ui {
+        let session = Session::spawn(
+            &self.spec,
+            grid,
+            self.config.terminal.scrollback_lines,
+            wake,
+        )?;
+        let mut ui = Ui {
             window,
             renderer,
             session,
-        })
+        };
+        apply_font(&mut ui, &self.config.font);
+        Ok(ui)
     }
 
     fn on_key(&mut self, event: &KeyEvent) {
@@ -422,6 +457,23 @@ impl App {
         ui.window.request_redraw();
     }
 
+    /// Applies a changed config file. Font changes apply live; shell and scrollback apply to
+    /// new sessions.
+    fn reload_config(&mut self) {
+        let Some(path) = &self.config_path else {
+            return;
+        };
+        let (config, error) = hv_config::load(path);
+        if let Some(err) = error {
+            log::warn!("{err}");
+            return; // keep the last good config
+        }
+        if let Some(ui) = &mut self.ui {
+            apply_font(ui, &config.font);
+        }
+        self.config = config;
+    }
+
     fn handle_session_events(&mut self, event_loop: &ActiveEventLoop) {
         let Some(ui) = &mut self.ui else { return };
         for event in ui.session.drain_events() {
@@ -432,6 +484,11 @@ impl App {
                 SessionEvent::Bell => ui
                     .window
                     .request_user_attention(Some(winit::window::UserAttentionType::Informational)),
+                SessionEvent::ClipboardStore(text) => {
+                    if let Err(err) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
+                        log::warn!("OSC 52 clipboard write failed: {err}");
+                    }
+                }
                 SessionEvent::Term(term_event) => log::debug!("terminal event: {term_event:?}"),
             }
         }
@@ -463,6 +520,7 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
+            AppEvent::ConfigChanged => self.reload_config(),
             AppEvent::Wakeup => {
                 self.wake_pending.store(false, Ordering::Release);
                 self.handle_session_events(event_loop);
@@ -552,6 +610,18 @@ fn grid_size(renderer: &Renderer) -> GridSize {
         cell_width: cw as u16,
         cell_height: ch as u16,
     }
+}
+
+fn apply_font(ui: &mut Ui, font: &hv_config::Font) {
+    if !ui.renderer.set_font_family(font.family.as_deref()) {
+        log::warn!(
+            "font {:?} is not installed; keeping the current font",
+            font.family
+        );
+    }
+    ui.renderer.set_font_size(font.size);
+    ui.session.resize(grid_size(&ui.renderer));
+    ui.window.request_redraw();
 }
 
 fn zoom(ui: &mut Ui, delta: f32) {

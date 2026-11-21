@@ -19,6 +19,7 @@ workspace = true
 anyhow = "1.0.104"
 arboard = "3.7.0"
 env_logger = "0.11.12"
+hv-config = { version = "0.0.0", path = "../hv-config" }
 hv-pty = { version = "0.0.0", path = "../hv-pty" }
 hv-render = { version = "0.0.0", path = "../hv-render" }
 hv-term = { version = "0.0.0", path = "../hv-term" }

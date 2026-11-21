@@ -50,7 +50,7 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
         cell_height: ch as u16,
     };
 
-    let session = Session::spawn(spec, grid, || {})?;
+    let session = Session::spawn(spec, grid, 10_000, || {})?;
     let deadline = Instant::now() + opts.wait;
     let mut exited = false;
     let mut events = Vec::new();

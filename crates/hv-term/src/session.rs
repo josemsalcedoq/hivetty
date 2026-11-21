@@ -42,6 +42,8 @@ pub enum SessionEvent {
     ResetTitle,
     /// BEL.
     Bell,
+    /// OSC 52: the program wants to put text on the clipboard (reading is never allowed).
+    ClipboardStore(String),
     /// A sequence caught by the interceptor (cwd, prompt marks, notifications, OSC 7501…).
     Term(TermEvent),
     /// The child process exited (PTY closed).
@@ -97,6 +99,9 @@ impl fmt::Debug for Session {
     }
 }
 
+/// Largest OSC 52 clipboard write accepted.
+const MAX_OSC52_BYTES: usize = 1024 * 1024;
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -107,6 +112,7 @@ impl Session {
     pub fn spawn(
         spec: &SpawnSpec,
         size: GridSize,
+        scrollback_lines: usize,
         wake: impl Fn() + Send + 'static,
     ) -> Result<Self> {
         let (pty, io) = Pty::spawn(spec, size)?;
@@ -115,7 +121,11 @@ impl Session {
             cols: usize::from(size.cols.max(1)),
             rows: usize::from(size.rows.max(1)),
         };
-        let term = Term::new(Config::default(), &dims, EventProxy(term_tx));
+        let config = Config {
+            scrolling_history: scrollback_lines,
+            ..Config::default()
+        };
+        let term = Term::new(config, &dims, EventProxy(term_tx));
         let state = Arc::new(Mutex::new(TermState {
             term,
             processor: Processor::new(),
@@ -356,6 +366,11 @@ fn reader_loop(
                     Event::Title(title) => out.push(SessionEvent::Title(title)),
                     Event::ResetTitle => out.push(SessionEvent::ResetTitle),
                     Event::Bell => out.push(SessionEvent::Bell),
+                    // OSC 52 write, capped so a program cannot flood the clipboard
+                    // (docs/security.md 2.1). `ClipboardLoad` (reading) is ignored on purpose.
+                    Event::ClipboardStore(_, text) if text.len() <= MAX_OSC52_BYTES => {
+                        out.push(SessionEvent::ClipboardStore(text));
+                    }
                     _ => {}
                 }
             }
@@ -431,6 +446,23 @@ mod tests {
     }
 
     #[test]
+    fn osc52_write_reaches_the_event_channel() {
+        let (tx, rx) = mpsc::channel();
+        let mut term = Term::new(
+            Config::default(),
+            &Dims { cols: 10, rows: 2 },
+            EventProxy(tx),
+        );
+        let mut processor: Processor<StdSyncHandler> = Processor::new();
+        processor.advance(&mut term, b"]52;c;aGVsbG8=");
+        let stored = rx.try_iter().find_map(|e| match e {
+            Event::ClipboardStore(_, text) => Some(text),
+            _ => None,
+        });
+        assert_eq!(stored.as_deref(), Some("hello"));
+    }
+
+    #[test]
     fn wide_characters_take_two_cells() {
         let snap = render("日本".as_bytes(), 10, 1);
         assert!(snap.cell(0, 1).wide_spacer);
@@ -482,7 +514,7 @@ mod tests {
             cell_width: 8,
             cell_height: 16,
         };
-        let session = Session::spawn(&spec, size, || {}).expect("spawn");
+        let session = Session::spawn(&spec, size, 1000, || {}).expect("spawn");
 
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {

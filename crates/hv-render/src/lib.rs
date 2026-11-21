@@ -276,6 +276,26 @@ impl Renderer {
         self.relayout_font();
     }
 
+    /// Uses `family` for the terminal text if it is installed; `None` restores the automatic
+    /// choice. Returns false (and keeps the current font) if the family is not installed.
+    pub fn set_font_family(&mut self, family: Option<&str>) -> bool {
+        let wanted = match family {
+            None => pick_font(&self.font_system),
+            Some(name) if is_installed(&self.font_system, name) => name.to_owned(),
+            Some(_) => return false,
+        };
+        if wanted != self.font_family {
+            self.font_family = wanted;
+            self.relayout_font();
+            let attrs = Attrs::new().family(Family::Name(&self.font_family));
+            self.pill_label
+                .set_text(JUMP_LABEL, &attrs, Shaping::Advanced, None);
+            self.pill_label
+                .shape_until_scroll(&mut self.font_system, false);
+        }
+        true
+    }
+
     /// Current font size.
     pub fn font_size(&self) -> f32 {
         self.font_size
@@ -751,6 +771,14 @@ fn with_preferred_backends(mut desc: wgpu::InstanceDescriptor) -> wgpu::Instance
 
 fn to_text_color(c: Rgb8) -> TextColor {
     TextColor::rgb(c.r, c.g, c.b)
+}
+
+fn is_installed(fs: &FontSystem, family: &str) -> bool {
+    fs.db().faces().any(|face| {
+        face.families
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(family))
+    })
 }
 
 fn pick_font(fs: &FontSystem) -> String {
