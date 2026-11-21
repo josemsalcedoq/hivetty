@@ -7,7 +7,9 @@ pub mod claude;
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::Timestamp;
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
 
 /// One assistant turn with its token usage.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,10 +43,9 @@ impl UsageRecord {
     }
 
     /// Local calendar day of the record, if its timestamp parses.
-    pub fn local_day(&self) -> Option<NaiveDate> {
-        DateTime::parse_from_rfc3339(&self.timestamp)
-            .ok()
-            .map(|t| t.with_timezone(&Local).date_naive())
+    pub fn local_day(&self) -> Option<Date> {
+        let ts: Timestamp = self.timestamp.parse().ok()?;
+        Some(ts.to_zoned_datetime(TimeZone::system()).date())
     }
 }
 
@@ -89,8 +90,8 @@ impl Totals {
 }
 
 /// Totals per local day.
-pub fn daily(records: &[UsageRecord]) -> BTreeMap<NaiveDate, Totals> {
-    let mut out: BTreeMap<NaiveDate, Totals> = BTreeMap::new();
+pub fn daily(records: &[UsageRecord]) -> BTreeMap<Date, Totals> {
+    let mut out: BTreeMap<Date, Totals> = BTreeMap::new();
     for r in records {
         if let Some(day) = r.local_day() {
             out.entry(day).or_default().add(r);
