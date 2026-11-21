@@ -24,16 +24,20 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 ## F0 — Cimientos
 
+**Estado (2026-11-21):**
+- ✅ Hechas: F0-01 (Rust 1.100.0 fijado), F0-02, F0-03, F0-04 (CI en verde en los 3 SO), F0-05, F0-06 (MIT OR Apache-2.0), F0-07, F0-08 (repo **público** con etiquetas, milestones, ruleset sin force-push y reporte privado de vulnerabilidades), F0-09 (Dependabot + `audit.yml` diario), F0-11 (esqueleto de `xtask` con `ci` funcional) y F0-12 (versión, SO y arquitectura; la GPU llega con wgpu en F1).
+- ⏳ Pendiente: **F0-10**, revisar e instalar las skills (necesita la elección del autor).
+
 | ID | Tarea | Depende | Tam. | Aceptación |
 |---|---|---|---|---|
 | F0-01 | Instalar Rust (rustup, MSVC en Windows) y fijar la versión en `rust-toolchain.toml` | — | XS | `cargo --version` en las máquinas de desarrollo |
 | F0-02 | Workspace con los crates de `architecture.md` vacíos y un crate `xtask` | F0-01 | S | `cargo build` en los 3 SO |
-| F0-03 | `[workspace.lints]`, `rustfmt.toml` y `clippy.toml`; `unsafe_code = "forbid"` salvo en `hv-platform` | F0-02 | XS | clippy limpio |
+| F0-03 | `[workspace.lints]`, `rustfmt.toml` y `clippy.toml`; `unsafe_code = "deny"` (no `forbid`, para que `hv-platform` pueda permitirlo) | F0-02 | XS | clippy limpio |
 | F0-04 | CI: fmt, clippy, nextest y deny; matriz macOS, Ubuntu y Windows; caché; Actions fijadas por SHA | F0-02 | M | PR vacío en verde |
 | F0-05 | `deny.toml` (licencias, advisories, orígenes) | F0-02 | XS | `cargo deny check` en verde |
 | F0-06 | Decidir la licencia (`docs/licensing.md`) y añadir `LICENSE-*` | — | XS | archivos presentes |
 | F0-07 | `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` y plantillas de issue y PR | — | S | plantillas visibles en GitHub |
-| F0-08 | Repo en GitHub (privado), etiquetas, milestones por fase y protección de `main` | — | S | — |
+| F0-08 | Repo en GitHub (público), etiquetas, milestones por fase y protección de `main` | — | S | — |
 | F0-09 | Renovate o Dependabot (crates y Actions) y `cargo-audit` diario | F0-04 | XS | primer PR automático |
 | F0-10 | Revisar e instalar las skills elegidas (`docs/skills.md`) | — | S | revisión anotada en `docs/skills.md` |
 | F0-11 | `xtask`: `golden-update`, `fixtures`, `dist`, `bench` | F0-02 | S | `cargo xtask --help` |
