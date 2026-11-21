@@ -87,6 +87,9 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | F1-31 | Windows: `xtask conpty-fetch` descarga y verifica (hash) el NuGet de ConPTY 1.25; se copia junto al exe; flags `INHERIT_CURSOR` + `GLYPH_WIDTH_WCSWIDTH` | — | F1-03 | M | `--doctor` informa "OpenConsole incluido" |
 | F1-32 | Responder a consultas (DA, DSR, XTVERSION, OSC 10/11) y a `CSI 6n` de ConPTY sin retraso | — | F1-06 | S | arranque de ConPTY sin bloqueo |
 | F1-33 | Fork o dependencia git de `portable-pty` con los arreglos de Windows de WezTerm main | — | F1-03 | S | `kill()` fiable en Windows |
+| F1-34 | Windows release (subsistema GUI): conectarse a la consola padre (`AttachConsole`) para que `--help`, `--doctor` y `usage` impriman en la terminal desde la que se lanzan | — | F0-12 | S | `hivetty.exe --doctor` imprime en cmd/PowerShell |
+| F1-35 | Box-drawing: esquinas redondeadas reales (`╭╮╯╰`) y uniones correctas de líneas dobles | — | F1-10 | S | dorado de cajas |
+| F1-36 | Pintar el texto en preedit del IME en la posición del cursor | — | F1-15 | S | composición visible con japonés |
 
 ## F2 — Pestañas, paneles y sesiones
 
