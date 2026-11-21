@@ -33,6 +33,13 @@ const PREFERRED_FONTS: &[&str] = &[
     "Liberation Mono",
 ];
 
+/// Label of the pill shown while scrolled up (UI strings move to hv-ui/src/strings.rs in F2).
+const JUMP_LABEL: &str = "↓ Jump to bottom";
+
+/// Pill background (`bg.elevated` in docs/ui-spec.md) and border.
+const PILL_BG: Rgb8 = Rgb8::hex(0x18181B);
+const PILL_BORDER: Rgb8 = Rgb8::hex(0x3A3A40);
+
 /// Padding around the grid, in logical pixels.
 const PADDING: f32 = 8.0;
 
@@ -56,6 +63,11 @@ pub struct Renderer {
     cell_w: f32,
     cell_h: f32,
     rows: Vec<RowCache>,
+    /// Second text pass for labels drawn on top of overlay rectangles (the jump pill).
+    ui_text: TextRenderer,
+    pill_label: Buffer,
+    /// Where the jump pill was drawn last frame, for hit testing: `[x, y, w, h]`.
+    pill_rect: Option<[f32; 4]>,
 }
 
 /// Layout of one row, rebuilt only when its cells change.
@@ -190,8 +202,19 @@ impl Renderer {
             TextAtlas::with_color_mode(&device, &queue, &cache, config.format, ColorMode::Web);
         let text_renderer =
             TextRenderer::new(&mut atlas, &device, wgpu::MultisampleState::default(), None);
+        let ui_text =
+            TextRenderer::new(&mut atlas, &device, wgpu::MultisampleState::default(), None);
 
         let (cell_w, cell_h) = measure_cell(&mut font_system, &font_family, font_size * scale);
+        let mut pill_label = Buffer::new(&mut font_system, Metrics::new(font_size * scale, cell_h));
+        pill_label.set_size(Some(cell_w * 40.0), Some(cell_h));
+        pill_label.set_text(
+            JUMP_LABEL,
+            &Attrs::new().family(Family::Name(&font_family)),
+            Shaping::Advanced,
+            None,
+        );
+        pill_label.shape_until_scroll(&mut font_system, false);
         Self {
             surface,
             device,
@@ -210,7 +233,16 @@ impl Renderer {
             cell_w,
             cell_h,
             rows: Vec::new(),
+            ui_text,
+            pill_label,
+            pill_rect: None,
         }
+    }
+
+    /// Whether `(x, y)` (physical pixels) is on the "Jump to bottom" pill drawn last frame.
+    pub fn hits_jump_to_bottom(&self, x: f32, y: f32) -> bool {
+        self.pill_rect
+            .is_some_and(|[px, py, w, h]| x >= px && x <= px + w && y >= py && y <= py + h)
     }
 
     /// GPU name and backend, for `--doctor` and logs.
@@ -258,6 +290,11 @@ impl Renderer {
         self.cell_w = w;
         self.cell_h = h;
         self.rows.clear();
+        self.pill_label
+            .set_metrics(Metrics::new(self.font_size * self.scale, h));
+        self.pill_label.set_size(Some(w * 40.0), Some(h));
+        self.pill_label
+            .shape_until_scroll(&mut self.font_system, false);
     }
 
     /// Cell size in physical pixels.
@@ -272,6 +309,17 @@ impl Renderer {
             (f32::from(cols) * self.cell_w + pad).ceil() as u32,
             (f32::from(rows) * self.cell_h + pad).ceil() as u32,
         )
+    }
+
+    /// The cell under a point in physical pixels: `(row, col, right_half)`, clamped to the grid.
+    pub fn cell_at(&self, x: f32, y: f32) -> (usize, usize, bool) {
+        let pad = (PADDING * self.scale).round();
+        let (cols, rows) = self.grid_size();
+        let fx = ((x - pad) / self.cell_w).max(0.0);
+        let fy = ((y - pad) / self.cell_h).max(0.0);
+        let col = (fx.floor() as usize).min(usize::from(cols).saturating_sub(1));
+        let row = (fy.floor() as usize).min(usize::from(rows).saturating_sub(1));
+        (row, col, fx.fract() >= 0.5)
     }
 
     /// How many columns and rows fit in the window.
@@ -382,8 +430,9 @@ impl Renderer {
         view: &wgpu::TextureView,
     ) -> Result<wgpu::CommandEncoder> {
         let pad = (PADDING * self.scale).round();
-        let (back, over) = self.build_rects(snap, pad);
+        let (back, mut over) = self.build_rects(snap, pad);
         self.update_rows(snap);
+        let pill = self.layout_pill(snap, &mut over);
 
         let width = self.config.width;
         let height = self.config.height;
@@ -414,6 +463,31 @@ impl Renderer {
                 &mut self.swash_cache,
             )
             .map_err(|e| anyhow!("text prepare failed: {e}"))?;
+        let pill_area = pill.map(|(x, y)| TextArea {
+            buffer: &self.pill_label,
+            left: x,
+            top: y,
+            scale: 1.0,
+            bounds: TextBounds {
+                left: 0,
+                top: 0,
+                right: width as i32,
+                bottom: height as i32,
+            },
+            default_color: to_text_color(snap.foreground),
+            custom_glyphs: &[],
+        });
+        self.ui_text
+            .prepare(
+                &self.device,
+                &self.queue,
+                &mut self.font_system,
+                &mut self.atlas,
+                &self.viewport,
+                pill_area,
+                &mut self.swash_cache,
+            )
+            .map_err(|e| anyhow!("label prepare failed: {e}"))?;
 
         self.rects.upload(
             &self.device,
@@ -456,8 +530,35 @@ impl Renderer {
                 .render(&self.atlas, &self.viewport, &mut pass)
                 .map_err(|e| anyhow!("text render failed: {e}"))?;
             self.rects.draw_overlay(&mut pass);
+            self.ui_text
+                .render(&self.atlas, &self.viewport, &mut pass)
+                .map_err(|e| anyhow!("label render failed: {e}"))?;
         }
         Ok(encoder)
+    }
+
+    /// Adds the "Jump to bottom" pill when the view is scrolled up. Returns where its label goes.
+    fn layout_pill(&mut self, snap: &Snapshot, over: &mut Vec<Rect>) -> Option<(f32, f32)> {
+        if snap.display_offset == 0 {
+            self.pill_rect = None;
+            return None;
+        }
+        let (cw, ch) = (self.cell_w, self.cell_h);
+        let label_w = JUMP_LABEL.chars().count() as f32 * cw;
+        let (w, h) = ((label_w + cw * 2.0).round(), (ch * 1.5).round());
+        let x = ((self.config.width as f32 - w) / 2.0).round();
+        let y = (self.config.height as f32 - h - ch).round();
+        let border = self.scale.round().max(1.0);
+        over.push(Rect::new(
+            x - border,
+            y - border,
+            w + border * 2.0,
+            h + border * 2.0,
+            PILL_BORDER,
+        ));
+        over.push(Rect::new(x, y, w, h, PILL_BG));
+        self.pill_rect = Some([x, y, w, h]);
+        Some((x + cw, y + ((h - ch) / 2.0).round()))
     }
 
     /// Background rectangles (merged runs) plus overlay rectangles (underlines, thin cursors).
@@ -688,6 +789,7 @@ mod tests {
             italic: false,
             underline: false,
             wide_spacer: false,
+            selected: false,
         }
     }
 

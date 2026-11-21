@@ -9,6 +9,8 @@ use std::time::Instant;
 use alacritty_terminal::Term;
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::{Config, TermMode};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use anyhow::Result;
@@ -17,6 +19,19 @@ use hv_pty::{GridSize, Pty, SpawnSpec};
 use crate::input::KeyModes;
 use crate::osc::{Interceptor, TermEvent};
 use crate::snapshot::{self, Snapshot};
+
+/// How a mouse selection grows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectKind {
+    /// Character by character (single click and drag).
+    Simple,
+    /// Whole words (double click).
+    Word,
+    /// Whole lines (triple click).
+    Line,
+    /// Rectangular block (Alt + drag).
+    Block,
+}
 
 /// Something the UI should react to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +146,48 @@ impl Session {
         let _ = writer.write_all(bytes).and_then(|()| writer.flush());
     }
 
+    /// Starts a selection at a visible cell. `right_half` is true when the pointer is over the
+    /// right half of the cell (so the selection starts after that character).
+    pub fn select_start(&self, row: usize, col: usize, right_half: bool, kind: SelectKind) {
+        let mut state = lock(&self.state);
+        let point = visible_point(&state.term, row, col);
+        let ty = match kind {
+            SelectKind::Simple => SelectionType::Simple,
+            SelectKind::Word => SelectionType::Semantic,
+            SelectKind::Line => SelectionType::Lines,
+            SelectKind::Block => SelectionType::Block,
+        };
+        state.term.selection = Some(Selection::new(ty, point, side(right_half)));
+    }
+
+    /// Extends the current selection to a visible cell.
+    pub fn select_update(&self, row: usize, col: usize, right_half: bool) {
+        let mut state = lock(&self.state);
+        let point = visible_point(&state.term, row, col);
+        if let Some(selection) = state.term.selection.as_mut() {
+            selection.update(point, side(right_half));
+        }
+    }
+
+    /// Clears the selection.
+    pub fn select_clear(&self) {
+        lock(&self.state).term.selection = None;
+    }
+
+    /// The selected text, if any.
+    pub fn selection_text(&self) -> Option<String> {
+        let state = lock(&self.state);
+        state.term.selection_to_string().filter(|s| !s.is_empty())
+    }
+
+    /// Whether the program asked for mouse events (then clicks go to it, not to selection).
+    pub fn mouse_mode(&self) -> bool {
+        lock(&self.state)
+            .term
+            .mode()
+            .intersects(TermMode::MOUSE_MODE)
+    }
+
     /// Pastes text. Escape characters are removed so pasted text can never end bracketed-paste
     /// mode early and run commands (docs/security.md 2.2).
     pub fn paste(&self, text: &str) {
@@ -222,6 +279,18 @@ impl Session {
     }
 }
 
+/// Grid point of a visible cell, taking the scrollback offset into account.
+fn visible_point(term: &Term<EventProxy>, row: usize, col: usize) -> Point {
+    let offset = term.grid().display_offset();
+    let line = i32::try_from(row).unwrap_or(i32::MAX) - i32::try_from(offset).unwrap_or(0);
+    let col = col.min(term.columns().saturating_sub(1));
+    Point::new(Line(line), Column(col))
+}
+
+fn side(right_half: bool) -> Side {
+    if right_half { Side::Right } else { Side::Left }
+}
+
 fn reader_loop(
     mut reader: Box<dyn Read + Send>,
     state: &Mutex<TermState>,
@@ -305,6 +374,26 @@ mod tests {
         assert_eq!(snap.cell(0, 1).fg, Rgb8Ext::rgb(1, 2, 3));
         // Inverse swaps fg and bg.
         assert_eq!(snap.cell(0, 2).bg, Rgb8Ext::rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn selection_returns_text_and_marks_cells() {
+        let (tx, _rx) = mpsc::channel();
+        let mut term = Term::new(
+            Config::default(),
+            &Dims { cols: 20, rows: 2 },
+            EventProxy(tx),
+        );
+        let mut processor: Processor<StdSyncHandler> = Processor::new();
+        processor.advance(&mut term, b"hello world");
+        let start = visible_point(&term, 0, 6);
+        let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
+        selection.update(visible_point(&term, 0, 10), Side::Right);
+        term.selection = Some(selection);
+        assert_eq!(term.selection_to_string().as_deref(), Some("world"));
+        let snap = snapshot::take(&term);
+        assert!(snap.cell(0, 6).selected && snap.cell(0, 10).selected);
+        assert!(!snap.cell(0, 5).selected);
     }
 
     #[test]

@@ -12,4 +12,4 @@ pub mod snapshot;
 
 pub use hv_grid::{Cursor, CursorKind, Rgb8, SnapCell, Snapshot};
 pub use hv_pty::{GridSize, SpawnSpec};
-pub use session::{Session, SessionEvent};
+pub use session::{SelectKind, Session, SessionEvent};

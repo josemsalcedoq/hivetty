@@ -27,6 +27,7 @@ OPTIONS:
     --size <COLSxROWS>   Grid size for --screenshot (default 100x30)
     --wait <SECONDS>     Max time --screenshot waits for the program to exit (default 5)
     --events             With --screenshot, print the terminal events seen (OSC 7/9/133/777/7501)
+    --scroll <LINES>     With --screenshot, scroll up into the scrollback before capturing
     --doctor             Print diagnostic information about this system
     -V, --version        Print version
     -h, --help           Print help
@@ -46,6 +47,7 @@ enum Command {
         rows: u16,
         wait: Duration,
         events: bool,
+        scroll: i32,
     },
     Doctor,
     Version,
@@ -57,6 +59,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut screenshot: Option<PathBuf> = None;
     let (mut cols, mut rows, mut wait) = (100, 30, Duration::from_secs(5));
     let mut events = false;
+    let mut scroll = 0;
     let mut i = 0;
     while i < args.len() {
         let value = |i: usize| {
@@ -88,6 +91,10 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 i += 1;
             }
             "--events" => events = true,
+            "--scroll" => {
+                scroll = value(i)?.parse().map_err(|_| "invalid --scroll")?;
+                i += 1;
+            }
             "--wait" => {
                 let secs: f64 = value(i)?.parse().map_err(|_| "invalid --wait")?;
                 wait = Duration::from_secs_f64(secs.clamp(0.0, 600.0));
@@ -105,6 +112,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             rows,
             wait,
             events,
+            scroll,
         },
         None => Command::Run(spec),
     })
@@ -144,12 +152,14 @@ fn main() -> ExitCode {
             rows,
             wait,
             events,
+            scroll,
         } => {
             let opts = headless::Capture {
                 cols,
                 rows,
                 wait,
                 print_events: events,
+                scroll_up: scroll,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))

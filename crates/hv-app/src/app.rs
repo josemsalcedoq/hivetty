@@ -6,10 +6,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Context, Result};
 use hv_render::Renderer;
 use hv_term::input::{Key as TermKey, Mods, encode_key};
-use hv_term::{GridSize, Session, SessionEvent, SpawnSpec};
+use std::time::{Duration, Instant};
+
+use hv_term::{GridSize, SelectKind, Session, SessionEvent, SpawnSpec};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::{ElementState, KeyEvent, MouseScrollDelta, StartCause, WindowEvent};
+use winit::event::{
+    ElementState, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
@@ -51,7 +55,21 @@ struct App {
     modifiers: ModifiersState,
     scroll_remainder: f32,
     fatal: Option<anyhow::Error>,
+    mouse: MouseState,
 }
+
+/// Pointer position and click tracking for selection.
+#[derive(Default)]
+struct MouseState {
+    x: f32,
+    y: f32,
+    selecting: bool,
+    last_click: Option<(Instant, usize, usize)>,
+    click_count: u8,
+}
+
+/// Max time between clicks to count as a double / triple click.
+const MULTI_CLICK: Duration = Duration::from_millis(400);
 
 impl App {
     fn new(spec: SpawnSpec, proxy: EventLoopProxy<AppEvent>) -> Self {
@@ -63,6 +81,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             scroll_remainder: 0.0,
             fatal: None,
+            mouse: MouseState::default(),
         }
     }
 
@@ -118,6 +137,10 @@ impl App {
 
         if primary && let Key::Character(c) = &event.logical_key {
             match c.to_lowercase().as_str() {
+                "c" => {
+                    copy_selection(&ui.session);
+                    return;
+                }
                 "v" => {
                     paste_clipboard(&ui.session);
                     return;
@@ -136,6 +159,19 @@ impl App {
                 }
                 _ => {}
             }
+        }
+        // Windows convention: Ctrl+C copies when there is a selection, otherwise it is ^C.
+        if cfg!(windows)
+            && m.control_key()
+            && !m.shift_key()
+            && !m.alt_key()
+            && matches!(&event.logical_key, Key::Character(c) if c.eq_ignore_ascii_case("c"))
+            && ui.session.selection_text().is_some()
+        {
+            copy_selection(&ui.session);
+            ui.session.select_clear();
+            ui.window.request_redraw();
+            return;
         }
         if cfg!(target_os = "macos") && m.super_key() {
             return; // never send Cmd+<key> to the program
@@ -160,8 +196,69 @@ impl App {
             mods
         };
         if let Some(bytes) = encode_key(&key, mods, ui.session.key_modes()) {
+            ui.session.select_clear();
             ui.session.scroll_to_bottom();
             ui.session.write(&bytes);
+        }
+    }
+
+    fn on_mouse_button(&mut self, state: ElementState, button: MouseButton) {
+        let Some(ui) = &mut self.ui else { return };
+        if button != MouseButton::Left {
+            return;
+        }
+        if state == ElementState::Pressed
+            && ui.renderer.hits_jump_to_bottom(self.mouse.x, self.mouse.y)
+        {
+            ui.session.scroll_to_bottom();
+            ui.window.request_redraw();
+            return;
+        }
+        // Programs that asked for mouse reporting get clicks (F1-16); Shift forces selection.
+        if ui.session.mouse_mode() && !self.modifiers.shift_key() {
+            return;
+        }
+        match state {
+            ElementState::Pressed => {
+                let (row, col, right) = ui.renderer.cell_at(self.mouse.x, self.mouse.y);
+                let now = Instant::now();
+                self.mouse.click_count = match self.mouse.last_click {
+                    Some((t, r, c)) if now - t < MULTI_CLICK && r == row && c == col => {
+                        self.mouse.click_count % 3 + 1
+                    }
+                    _ => 1,
+                };
+                self.mouse.last_click = Some((now, row, col));
+                let kind = match self.mouse.click_count {
+                    2 => SelectKind::Word,
+                    3 => SelectKind::Line,
+                    _ if self.modifiers.alt_key() => SelectKind::Block,
+                    _ => SelectKind::Simple,
+                };
+                ui.session.select_start(row, col, right, kind);
+                if kind != SelectKind::Simple && kind != SelectKind::Block {
+                    ui.session.select_update(row, col, right);
+                }
+                self.mouse.selecting = true;
+            }
+            ElementState::Released => {
+                self.mouse.selecting = false;
+                // A plain click without dragging leaves no selection behind.
+                if self.mouse.click_count == 1 && ui.session.selection_text().is_none() {
+                    ui.session.select_clear();
+                }
+            }
+        }
+        ui.window.request_redraw();
+    }
+
+    fn on_cursor_moved(&mut self, x: f32, y: f32) {
+        self.mouse.x = x;
+        self.mouse.y = y;
+        if let (true, Some(ui)) = (self.mouse.selecting, &self.ui) {
+            let (row, col, right) = ui.renderer.cell_at(x, y);
+            ui.session.select_update(row, col, right);
+            ui.window.request_redraw();
         }
     }
 
@@ -270,6 +367,10 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => self.on_key(&event),
             WindowEvent::MouseWheel { delta, .. } => self.on_wheel(delta),
+            WindowEvent::MouseInput { state, button, .. } => self.on_mouse_button(state, button),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.on_cursor_moved(position.x as f32, position.y as f32);
+            }
             WindowEvent::RedrawRequested => {
                 if let Some(ui) = &mut self.ui {
                     ui.session.flush_expired_sync();
@@ -306,6 +407,15 @@ fn zoom(ui: &mut Ui, delta: f32) {
     ui.renderer.set_font_size(ui.renderer.font_size() + delta);
     ui.session.resize(grid_size(&ui.renderer));
     ui.window.request_redraw();
+}
+
+fn copy_selection(session: &Session) {
+    let Some(text) = session.selection_text() else {
+        return;
+    };
+    if let Err(err) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
+        log::warn!("clipboard write failed: {err}");
+    }
 }
 
 fn paste_clipboard(session: &Session) {

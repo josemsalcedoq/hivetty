@@ -24,6 +24,7 @@ pub(crate) mod palette {
     pub(crate) const FOREGROUND: Rgb8 = Rgb8::hex(0xE6E6E6);
     pub(crate) const BACKGROUND: Rgb8 = Rgb8::hex(0x0A0A0B);
     pub(crate) const CURSOR: Rgb8 = Rgb8::hex(0xE6E6E6);
+    pub(crate) const SELECTION: Rgb8 = Rgb8::hex(0x264F78);
 
     const ANSI: [u32; 16] = [
         0x1A1A1D, 0xF85149, 0x3FB950, 0xD29922, 0x4EA1FF, 0xBC8CFF, 0x39C5CF, 0xC9C9CC, //
@@ -87,6 +88,7 @@ fn resolve_named(named: NamedColor, colors: &Colors) -> Rgb8 {
 pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) -> Snapshot {
     let content = term.renderable_content();
     let colors = content.colors;
+    let selection = content.selection;
     let grid = term.grid();
     let cols = grid.columns();
     let rows = grid.screen_lines();
@@ -102,6 +104,7 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
         italic: false,
         underline: false,
         wide_spacer: false,
+        selected: false,
     };
     let mut cells = vec![blank; rows * cols];
 
@@ -126,6 +129,10 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
         if flags.contains(Flags::HIDDEN) {
             fg = bg;
         }
+        let selected = selection.is_some_and(|range| range.contains(indexed.point));
+        if selected {
+            bg = palette::SELECTION;
+        }
         cells[row * cols + col] = SnapCell {
             ch: cell.c,
             fg,
@@ -134,6 +141,7 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
             italic: flags.contains(Flags::ITALIC),
             underline: flags.intersects(Flags::ALL_UNDERLINES),
             wide_spacer: flags.contains(Flags::WIDE_CHAR_SPACER),
+            selected,
         };
     }
 

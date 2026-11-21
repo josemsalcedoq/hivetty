@@ -20,6 +20,8 @@ pub(crate) struct Capture {
     pub(crate) font_size: f32,
     /// Print the terminal events (titles, OSC 7/9/133/777/7501…) seen during the run.
     pub(crate) print_events: bool,
+    /// Lines to scroll up into the scrollback before capturing.
+    pub(crate) scroll_up: i32,
 }
 
 impl Default for Capture {
@@ -30,6 +32,7 @@ impl Default for Capture {
             wait: Duration::from_secs(5),
             font_size: 14.0,
             print_events: false,
+            scroll_up: 0,
         }
     }
 }
@@ -69,6 +72,9 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
         session.kill();
     }
 
+    if opts.scroll_up > 0 {
+        session.scroll(opts.scroll_up);
+    }
     let snapshot = session.snapshot();
     let (w, h, rgba) = renderer.render_to_rgba(&snapshot)?;
     let file = File::create(out).with_context(|| format!("cannot create {}", out.display()))?;

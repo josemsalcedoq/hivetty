@@ -52,6 +52,8 @@ pub struct SnapCell {
     pub underline: bool,
     /// Placeholder cell to the right of a wide character (draw nothing).
     pub wide_spacer: bool,
+    /// Part of the mouse selection (its background is already the selection color).
+    pub selected: bool,
 }
 
 /// Cursor position and shape.
