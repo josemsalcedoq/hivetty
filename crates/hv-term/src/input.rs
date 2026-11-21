@@ -171,6 +171,48 @@ fn ctrl_byte(text: &str) -> Option<u8> {
     }
 }
 
+/// How to quote a dropped file path for the program running in the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quoting {
+    /// POSIX shells and most programs: single quotes, `'` written as `'\''`.
+    Posix,
+    /// PowerShell: single quotes, `'` doubled.
+    PowerShell,
+    /// cmd.exe: double quotes (paths cannot contain `"`).
+    Cmd,
+}
+
+impl Quoting {
+    /// Picks the quoting style from the program name (`pwsh`, `powershell.exe`, `cmd`…).
+    pub fn for_program(program: &str) -> Self {
+        let name = std::path::Path::new(program)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        match name.as_str() {
+            "pwsh" | "powershell" => Self::PowerShell,
+            "cmd" => Self::Cmd,
+            _ => Self::Posix,
+        }
+    }
+}
+
+/// Quotes a path so it can be inserted on a command line. Paths with only safe characters are
+/// left as they are.
+pub fn quote_path(path: &str, quoting: Quoting) -> String {
+    let safe = path
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '/' | '\\' | '.' | '-' | '_' | ':' | '~'));
+    if safe && !path.is_empty() {
+        return path.to_owned();
+    }
+    match quoting {
+        Quoting::Posix => format!("'{}'", path.replace('\'', r"'\''")),
+        Quoting::PowerShell => format!("'{}'", path.replace('\'', "''")),
+        Quoting::Cmd => format!("\"{path}\""),
+    }
+}
+
 /// Mouse button for reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseButton {
@@ -318,6 +360,32 @@ mod tests {
         let app = KeyModes { app_cursor: true };
         assert_eq!(encode_key(&Key::Up, NONE, app).unwrap(), b"\x1bOA");
         assert_eq!(enc(Key::Right, CTRL), b"\x1b[1;5C");
+    }
+
+    #[test]
+    fn dropped_paths_are_quoted_per_shell() {
+        assert_eq!(
+            quote_path(r"C:\dev\shot.png", Quoting::PowerShell),
+            r"C:\dev\shot.png"
+        );
+        assert_eq!(
+            quote_path(r"C:\My Files\it's.png", Quoting::PowerShell),
+            r"'C:\My Files\it''s.png'"
+        );
+        assert_eq!(
+            quote_path("/tmp/a b/it's", Quoting::Posix),
+            r"'/tmp/a b/it'\''s'"
+        );
+        assert_eq!(
+            quote_path(r"C:\a b\c.txt", Quoting::Cmd),
+            "\"C:\\a b\\c.txt\""
+        );
+        assert_eq!(
+            Quoting::for_program(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            Quoting::PowerShell
+        );
+        assert_eq!(Quoting::for_program("cmd.exe"), Quoting::Cmd);
+        assert_eq!(Quoting::for_program("/bin/zsh"), Quoting::Posix);
     }
 
     #[test]

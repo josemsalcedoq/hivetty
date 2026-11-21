@@ -69,6 +69,8 @@ pub struct Renderer {
     /// Scrollback search bar text (`None` = hidden) and its laid-out label.
     search_text: Option<String>,
     search_label: Buffer,
+    /// Visual bell flash in progress.
+    flash: bool,
     /// Where the jump pill was drawn last frame, for hit testing: `[x, y, w, h]`.
     pill_rect: Option<[f32; 4]>,
 }
@@ -242,6 +244,7 @@ impl Renderer {
             pill_rect: None,
             search_text: None,
             search_label,
+            flash: false,
         }
     }
 
@@ -471,6 +474,10 @@ impl Renderer {
         self.update_rows(snap);
         let pill = self.layout_pill(snap, &mut over);
         let search = self.layout_search(&mut over);
+        if self.flash {
+            let (w, h) = (self.config.width as f32, self.config.height as f32);
+            over.push(Rect::with_alpha(0.0, 0.0, w, h, snap.foreground, 0.12));
+        }
 
         let width = self.config.width;
         let height = self.config.height;
@@ -591,6 +598,11 @@ impl Renderer {
     }
 
     /// Adds the "Jump to bottom" pill when the view is scrolled up. Returns where its label goes.
+    /// Turns the visual bell flash on or off.
+    pub fn set_flash(&mut self, on: bool) {
+        self.flash = on;
+    }
+
     /// Shows the search bar with `text` (e.g. `Find: foo`), or hides it with `None`.
     pub fn set_search_bar(&mut self, text: Option<&str>) {
         if self.search_text.as_deref() == text {

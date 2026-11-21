@@ -94,6 +94,8 @@ struct App {
     search: Option<SearchUi>,
     /// `--record` target.
     record: Option<std::path::PathBuf>,
+    /// Visual bell: flash the window until this instant (F1-23).
+    bell_until: Option<Instant>,
 }
 
 #[derive(Debug, Default)]
@@ -130,6 +132,9 @@ struct MouseState {
     last_reported_cell: Option<(usize, usize)>,
 }
 
+/// How long the visual bell flashes.
+const BELL_FLASH: Duration = Duration::from_millis(120);
+
 /// Max time between clicks to count as a double / triple click.
 const MULTI_CLICK: Duration = Duration::from_millis(400);
 
@@ -149,6 +154,7 @@ impl App {
             config_path: None,
             search: None,
             record: None,
+            bell_until: None,
         }
     }
 
@@ -410,6 +416,20 @@ impl App {
         }
     }
 
+    /// A file dropped on the window: insert its path, quoted for the running shell.
+    fn on_drop(&mut self, path: &std::path::Path) {
+        let Some(ui) = &self.ui else { return };
+        let program = self
+            .spec
+            .program
+            .clone()
+            .unwrap_or_else(|| hv_pty::default_shell().0);
+        let quoting = hv_term::input::Quoting::for_program(&program);
+        let text = hv_term::input::quote_path(&path.to_string_lossy(), quoting);
+        ui.session.paste(&format!("{text} "));
+        ui.window.focus_window();
+    }
+
     fn on_mouse_button(&mut self, state: ElementState, button: MouseButton) {
         if button == MouseButton::Left && state == ElementState::Pressed && self.link_modifier() {
             self.update_hover_link();
@@ -564,9 +584,14 @@ impl App {
                 SessionEvent::Title(title) => ui.window.set_title(&title),
                 SessionEvent::ResetTitle => ui.window.set_title(APP_TITLE),
                 SessionEvent::Exited => event_loop.exit(),
-                SessionEvent::Bell => ui
-                    .window
-                    .request_user_attention(Some(winit::window::UserAttentionType::Informational)),
+                SessionEvent::Bell => {
+                    ui.window.request_user_attention(Some(
+                        winit::window::UserAttentionType::Informational,
+                    ));
+                    self.bell_until = Some(Instant::now() + BELL_FLASH);
+                    ui.renderer.set_flash(true);
+                    ui.window.request_redraw();
+                }
                 SessionEvent::ClipboardStore(text) => {
                     if let Err(err) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
                         log::warn!("OSC 52 clipboard write failed: {err}");
@@ -643,6 +668,7 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::Ime(ime) => self.on_ime(ime),
             WindowEvent::MouseWheel { delta, .. } => self.on_wheel(delta),
             WindowEvent::MouseInput { state, button, .. } => self.on_mouse_button(state, button),
+            WindowEvent::DroppedFile(path) => self.on_drop(&path),
             WindowEvent::CursorMoved { position, .. } => {
                 self.on_cursor_moved(position.x as f32, position.y as f32);
             }
@@ -667,6 +693,10 @@ impl ApplicationHandler<AppEvent> for App {
                         ui.window
                             .set_ime_cursor_area(PhysicalPosition::new(x, y), PhysSize::new(w, h));
                     }
+                    if self.bell_until.is_some_and(|t| Instant::now() >= t) {
+                        self.bell_until = None;
+                        ui.renderer.set_flash(false);
+                    }
                     if let Err(err) = ui.renderer.render(&snapshot) {
                         log::error!("render failed: {err:#}");
                     }
@@ -679,7 +709,11 @@ impl ApplicationHandler<AppEvent> for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // A synchronized update (DECSET 2026) must be flushed when its deadline passes even if
         // no more output arrives.
-        let deadline = self.ui.as_ref().and_then(|ui| ui.session.sync_deadline());
+        let sync = self.ui.as_ref().and_then(|ui| ui.session.sync_deadline());
+        let deadline = match (sync, self.bell_until) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
         event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 }
