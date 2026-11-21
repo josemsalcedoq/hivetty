@@ -801,6 +801,7 @@ mod tests {
             underline: false,
             wide_spacer: false,
             selected: false,
+            link: 0,
         }
     }
 

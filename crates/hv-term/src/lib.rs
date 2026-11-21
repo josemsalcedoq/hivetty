@@ -6,6 +6,7 @@
 //! - [`input`]: key encoding.
 
 pub mod input;
+pub mod links;
 pub mod osc;
 pub mod session;
 pub mod snapshot;

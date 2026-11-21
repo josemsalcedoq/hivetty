@@ -24,6 +24,7 @@ hv-render = { version = "0.0.0", path = "../hv-render" }
 hv-term = { version = "0.0.0", path = "../hv-term" }
 hv-usage = { version = "0.0.0", path = "../hv-usage" }
 log = "0.4.35"
+opener = "0.9.0"
 png = "0.18.1"
 pollster = "1.0.3"
 winit = "0.30"

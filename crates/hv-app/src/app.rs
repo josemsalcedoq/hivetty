@@ -19,7 +19,9 @@ use winit::event::{
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorIcon, Window, WindowId};
+
+use hv_term::links::{self, LinkTarget};
 
 const DEFAULT_FONT_SIZE: f32 = 14.0;
 const APP_TITLE: &str = "hivetty";
@@ -71,6 +73,8 @@ struct MouseState {
     selecting: bool,
     last_click: Option<(Instant, usize, usize)>,
     click_count: u8,
+    /// Link under the pointer while the link modifier is held: `(row, start, end, target)`.
+    hover_link: Option<(usize, usize, usize, LinkTarget)>,
     /// Button held while reporting to the program, and the last cell reported.
     reported_button: Option<TermButton>,
     last_reported_cell: Option<(usize, usize)>,
@@ -255,7 +259,47 @@ impl App {
         true
     }
 
+    /// Ctrl (Cmd on macOS) turns text under the pointer into a clickable link.
+    fn link_modifier(&self) -> bool {
+        if cfg!(target_os = "macos") {
+            self.modifiers.super_key()
+        } else {
+            self.modifiers.control_key() && !self.modifiers.shift_key()
+        }
+    }
+
+    /// Recomputes which link (if any) is under the pointer and updates the mouse cursor.
+    fn update_hover_link(&mut self) {
+        let hover = match (&self.ui, self.link_modifier()) {
+            (Some(ui), true) => {
+                let (row, col, _) = ui.renderer.cell_at(self.mouse.x, self.mouse.y);
+                let snap = ui.session.snapshot();
+                link_at(&snap, row, col)
+            }
+            _ => None,
+        };
+        if hover != self.mouse.hover_link {
+            if let Some(ui) = &self.ui {
+                let icon = if hover.is_some() {
+                    CursorIcon::Pointer
+                } else {
+                    CursorIcon::Text
+                };
+                ui.window.set_cursor(icon);
+                ui.window.request_redraw();
+            }
+            self.mouse.hover_link = hover;
+        }
+    }
+
     fn on_mouse_button(&mut self, state: ElementState, button: MouseButton) {
+        if button == MouseButton::Left && state == ElementState::Pressed && self.link_modifier() {
+            self.update_hover_link();
+            if let (Some((.., target)), Some(ui)) = (self.mouse.hover_link.clone(), &self.ui) {
+                open_link(&target, ui.session.cwd().as_deref());
+                return;
+            }
+        }
         let term_button = match button {
             MouseButton::Left => TermButton::Left,
             MouseButton::Middle => TermButton::Middle,
@@ -323,6 +367,7 @@ impl App {
     fn on_cursor_moved(&mut self, x: f32, y: f32) {
         self.mouse.x = x;
         self.mouse.y = y;
+        self.update_hover_link();
         let held = self.mouse.reported_button.unwrap_or(TermButton::None);
         if self.report_mouse(held, MouseAction::Motion) {
             return;
@@ -449,7 +494,10 @@ impl ApplicationHandler<AppEvent> for App {
                     ui.session.resize(grid_size(&ui.renderer));
                 }
             }
-            WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
+            WindowEvent::ModifiersChanged(m) => {
+                self.modifiers = m.state();
+                self.update_hover_link();
+            }
             WindowEvent::KeyboardInput { event, .. } => self.on_key(&event),
             WindowEvent::Ime(ime) => self.on_ime(ime),
             WindowEvent::MouseWheel { delta, .. } => self.on_wheel(delta),
@@ -460,7 +508,18 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::RedrawRequested => {
                 if let Some(ui) = &mut self.ui {
                     ui.session.flush_expired_sync();
-                    let snapshot = ui.session.snapshot();
+                    let mut snapshot = ui.session.snapshot();
+                    // Underline the link under the pointer while Ctrl/Cmd is held.
+                    if let Some((row, start, end, _)) = &self.mouse.hover_link
+                        && *row < snapshot.rows
+                    {
+                        let cols = snapshot.cols;
+                        for cell in
+                            &mut snapshot.cells[row * cols + start..row * cols + (*end).min(cols)]
+                        {
+                            cell.underline = true;
+                        }
+                    }
                     // Keep the IME candidate window next to the text cursor.
                     if let Some(cursor) = snapshot.cursor {
                         let (x, y, w, h) = ui.renderer.cell_rect(cursor.row, cursor.col);
@@ -499,6 +558,68 @@ fn zoom(ui: &mut Ui, delta: f32) {
     ui.renderer.set_font_size(ui.renderer.font_size() + delta);
     ui.session.resize(grid_size(&ui.renderer));
     ui.window.request_redraw();
+}
+
+/// The link covering a cell: an OSC 8 hyperlink, or a URL / file reference in the text.
+fn link_at(
+    snap: &hv_term::Snapshot,
+    row: usize,
+    col: usize,
+) -> Option<(usize, usize, usize, LinkTarget)> {
+    if row >= snap.rows || col >= snap.cols {
+        return None;
+    }
+    if let Some(uri) = snap.hyperlink(row, col) {
+        let same = |c: usize| snap.cell(row, c).link == snap.cell(row, col).link;
+        let start = (0..=col)
+            .rev()
+            .take_while(|c| same(*c))
+            .last()
+            .unwrap_or(col);
+        let end = (col..snap.cols)
+            .take_while(|c| same(*c))
+            .last()
+            .map_or(col + 1, |c| c + 1);
+        return Some((row, start, end, LinkTarget::Url(uri.to_owned())));
+    }
+    let link = links::link_at(&snap.row_chars(row), col)?;
+    Some((row, link.start, link.end, link.target))
+}
+
+/// Opens a link with the system handler, or a file reference in the editor at its line.
+fn open_link(target: &LinkTarget, cwd: Option<&std::path::Path>) {
+    let result = match target {
+        LinkTarget::Url(url) if links::is_allowed_url(url) => {
+            opener::open(url).map_err(|e| e.to_string())
+        }
+        LinkTarget::Url(url) => Err(format!(
+            "refusing to open URL with an unsupported scheme: {url}"
+        )),
+        LinkTarget::File { path, line, column } => {
+            let full = links::resolve_path(path, cwd);
+            if !full.exists() {
+                Err(format!("file not found: {}", full.display()))
+            } else if let (Some(line), Some(code)) = (line, find_vscode()) {
+                let location = format!("{}:{line}:{}", full.display(), column.unwrap_or(1));
+                std::process::Command::new(code)
+                    .args(["-g", &location])
+                    .spawn()
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            } else {
+                opener::open(&full).map_err(|e| e.to_string())
+            }
+        }
+    };
+    if let Err(err) = result {
+        log::warn!("cannot open link: {err}");
+    }
+}
+
+/// VS Code's command line launcher, if installed (`code -g file:line:col`).
+fn find_vscode() -> Option<std::path::PathBuf> {
+    let path = hv_pty::resolve_program("code");
+    path.is_absolute().then_some(path)
 }
 
 fn copy_selection(session: &Session) {

@@ -105,8 +105,10 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
         underline: false,
         wide_spacer: false,
         selected: false,
+        link: 0,
     };
     let mut cells = vec![blank; rows * cols];
+    let mut hyperlinks: Vec<String> = Vec::new();
 
     for indexed in content.display_iter {
         let Ok(row) = usize::try_from(indexed.point.line.0 + display_offset as i32) else {
@@ -130,6 +132,14 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
             fg = bg;
         }
         let selected = selection.is_some_and(|range| range.contains(indexed.point));
+        let link = cell.hyperlink().map_or(0, |h| {
+            let uri = h.uri();
+            let index = hyperlinks.iter().position(|u| u == uri).unwrap_or_else(|| {
+                hyperlinks.push(uri.to_owned());
+                hyperlinks.len() - 1
+            });
+            u16::try_from(index + 1).unwrap_or(0)
+        });
         if selected {
             bg = palette::SELECTION;
         }
@@ -142,6 +152,7 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
             underline: flags.intersects(Flags::ALL_UNDERLINES),
             wide_spacer: flags.contains(Flags::WIDE_CHAR_SPACER),
             selected,
+            link,
         };
     }
 
@@ -163,6 +174,7 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
     };
 
     Snapshot {
+        hyperlinks,
         cols,
         rows,
         cells,

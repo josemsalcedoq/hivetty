@@ -85,6 +85,7 @@ struct TermState {
 /// A running terminal session.
 pub struct Session {
     state: Arc<Mutex<TermState>>,
+    cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pty: Mutex<Pty>,
     events: Receiver<SessionEvent>,
@@ -124,16 +125,26 @@ impl Session {
         let writer = Arc::new(Mutex::new(io.writer));
         let (events_tx, events_rx) = mpsc::channel();
 
+        let cwd = Arc::new(Mutex::new(spec.cwd.clone()));
+        let thread_cwd = Arc::clone(&cwd);
         let thread_state = Arc::clone(&state);
         let thread_writer = Arc::clone(&writer);
         std::thread::Builder::new()
             .name("hivetty-pty-reader".into())
             .spawn(move || {
-                reader_loop(io.reader, &thread_state, &thread_writer, &events_tx, &wake)
+                reader_loop(
+                    io.reader,
+                    &thread_state,
+                    &thread_writer,
+                    &thread_cwd,
+                    &events_tx,
+                    &wake,
+                )
             })?;
 
         Ok(Self {
             state,
+            cwd,
             writer,
             pty: Mutex::new(pty),
             events: events_rx,
@@ -178,6 +189,11 @@ impl Session {
     pub fn selection_text(&self) -> Option<String> {
         let state = lock(&self.state);
         state.term.selection_to_string().filter(|s| !s.is_empty())
+    }
+
+    /// Last working directory reported by the shell (OSC 7), or the one it started in.
+    pub fn cwd(&self) -> Option<std::path::PathBuf> {
+        lock(&self.cwd).clone()
     }
 
     /// Mouse reporting modes the program enabled.
@@ -307,6 +323,7 @@ fn reader_loop(
     mut reader: Box<dyn Read + Send>,
     state: &Mutex<TermState>,
     writer: &Mutex<Box<dyn Write + Send>>,
+    cwd: &Mutex<Option<std::path::PathBuf>>,
     events: &Sender<SessionEvent>,
     wake: &(impl Fn() + Send),
 ) {
@@ -344,6 +361,11 @@ fn reader_loop(
             }
             processor.sync_timeout().sync_timeout().is_some()
         };
+        for event in &out {
+            if let SessionEvent::Term(TermEvent::Cwd(dir)) = event {
+                *lock(cwd) = Some(std::path::PathBuf::from(dir));
+            }
+        }
         for event in out {
             let _ = events.send(event);
         }
