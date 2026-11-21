@@ -19,7 +19,7 @@ use winit::event::{
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{Window, WindowId};
 
 use hv_term::links::{self, LinkTarget};
 
@@ -75,6 +75,67 @@ struct Ui {
     window: Arc<Window>,
     renderer: Renderer,
     session: Session,
+    /// Sidebar and other egui chrome (SP-3, ADR 0003).
+    chrome: hv_ui::Chrome,
+    egui: egui_winit::State,
+    /// What the sidebar shows about the session.
+    info: crate::model::SessionInfo,
+    /// Grid area egui left last frame, in physical pixels.
+    terminal_area: Option<[f32; 4]>,
+}
+
+impl Ui {
+    /// Whether a point (physical pixels) is over the chrome rather than the terminal.
+    fn over_chrome(&self, x: f32, y: f32) -> bool {
+        self.terminal_area
+            .is_some_and(|[ax, ay, aw, ah]| x < ax || y < ay || x >= ax + aw || y >= ay + ah)
+    }
+
+    /// Runs the chrome for this frame, applies a changed grid area and returns what to paint.
+    fn run_chrome(
+        &mut self,
+        sidebar_visible: bool,
+        cursor: egui::CursorIcon,
+    ) -> hv_render::UiFrame {
+        let input = self.egui.take_egui_input(&self.window);
+        let model = hv_ui::ChromeModel {
+            sidebar_visible,
+            sessions: vec![crate::model::session_row(
+                &self.info,
+                self.session.cwd().as_deref(),
+            )],
+        };
+        let mut out = self.chrome.run(input, &model);
+        if self.terminal_area != Some(out.terminal_area) {
+            self.terminal_area = Some(out.terminal_area);
+            self.renderer.set_grid_area(Some(out.terminal_area));
+            self.session.resize(grid_size(&self.renderer));
+        }
+        let ppp = out.full.pixels_per_point;
+        let pointer_over_terminal = self
+            .chrome
+            .context()
+            .pointer_latest_pos()
+            .is_some_and(|p| !self.over_chrome(p.x * ppp, p.y * ppp));
+        if pointer_over_terminal {
+            out.full.platform_output.cursor_icon = cursor;
+        }
+        let platform = std::mem::take(&mut out.full.platform_output);
+        self.egui.handle_platform_output(&self.window, platform);
+        if out
+            .full
+            .viewport_output
+            .values()
+            .any(|v| v.repaint_delay.is_zero())
+        {
+            self.window.request_redraw();
+        }
+        hv_render::UiFrame {
+            primitives: self.chrome.tessellate(out.full.shapes, ppp),
+            textures: out.full.textures_delta,
+            pixels_per_point: ppp,
+        }
+    }
 }
 
 struct App {
@@ -96,6 +157,8 @@ struct App {
     record: Option<std::path::PathBuf>,
     /// Visual bell: flash the window until this instant (F1-23).
     bell_until: Option<Instant>,
+    /// Sidebar shown (toggled with Ctrl+Shift+B / Cmd+B).
+    sidebar_visible: bool,
 }
 
 #[derive(Debug, Default)]
@@ -155,6 +218,7 @@ impl App {
             search: None,
             record: None,
             bell_until: None,
+            sidebar_visible: true,
         }
     }
 
@@ -198,10 +262,23 @@ impl App {
         if let Some(path) = &self.record {
             session.start_recording(path, grid)?;
         }
+        let chrome = hv_ui::Chrome::new();
+        let egui = egui_winit::State::new(
+            chrome.context().clone(),
+            egui::ViewportId::ROOT,
+            &window,
+            Some(scale),
+            None,
+            None,
+        );
         let mut ui = Ui {
             window,
             renderer,
             session,
+            chrome,
+            egui,
+            info: crate::model::SessionInfo::new(),
+            terminal_area: None,
         };
         apply_font(&mut ui, &self.config.font);
         Ok(ui)
@@ -226,6 +303,11 @@ impl App {
 
         if primary && let Key::Character(c) = &event.logical_key {
             match c.to_lowercase().as_str() {
+                "b" => {
+                    self.sidebar_visible = !self.sidebar_visible;
+                    ui.window.request_redraw();
+                    return;
+                }
                 "f" => {
                     self.search = Some(SearchUi::default());
                     self.refresh_search_bar();
@@ -359,13 +441,7 @@ impl App {
         };
         if hover != self.mouse.hover_link {
             if let Some(ui) = &self.ui {
-                let icon = if hover.is_some() {
-                    CursorIcon::Pointer
-                } else {
-                    CursorIcon::Text
-                };
-                ui.window.set_cursor(icon);
-                ui.window.request_redraw();
+                ui.window.request_redraw(); // the frame updates the underline and the cursor
             }
             self.mouse.hover_link = hover;
         }
@@ -431,6 +507,15 @@ impl App {
     }
 
     fn on_mouse_button(&mut self, state: ElementState, button: MouseButton) {
+        // Presses on the sidebar belong to egui; releases still end a selection drag.
+        if state == ElementState::Pressed
+            && self
+                .ui
+                .as_ref()
+                .is_some_and(|ui| ui.over_chrome(self.mouse.x, self.mouse.y))
+        {
+            return;
+        }
         if button == MouseButton::Left && state == ElementState::Pressed && self.link_modifier() {
             self.update_hover_link();
             if let (Some((.., target)), Some(ui)) = (self.mouse.hover_link.clone(), &self.ui) {
@@ -505,6 +590,9 @@ impl App {
     fn on_cursor_moved(&mut self, x: f32, y: f32) {
         self.mouse.x = x;
         self.mouse.y = y;
+        if let Some(ui) = &self.ui {
+            ui.window.request_redraw(); // egui hover state
+        }
         self.update_hover_link();
         let held = self.mouse.reported_button.unwrap_or(TermButton::None);
         if self.report_mouse(held, MouseAction::Motion) {
@@ -519,6 +607,9 @@ impl App {
 
     fn on_wheel(&mut self, delta: MouseScrollDelta) {
         let Some(ui) = &mut self.ui else { return };
+        if ui.over_chrome(self.mouse.x, self.mouse.y) {
+            return;
+        }
         let (_, cell_h) = ui.renderer.cell_size();
         let lines = match delta {
             MouseScrollDelta::LineDelta(_, y) => y * 3.0,
@@ -581,8 +672,14 @@ impl App {
         let Some(ui) = &mut self.ui else { return };
         for event in ui.session.drain_events() {
             match event {
-                SessionEvent::Title(title) => ui.window.set_title(&title),
-                SessionEvent::ResetTitle => ui.window.set_title(APP_TITLE),
+                SessionEvent::Title(title) => {
+                    ui.window.set_title(&title);
+                    ui.info.title = Some(title);
+                }
+                SessionEvent::ResetTitle => {
+                    ui.window.set_title(APP_TITLE);
+                    ui.info.title = None;
+                }
                 SessionEvent::Exited => event_loop.exit(),
                 SessionEvent::Bell => {
                     ui.window.request_user_attention(Some(
@@ -640,6 +737,17 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // egui sees pointer and window events; the keyboard belongs to the terminal.
+        if let Some(ui) = &mut self.ui
+            && !matches!(
+                event,
+                WindowEvent::KeyboardInput { .. }
+                    | WindowEvent::Ime(_)
+                    | WindowEvent::RedrawRequested
+            )
+        {
+            let _ = ui.egui.on_window_event(&ui.window, &event);
+        }
         match event {
             WindowEvent::CloseRequested => {
                 if let Some(ui) = &self.ui {
@@ -650,14 +758,16 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::Resized(PhysicalSize { width, height }) => {
                 if let Some(ui) = &mut self.ui {
                     ui.renderer.resize(width, height);
-                    ui.session.resize(grid_size(&ui.renderer));
+                    // The next frame lays out the chrome and resizes the grid to what is left.
+                    ui.terminal_area = None;
                     ui.window.request_redraw();
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 if let Some(ui) = &mut self.ui {
                     ui.renderer.set_scale(scale_factor as f32);
-                    ui.session.resize(grid_size(&ui.renderer));
+                    ui.terminal_area = None;
+                    ui.window.request_redraw();
                 }
             }
             WindowEvent::ModifiersChanged(m) => {
@@ -674,6 +784,12 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(ui) = &mut self.ui {
+                    let cursor = if self.mouse.hover_link.is_some() {
+                        egui::CursorIcon::PointingHand
+                    } else {
+                        egui::CursorIcon::Text
+                    };
+                    let mut frame = ui.run_chrome(self.sidebar_visible, cursor);
                     ui.session.flush_expired_sync();
                     let mut snapshot = ui.session.snapshot();
                     // Underline the link under the pointer while Ctrl/Cmd is held.
@@ -697,7 +813,7 @@ impl ApplicationHandler<AppEvent> for App {
                         self.bell_until = None;
                         ui.renderer.set_flash(false);
                     }
-                    if let Err(err) = ui.renderer.render(&snapshot) {
+                    if let Err(err) = ui.renderer.render_with_ui(&snapshot, Some(&mut frame)) {
                         log::error!("render failed: {err:#}");
                     }
                 }
@@ -710,10 +826,13 @@ impl ApplicationHandler<AppEvent> for App {
         // A synchronized update (DECSET 2026) must be flushed when its deadline passes even if
         // no more output arrives.
         let sync = self.ui.as_ref().and_then(|ui| ui.session.sync_deadline());
-        let deadline = match (sync, self.bell_until) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
+        // The sidebar's elapsed time changes every second for a minute, then every minute.
+        let tick = self
+            .ui
+            .as_ref()
+            .filter(|_| self.sidebar_visible)
+            .map(|ui| crate::model::next_elapsed_change(ui.info.started, Instant::now()));
+        let deadline = [sync, self.bell_until, tick].into_iter().flatten().min();
         event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 }

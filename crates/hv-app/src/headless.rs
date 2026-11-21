@@ -57,15 +57,6 @@ fn raw_input(width: u32, height: u32) -> egui::RawInput {
     }
 }
 
-/// The terminal area egui reported, or the full width when there is no sidebar.
-fn with_sidebar(area: [f32; 4], ui: bool) -> [f32; 4] {
-    if ui {
-        area
-    } else {
-        [0.0, 0.0, area[2] + area[0], area[3]]
-    }
-}
-
 /// Runs `spec`, waits for it to exit (or for `opts.wait`), and writes the screen to `out`.
 pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result<String> {
     let mut renderer = Renderer::new_headless(1, 1, 1.0, opts.font_size)?;
@@ -78,9 +69,13 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
     // Texture updates (the font atlas) accumulate until the first frame is painted.
     let mut pending_textures = egui::TexturesDelta::default();
     if let Some(chrome) = chrome.as_mut() {
-        let out = chrome.run(raw_input(width, height), &hv_ui::ChromeModel::default());
+        let model = hv_ui::ChromeModel {
+            sidebar_visible: true,
+            ..Default::default()
+        };
+        let out = chrome.run(raw_input(width, height), &model);
         pending_textures.append(out.full.textures_delta);
-        renderer.set_grid_area(Some(with_sidebar(out.terminal_area, opts.ui)));
+        renderer.set_grid_area(Some(out.terminal_area));
     }
     let (cw, ch) = renderer.cell_size();
     let grid = GridSize {

@@ -26,6 +26,18 @@ impl SessionInfo {
     }
 }
 
+/// When the formatted elapsed time of a session started at `started` next changes.
+pub(crate) fn next_elapsed_change(started: Instant, now: Instant) -> Instant {
+    let secs = now.saturating_duration_since(started).as_secs();
+    let step = match secs {
+        0..60 => 1,
+        60..3600 => 60,
+        3600..86_400 => 3600,
+        _ => 86_400,
+    };
+    started + std::time::Duration::from_secs((secs / step + 1) * step)
+}
+
 /// The sidebar row for a session.
 pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow {
     let project = cwd
@@ -48,5 +60,21 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         elapsed: format_elapsed(info.started.elapsed().as_secs()),
         state,
         focused: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn elapsed_ticks_follow_the_display_granularity() {
+        let t0 = Instant::now();
+        let at = |s: u64| next_elapsed_change(t0, t0 + Duration::from_millis(s * 1000 + 300));
+        assert_eq!(at(5), t0 + Duration::from_secs(6));
+        assert_eq!(at(59), t0 + Duration::from_secs(60));
+        assert_eq!(at(61), t0 + Duration::from_secs(120));
+        assert_eq!(at(3601), t0 + Duration::from_secs(7200));
     }
 }

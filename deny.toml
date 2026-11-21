@@ -29,6 +29,12 @@ allow = [
     "CDLA-Permissive-2.0",
 ]
 
+# egui's built-in UI fonts (Ubuntu-Light, Hack, Noto Emoji); redistribution is allowed.
+# Goes away when hv-ui loads Inter instead (docs/licensing.md).
+exceptions = [
+    { crate = "epaint_default_fonts", allow = ["Ubuntu-font-1.0"] },
+]
+
 [licenses.private]
 ignore = true
 

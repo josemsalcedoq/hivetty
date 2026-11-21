@@ -11,6 +11,7 @@
 
 ## Fuentes incluidas
 - JetBrains Mono (OFL-1.1), Symbols Nerd Font (MIT/OFL) e Inter (OFL-1.1). Incluir sus licencias.
+- Provisional: las fuentes por defecto de egui (`epaint_default_fonts`: Ubuntu-Light con la Ubuntu Font Licence 1.0, Hack y Noto Emoji con OFL-1.1). Permiten redistribuir; están como excepción en `deny.toml` hasta que la interfaz cargue Inter.
 
 ## Logos de agentes y tecnologías
 - Son **marcas registradas**. Usarlos solo para identificar el producto (uso nominativo), sin modificarlos y siguiendo la guía de marca de cada empresa cuando la haya.
