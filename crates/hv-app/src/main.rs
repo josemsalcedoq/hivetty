@@ -262,6 +262,17 @@ fn doctor_report() -> String {
     if cfg!(windows) {
         report.push_str(&format!("conpty: {}\n", conpty_status()));
     }
+    match hv_config::default_path() {
+        Some(path) => {
+            let state = if path.is_file() {
+                "found"
+            } else {
+                "not created yet, using defaults"
+            };
+            report.push_str(&format!("config: {} ({state})\n", path.display()));
+        }
+        None => report.push_str("config: no config directory found\n"),
+    }
     report
 }
 
