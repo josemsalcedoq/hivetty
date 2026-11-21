@@ -29,6 +29,7 @@ OPTIONS:
     --events             With --screenshot, print the terminal events seen (OSC 7/9/133/777/7501)
     --scroll <LINES>     With --screenshot, scroll up into the scrollback before capturing
     --doctor             Print diagnostic information about this system
+    usage [--json]       Print Claude Code token usage per day from local transcripts
     -V, --version        Print version
     -h, --help           Print help
 
@@ -50,6 +51,9 @@ enum Command {
         scroll: i32,
     },
     Doctor,
+    Usage {
+        json: bool,
+    },
     Version,
     Help,
 }
@@ -70,6 +74,11 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             "-h" | "--help" => return Ok(Command::Help),
             "-V" | "--version" => return Ok(Command::Version),
             "--doctor" => return Ok(Command::Doctor),
+            "usage" => {
+                return Ok(Command::Usage {
+                    json: args[i + 1..].iter().any(|a| a == "--json"),
+                });
+            }
             "-e" | "--command" => {
                 let program = value(i)?.clone();
                 spec.program = Some(program);
@@ -145,6 +154,10 @@ fn main() -> ExitCode {
             Ok(())
         }
         Command::Run(spec) => app::run(spec),
+        Command::Usage { json } => {
+            print!("{}", usage_report(json));
+            Ok(())
+        }
         Command::Screenshot {
             spec,
             out,
@@ -173,6 +186,68 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `hivetty usage`: Claude Code token usage per day, read from the local transcripts.
+fn usage_report(json: bool) -> String {
+    use std::fmt::Write as _;
+    let Some(root) = hv_usage::claude::default_root() else {
+        return "No Claude Code transcripts found (~/.claude/projects).
+"
+        .to_owned();
+    };
+    let records = hv_usage::claude::scan(&root);
+    let daily = hv_usage::daily(&records);
+    let mut out = String::new();
+    if json {
+        out.push_str("{\"daily\":[");
+        for (i, (day, t)) in daily.iter().enumerate() {
+            let sep = if i == 0 { "" } else { "," };
+            let _ = write!(
+                out,
+                "{sep}{{\"date\":\"{day}\",\"input\":{},\"output\":{},\"cacheRead\":{},\"cacheWrite\":{},\"turns\":{}}}",
+                t.input, t.output, t.cache_read, t.cache_write, t.turns
+            );
+        }
+        out.push_str(
+            "]}
+",
+        );
+        return out;
+    }
+    let _ = writeln!(
+        out,
+        "{:<12}{:>12}{:>12}{:>14}{:>14}{:>8}",
+        "Date", "Input", "Output", "Cache read", "Cache write", "Turns"
+    );
+    let mut total = hv_usage::Totals::default();
+    for (day, t) in &daily {
+        let _ = writeln!(
+            out,
+            "{:<12}{:>12}{:>12}{:>14}{:>14}{:>8}",
+            day.to_string(),
+            t.input,
+            t.output,
+            t.cache_read,
+            t.cache_write,
+            t.turns
+        );
+        total.input += t.input;
+        total.output += t.output;
+        total.cache_read += t.cache_read;
+        total.cache_write += t.cache_write;
+        total.turns += t.turns;
+    }
+    let _ = writeln!(
+        out,
+        "
+Total input {} ({:.0}% from cache), output {}, {} turns",
+        hv_usage::compact(total.total_input()),
+        total.cache_share() * 100.0,
+        hv_usage::compact(total.output),
+        total.turns
+    );
+    out
 }
 
 /// Builds the `--doctor` report. GPU, hook and ConPTY checks are added in later phases.
