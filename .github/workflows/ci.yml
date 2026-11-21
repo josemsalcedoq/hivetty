@@ -60,3 +60,22 @@ jobs:
 
       - name: cargo-deny
         run: cargo deny check
+
+      # Runs a real command in a PTY and renders it offscreen on this OS's GPU backend
+      # (Metal on macOS, lavapipe Vulkan on Linux, DX12/WARP on Windows).
+      - name: Headless render smoke test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmd=(cmd.exe /C "echo hivetty on Windows & ver & echo Unicode: ñ 日本 ✓")
+          else
+            cmd=(sh -c 'printf "hivetty on %s\n\033[31mred \033[32mgreen \033[1;34mbold-blue\033[0m \033[7m inverse \033[0m\nUnicode: ñ 日本 ✓\n" "$(uname -s)"')
+          fi
+          cargo run --locked -p hv-app -- --screenshot "render-${RUNNER_OS}.png" --size 80x12 --wait 15 -e "${cmd[@]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: render-${{ runner.os }}
+          path: render-*.png
+          if-no-files-found: warn

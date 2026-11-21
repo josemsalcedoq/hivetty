@@ -5,7 +5,7 @@
 - Decidirlo antes del primer commit de código (F0). Si se quiere evitar que otros lo cierren, usar GPL-3.0 (ojo: no podría reutilizarse en productos cerrados).
 
 ## Dependencias
-- `cargo-deny` con lista de licencias permitidas: MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib, MPL-2.0 (solo como dependencia), Unicode-3.0 y OFL-1.1 (fuentes).
+- `cargo-deny` con lista de licencias permitidas: MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib, 0BSD, BSL-1.0, CC0-1.0, MPL-2.0 (solo como dependencia), Unicode-3.0 y OFL-1.1 (fuentes).
 - Prohibidas por defecto: GPL/AGPL (salvo si el proyecto se licencia como GPL), y cualquier licencia sin identificar.
 - Avisos de terceros (`THIRD_PARTY_NOTICES`) generados con `cargo-about` e incluidos en cada paquete.
 

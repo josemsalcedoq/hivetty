@@ -8,6 +8,7 @@ hivetty/
 ├── rust-toolchain.toml
 ├── crates/
 │   ├── hv-app/                # binario `hivetty`: ventana, bucle de eventos, composición, subcomandos (hook, cli, doctor)
+│   ├── hv-grid/               # datos puros compartidos: Snapshot, SnapCell, Rgb8 (sin dependencias)
 │   ├── hv-term/               # trait VtEngine; impl. con alacritty_terminal; interceptor de OSC/DCS/APC; lector de PTY
 │   ├── hv-pty/                # fork o envoltorio de portable-pty; ConPTY incluido; matar árboles de procesos
 │   ├── hv-render/             # wgpu: atlas, celdas, cursor, decoraciones, box-drawing; renderer por software
@@ -32,7 +33,7 @@ hivetty/
 ```
 
 Reglas de dependencias (se comprueban en CI con `cargo-deny` + un test de `cargo metadata`):
-- `hv-ui` y `hv-render` **no** dependen de `hv-pty` (hablan con los paneles por `PaneHost`).
+- `hv-ui` y `hv-render` **no** dependen de `hv-pty` ni de `hv-term`: reciben instantáneas de `hv-grid` y hablan con los paneles por `PaneHost`.
 - Solo `hv-platform` usa `unsafe`.
 - `hv-usage` no depende de nada gráfico (se puede usar desde la CLI).
 

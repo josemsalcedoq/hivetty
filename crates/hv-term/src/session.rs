@@ -131,6 +131,23 @@ impl Session {
         let _ = writer.write_all(bytes).and_then(|()| writer.flush());
     }
 
+    /// Pastes text. Escape characters are removed so pasted text can never end bracketed-paste
+    /// mode early and run commands (docs/security.md 2.2).
+    pub fn paste(&self, text: &str) {
+        let clean: String = text.chars().filter(|&c| c != '\x1b').collect();
+        let bracketed = lock(&self.state)
+            .term
+            .mode()
+            .contains(TermMode::BRACKETED_PASTE);
+        if bracketed {
+            self.write(format!("\x1b[200~{clean}\x1b[201~").as_bytes());
+        } else {
+            // Without bracketed paste, line breaks are sent as CR, like typing Enter.
+            self.write(clean.replace("\r\n", "\r").replace('\n', "\r").as_bytes());
+        }
+        self.scroll_to_bottom();
+    }
+
     /// Resizes the emulator and the PTY.
     pub fn resize(&self, size: GridSize) {
         {

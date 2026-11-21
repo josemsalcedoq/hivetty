@@ -15,5 +15,6 @@ workspace = true
 alacritty_terminal = "0.26"
 anyhow = "1.0.104"
 base64 = "0.23.1"
+hv-grid = { version = "0.0.0", path = "../hv-grid" }
 hv-pty = { version = "0.0.0", path = "../hv-pty" }
 log = "0.4.35"

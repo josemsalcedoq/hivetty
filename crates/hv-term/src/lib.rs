@@ -10,6 +10,6 @@ pub mod osc;
 pub mod session;
 pub mod snapshot;
 
+pub use hv_grid::{Cursor, CursorKind, Rgb8, SnapCell, Snapshot};
 pub use hv_pty::{GridSize, SpawnSpec};
 pub use session::{Session, SessionEvent};
-pub use snapshot::{Cursor, CursorKind, Rgb8, SnapCell, Snapshot};

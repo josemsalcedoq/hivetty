@@ -17,10 +17,12 @@ workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
+arboard = "3.7.0"
 env_logger = "0.11.12"
 hv-pty = { version = "0.0.0", path = "../hv-pty" }
 hv-render = { version = "0.0.0", path = "../hv-render" }
 hv-term = { version = "0.0.0", path = "../hv-term" }
 log = "0.4.35"
+png = "0.18.1"
 pollster = "1.0.3"
 winit = "0.30"

@@ -1,6 +1,16 @@
 //! hivetty: a GPU-accelerated terminal for running many coding agents side by side.
 
+// Release builds on Windows are GUI apps (no console window). Debug builds keep the console for logs.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
+mod app;
+mod headless;
+
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
+
+use hv_term::SpawnSpec;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -8,46 +18,151 @@ const HELP: &str = "\
 hivetty - a terminal for running many coding agents side by side
 
 USAGE:
-    hivetty [OPTIONS]
+    hivetty [OPTIONS] [-e <PROGRAM> [ARGS]...]
 
 OPTIONS:
-    --doctor       Print diagnostic information about this system
-    -V, --version  Print version
-    -h, --help     Print help
+    -e, --command <PROGRAM> [ARGS]...
+                         Run PROGRAM instead of the default shell (must be last)
+    --screenshot <FILE>  Run without a window and save the final screen as a PNG
+    --size <COLSxROWS>   Grid size for --screenshot (default 100x30)
+    --wait <SECONDS>     Max time --screenshot waits for the program to exit (default 5)
+    --doctor             Print diagnostic information about this system
+    -V, --version        Print version
+    -h, --help           Print help
+
+ENVIRONMENT:
+    HIVETTY_LOG          Log level (error, warn, info, debug, trace). Default: warn
 ";
 
+/// What the command line asked for.
+#[derive(Debug, PartialEq)]
+enum Command {
+    Run(SpawnSpec),
+    Screenshot {
+        spec: SpawnSpec,
+        out: PathBuf,
+        cols: u16,
+        rows: u16,
+        wait: Duration,
+    },
+    Doctor,
+    Version,
+    Help,
+}
+
+fn parse_args(args: &[String]) -> Result<Command, String> {
+    let mut spec = SpawnSpec::default();
+    let mut screenshot: Option<PathBuf> = None;
+    let (mut cols, mut rows, mut wait) = (100, 30, Duration::from_secs(5));
+    let mut i = 0;
+    while i < args.len() {
+        let value = |i: usize| {
+            args.get(i + 1)
+                .ok_or_else(|| format!("{} needs a value", args[i]))
+        };
+        match args[i].as_str() {
+            "-h" | "--help" => return Ok(Command::Help),
+            "-V" | "--version" => return Ok(Command::Version),
+            "--doctor" => return Ok(Command::Doctor),
+            "-e" | "--command" => {
+                let program = value(i)?.clone();
+                spec.program = Some(program);
+                spec.args = args[i + 2..].to_vec();
+                break;
+            }
+            "--screenshot" => {
+                screenshot = Some(PathBuf::from(value(i)?));
+                i += 1;
+            }
+            "--size" => {
+                let v = value(i)?;
+                let (c, r) = v.split_once('x').ok_or("--size must look like 100x30")?;
+                cols = c.parse().map_err(|_| "invalid --size columns")?;
+                rows = r.parse().map_err(|_| "invalid --size rows")?;
+                if cols == 0 || rows == 0 {
+                    return Err("--size must be at least 1x1".into());
+                }
+                i += 1;
+            }
+            "--wait" => {
+                let secs: f64 = value(i)?.parse().map_err(|_| "invalid --wait")?;
+                wait = Duration::from_secs_f64(secs.clamp(0.0, 600.0));
+                i += 1;
+            }
+            other => return Err(format!("unknown argument '{other}'")),
+        }
+        i += 1;
+    }
+    Ok(match screenshot {
+        Some(out) => Command::Screenshot {
+            spec,
+            out,
+            cols,
+            rows,
+            wait,
+        },
+        None => Command::Run(spec),
+    })
+}
+
 fn main() -> ExitCode {
+    env_logger::Builder::from_env(
+        env_logger::Env::new().filter_or("HIVETTY_LOG", "warn,wgpu_hal=off,wgpu_core=error"),
+    )
+    .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        None => {
-            println!(
-                "hivetty {VERSION}: the terminal window is not implemented yet (see docs/PLAN.md)."
-            );
-            ExitCode::SUCCESS
+    let command = match parse_args(&args) {
+        Ok(c) => c,
+        Err(message) => {
+            println!("error: {message}\n\n{HELP}");
+            return ExitCode::from(2);
         }
-        Some("-V" | "--version") => {
-            println!("hivetty {VERSION}");
-            ExitCode::SUCCESS
-        }
-        Some("-h" | "--help") => {
+    };
+    let result = match command {
+        Command::Help => {
             print!("{HELP}");
-            ExitCode::SUCCESS
+            Ok(())
         }
-        Some("--doctor") => {
+        Command::Version => {
+            println!("hivetty {VERSION}");
+            Ok(())
+        }
+        Command::Doctor => {
             print!("{}", doctor_report());
-            ExitCode::SUCCESS
+            Ok(())
         }
-        Some(other) => {
-            println!("error: unknown argument '{other}'\n\n{HELP}");
-            ExitCode::from(2)
+        Command::Run(spec) => app::run(spec),
+        Command::Screenshot {
+            spec,
+            out,
+            cols,
+            rows,
+            wait,
+        } => {
+            let opts = headless::Capture {
+                cols,
+                rows,
+                wait,
+                ..headless::Capture::default()
+            };
+            headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))
+        }
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            log::error!("{err:#}");
+            println!("hivetty: {err:#}");
+            ExitCode::FAILURE
         }
     }
 }
 
-/// Builds the `--doctor` report. GPU, shell, hook and ConPTY checks are added in later phases.
+/// Builds the `--doctor` report. GPU, hook and ConPTY checks are added in later phases.
 fn doctor_report() -> String {
+    let (shell, _) = hv_pty::default_shell();
     format!(
-        "hivetty {VERSION}\nos: {}\narch: {}\nfamily: {}\n",
+        "hivetty {VERSION}\nos: {}\narch: {}\nfamily: {}\nshell: {shell}\n",
         std::env::consts::OS,
         std::env::consts::ARCH,
         std::env::consts::FAMILY,
@@ -58,10 +173,56 @@ fn doctor_report() -> String {
 mod tests {
     use super::*;
 
+    fn args(s: &str) -> Vec<String> {
+        s.split_whitespace().map(str::to_owned).collect()
+    }
+
     #[test]
     fn doctor_report_includes_version_and_os() {
         let report = doctor_report();
         assert!(report.starts_with(&format!("hivetty {VERSION}\n")));
         assert!(report.contains(&format!("os: {}", std::env::consts::OS)));
+        assert!(report.contains("shell: "));
+    }
+
+    #[test]
+    fn no_args_runs_the_default_shell() {
+        assert_eq!(parse_args(&[]), Ok(Command::Run(SpawnSpec::default())));
+    }
+
+    #[test]
+    fn command_takes_the_rest_of_the_line() {
+        let Ok(Command::Run(spec)) = parse_args(&args("-e git log --oneline")) else {
+            panic!()
+        };
+        assert_eq!(spec.program.as_deref(), Some("git"));
+        assert_eq!(spec.args, ["log", "--oneline"]);
+    }
+
+    #[test]
+    fn screenshot_with_size_and_wait() {
+        let Ok(Command::Screenshot {
+            out,
+            cols,
+            rows,
+            wait,
+            spec,
+        }) = parse_args(&args("--screenshot a.png --size 80x24 --wait 2 -e echo hi"))
+        else {
+            panic!()
+        };
+        assert_eq!(
+            (out, cols, rows, wait),
+            (PathBuf::from("a.png"), 80, 24, Duration::from_secs(2))
+        );
+        assert_eq!(spec.program.as_deref(), Some("echo"));
+    }
+
+    #[test]
+    fn bad_arguments_are_rejected() {
+        assert!(parse_args(&args("--size 80")).is_err());
+        assert!(parse_args(&args("--size 0x10")).is_err());
+        assert!(parse_args(&args("--bogus")).is_err());
+        assert!(parse_args(&args("-e")).is_err());
     }
 }

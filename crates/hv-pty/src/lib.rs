@@ -35,7 +35,7 @@ impl GridSize {
 }
 
 /// What to run inside a new PTY.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpawnSpec {
     /// Program to run. `None` means the user's default shell (see [`default_shell`]).
     pub program: Option<String>,
