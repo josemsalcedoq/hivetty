@@ -25,8 +25,8 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 ## F0 — Cimientos
 
 **Estado (2026-11-21):**
-- ✅ Hechas: F0-01 (Rust 1.100.0 fijado), F0-02, F0-03, F0-04 (CI en verde en los 3 SO), F0-05, F0-06 (MIT OR Apache-2.0), F0-07, F0-08 (repo **público** con etiquetas, milestones, ruleset sin force-push y reporte privado de vulnerabilidades), F0-09 (Dependabot + `audit.yml` diario), F0-11 (esqueleto de `xtask` con `ci` funcional) y F0-12 (versión, SO y arquitectura; la GPU llega con wgpu en F1).
-- ⏳ Pendiente: **F0-10**, revisar e instalar las skills (necesita la elección del autor).
+- ✅ Hechas: F0-01 (Rust 1.100.0 fijado), F0-02, F0-03, F0-04 (CI en verde en los 3 SO), F0-05, F0-06 (MIT OR Apache-2.0), F0-07, F0-08 (repo **público** con etiquetas, milestones, ruleset sin force-push y reporte privado de vulnerabilidades), F0-09 (Dependabot + `audit.yml` diario), F0-10 (skills en `.claude/skills`, ver `SOURCES.md`), F0-11 (esqueleto de `xtask` con `ci` funcional) y F0-12 (versión, SO y arquitectura; la GPU llega con wgpu en F1).
+- ✅ **F0 cerrada.** rust-docs-mcp queda opcional (no se instaló para no tocar la configuración global de Claude).
 
 | ID | Tarea | Depende | Tam. | Aceptación |
 |---|---|---|---|---|
