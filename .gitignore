@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+*.pdb
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/settings.local.json
