@@ -66,6 +66,9 @@ pub struct Renderer {
     /// Second text pass for labels drawn on top of overlay rectangles (the jump pill).
     ui_text: TextRenderer,
     pill_label: Buffer,
+    /// Scrollback search bar text (`None` = hidden) and its laid-out label.
+    search_text: Option<String>,
+    search_label: Buffer,
     /// Where the jump pill was drawn last frame, for hit testing: `[x, y, w, h]`.
     pill_rect: Option<[f32; 4]>,
 }
@@ -206,6 +209,7 @@ impl Renderer {
             TextRenderer::new(&mut atlas, &device, wgpu::MultisampleState::default(), None);
 
         let (cell_w, cell_h) = measure_cell(&mut font_system, &font_family, font_size * scale);
+        let search_label = Buffer::new(&mut font_system, Metrics::new(font_size * scale, cell_h));
         let mut pill_label = Buffer::new(&mut font_system, Metrics::new(font_size * scale, cell_h));
         pill_label.set_size(Some(cell_w * 40.0), Some(cell_h));
         pill_label.set_text(
@@ -236,6 +240,8 @@ impl Renderer {
             ui_text,
             pill_label,
             pill_rect: None,
+            search_text: None,
+            search_label,
         }
     }
 
@@ -464,6 +470,7 @@ impl Renderer {
         let (back, mut over) = self.build_rects(snap, pad);
         self.update_rows(snap);
         let pill = self.layout_pill(snap, &mut over);
+        let search = self.layout_search(&mut over);
 
         let width = self.config.width;
         let height = self.config.height;
@@ -494,6 +501,21 @@ impl Renderer {
                 &mut self.swash_cache,
             )
             .map_err(|e| anyhow!("text prepare failed: {e}"))?;
+        let bounds = TextBounds {
+            left: 0,
+            top: 0,
+            right: width as i32,
+            bottom: height as i32,
+        };
+        let search_area = search.map(|(x, y)| TextArea {
+            buffer: &self.search_label,
+            left: x,
+            top: y,
+            scale: 1.0,
+            bounds,
+            default_color: to_text_color(snap.foreground),
+            custom_glyphs: &[],
+        });
         let pill_area = pill.map(|(x, y)| TextArea {
             buffer: &self.pill_label,
             left: x,
@@ -515,7 +537,7 @@ impl Renderer {
                 &mut self.font_system,
                 &mut self.atlas,
                 &self.viewport,
-                pill_area,
+                pill_area.into_iter().chain(search_area),
                 &mut self.swash_cache,
             )
             .map_err(|e| anyhow!("label prepare failed: {e}"))?;
@@ -569,6 +591,46 @@ impl Renderer {
     }
 
     /// Adds the "Jump to bottom" pill when the view is scrolled up. Returns where its label goes.
+    /// Shows the search bar with `text` (e.g. `Find: foo`), or hides it with `None`.
+    pub fn set_search_bar(&mut self, text: Option<&str>) {
+        if self.search_text.as_deref() == text {
+            return;
+        }
+        self.search_text = text.map(str::to_owned);
+        if let Some(text) = text {
+            let attrs = Attrs::new().family(Family::Name(&self.font_family));
+            self.search_label
+                .set_metrics(Metrics::new(self.font_size * self.scale, self.cell_h));
+            self.search_label
+                .set_size(Some(self.cell_w * 200.0), Some(self.cell_h));
+            self.search_label
+                .set_text(text, &attrs, Shaping::Advanced, None);
+            self.search_label
+                .shape_until_scroll(&mut self.font_system, false);
+        }
+    }
+
+    /// Adds the search bar (top right). Returns where its label goes.
+    fn layout_search(&mut self, over: &mut Vec<Rect>) -> Option<(f32, f32)> {
+        let text = self.search_text.as_deref()?;
+        let (cw, ch) = (self.cell_w, self.cell_h);
+        let chars = text.chars().count().max(24) as f32;
+        let (w, h) = ((chars * cw + cw * 2.0).round(), (ch * 1.5).round());
+        let margin = (PADDING * self.scale).round();
+        let x = (self.config.width as f32 - w - margin).max(0.0).round();
+        let y = margin;
+        let border = self.scale.round().max(1.0);
+        over.push(Rect::new(
+            x - border,
+            y - border,
+            w + border * 2.0,
+            h + border * 2.0,
+            PILL_BORDER,
+        ));
+        over.push(Rect::new(x, y, w, h, PILL_BG));
+        Some((x + cw, y + ((h - ch) / 2.0).round()))
+    }
+
     fn layout_pill(&mut self, snap: &Snapshot, over: &mut Vec<Rect>) -> Option<(f32, f32)> {
         if snap.display_offset == 0 {
             self.pill_rect = None;

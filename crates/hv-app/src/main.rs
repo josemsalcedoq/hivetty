@@ -28,6 +28,7 @@ OPTIONS:
     --wait <SECONDS>     Max time --screenshot waits for the program to exit (default 5)
     --events             With --screenshot, print the terminal events seen (OSC 7/9/133/777/7501)
     --scroll <LINES>     With --screenshot, scroll up into the scrollback before capturing
+    --find <PATTERN>     With --screenshot, search the scrollback (regex) and show the result
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
     -V, --version        Print version
@@ -49,6 +50,7 @@ enum Command {
         wait: Duration,
         events: bool,
         scroll: i32,
+        find: Option<String>,
     },
     Doctor,
     Usage {
@@ -64,6 +66,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let (mut cols, mut rows, mut wait) = (100, 30, Duration::from_secs(5));
     let mut events = false;
     let mut scroll = 0;
+    let mut find = None;
     let mut i = 0;
     while i < args.len() {
         let value = |i: usize| {
@@ -100,6 +103,10 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 i += 1;
             }
             "--events" => events = true,
+            "--find" => {
+                find = Some(value(i)?.clone());
+                i += 1;
+            }
             "--scroll" => {
                 scroll = value(i)?.parse().map_err(|_| "invalid --scroll")?;
                 i += 1;
@@ -122,6 +129,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             wait,
             events,
             scroll,
+            find,
         },
         None => Command::Run(spec),
     })
@@ -172,6 +180,7 @@ fn main() -> ExitCode {
             wait,
             events,
             scroll,
+            find,
         } => {
             let opts = headless::Capture {
                 cols,
@@ -179,6 +188,7 @@ fn main() -> ExitCode {
                 wait,
                 print_events: events,
                 scroll_up: scroll,
+                find,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))

@@ -22,6 +22,8 @@ pub(crate) struct Capture {
     pub(crate) print_events: bool,
     /// Lines to scroll up into the scrollback before capturing.
     pub(crate) scroll_up: i32,
+    /// Run a scrollback search and show the search bar before capturing.
+    pub(crate) find: Option<String>,
 }
 
 impl Default for Capture {
@@ -33,6 +35,7 @@ impl Default for Capture {
             font_size: 14.0,
             print_events: false,
             scroll_up: 0,
+            find: None,
         }
     }
 }
@@ -74,6 +77,14 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
 
     if opts.scroll_up > 0 {
         session.scroll(opts.scroll_up);
+    }
+    if let Some(pattern) = &opts.find {
+        let status = match session.search(pattern) {
+            Ok(true) => "",
+            Ok(false) => "  (no matches)",
+            Err(_) => "  (invalid pattern)",
+        };
+        renderer.set_search_bar(Some(&format!("Find: {pattern}▏{status}")));
     }
     let snapshot = session.snapshot();
     let (w, h, rgba) = renderer.render_to_rgba(&snapshot)?;

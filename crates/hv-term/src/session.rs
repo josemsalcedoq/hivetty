@@ -9,8 +9,9 @@ use std::time::Instant;
 use alacritty_terminal::Term;
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
+use alacritty_terminal::term::search::{Match, RegexSearch};
 use alacritty_terminal::term::{Config, TermMode};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use anyhow::Result;
@@ -79,6 +80,7 @@ impl Dimensions for Dims {
 
 struct TermState {
     term: Term<EventProxy>,
+    search: Option<SearchState>,
     processor: Processor<StdSyncHandler>,
     interceptor: Interceptor,
     term_events: Receiver<Event>,
@@ -113,9 +115,10 @@ impl Session {
         spec: &SpawnSpec,
         size: GridSize,
         scrollback_lines: usize,
-        wake: impl Fn() + Send + 'static,
+        wake: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self> {
-        let (pty, io) = Pty::spawn(spec, size)?;
+        let (mut pty, io) = Pty::spawn(spec, size)?;
+        let waiter = pty.take_waiter();
         let (term_tx, term_rx) = mpsc::channel();
         let dims = Dims {
             cols: usize::from(size.cols.max(1)),
@@ -129,6 +132,7 @@ impl Session {
         let state = Arc::new(Mutex::new(TermState {
             term,
             processor: Processor::new(),
+            search: None,
             interceptor: Interceptor::new(),
             term_events: term_rx,
         }));
@@ -137,6 +141,27 @@ impl Session {
 
         let cwd = Arc::new(Mutex::new(spec.cwd.clone()));
         let thread_cwd = Arc::clone(&cwd);
+        // Exactly one `Exited` event, from whichever notices first: EOF on the PTY output
+        // (Unix) or the child process exiting (needed on Windows, where ConPTY keeps the pipe open).
+        let exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let wake = Arc::new(wake);
+        if let Some(waiter) = waiter {
+            let events = events_tx.clone();
+            let exited = Arc::clone(&exited);
+            let wake = Arc::clone(&wake);
+            std::thread::Builder::new()
+                .name("hivetty-child-wait".into())
+                .spawn(move || {
+                    waiter.wait();
+                    // Give the reader a moment to deliver the last output first.
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if !exited.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                        let _ = events.send(SessionEvent::Exited);
+                        wake();
+                    }
+                })?;
+        }
+        let thread_exited = Arc::clone(&exited);
         let thread_state = Arc::clone(&state);
         let thread_writer = Arc::clone(&writer);
         std::thread::Builder::new()
@@ -148,7 +173,8 @@ impl Session {
                     &thread_writer,
                     &thread_cwd,
                     &events_tx,
-                    &wake,
+                    &thread_exited,
+                    &*wake,
                 )
             })?;
 
@@ -204,6 +230,61 @@ impl Session {
     /// Last working directory reported by the shell (OSC 7), or the one it started in.
     pub fn cwd(&self) -> Option<std::path::PathBuf> {
         lock(&self.cwd).clone()
+    }
+
+    /// Starts (or changes) a scrollback search. The nearest match above the bottom of the
+    /// screen is selected and scrolled into view. Returns `Ok(false)` when nothing matches.
+    pub fn search(&self, pattern: &str) -> Result<bool, String> {
+        let mut state = lock(&self.state);
+        if pattern.is_empty() {
+            state.search = None;
+            state.term.selection = None;
+            return Ok(true);
+        }
+        let regex = RegexSearch::new(pattern).map_err(|e| e.to_string())?;
+        let origin = state.term.grid().bottommost_line();
+        let origin = Point::new(origin, state.term.last_column());
+        let mut search = SearchState {
+            regex,
+            current: None,
+        };
+        let found = state.term.search_next(
+            &mut search.regex,
+            origin,
+            Direction::Left,
+            Side::Right,
+            None,
+        );
+        state.search = Some(search);
+        Ok(show_match(&mut state, found))
+    }
+
+    /// Moves to the next match: older (`up = true`) or newer. Returns false when nothing matches.
+    pub fn search_step(&self, up: bool) -> bool {
+        let mut state = lock(&self.state);
+        let TermState { term, search, .. } = &mut *state;
+        let Some(search) = search.as_mut() else {
+            return false;
+        };
+        let (origin, direction) = match &search.current {
+            Some(m) if up => (m.start().sub(term, Boundary::None, 1), Direction::Left),
+            Some(m) => (m.end().add(term, Boundary::None, 1), Direction::Right),
+            None => (
+                Point::new(term.grid().bottommost_line(), term.last_column()),
+                Direction::Left,
+            ),
+        };
+        let side = if up { Side::Right } else { Side::Left };
+        let found = term.search_next(&mut search.regex, origin, direction, side, None);
+        show_match(&mut state, found)
+    }
+
+    /// Ends the search and removes its highlight.
+    pub fn search_clear(&self) {
+        let mut state = lock(&self.state);
+        if state.search.take().is_some() {
+            state.term.selection = None;
+        }
     }
 
     /// Mouse reporting modes the program enabled.
@@ -317,6 +398,24 @@ impl Session {
     }
 }
 
+struct SearchState {
+    regex: RegexSearch,
+    current: Option<Match>,
+}
+
+/// Highlights a search match (as the selection, so it can be copied) and scrolls to it.
+fn show_match(state: &mut TermState, found: Option<Match>) -> bool {
+    let Some(m) = found else { return false };
+    let mut selection = Selection::new(SelectionType::Simple, *m.start(), Side::Left);
+    selection.update(*m.end(), Side::Right);
+    state.term.selection = Some(selection);
+    state.term.scroll_to_point(*m.start());
+    if let Some(search) = state.search.as_mut() {
+        search.current = Some(m);
+    }
+    true
+}
+
 /// Grid point of a visible cell, taking the scrollback offset into account.
 fn visible_point(term: &Term<EventProxy>, row: usize, col: usize) -> Point {
     let offset = term.grid().display_offset();
@@ -335,6 +434,7 @@ fn reader_loop(
     writer: &Mutex<Box<dyn Write + Send>>,
     cwd: &Mutex<Option<std::path::PathBuf>>,
     events: &Sender<SessionEvent>,
+    exited: &std::sync::atomic::AtomicBool,
     wake: &(impl Fn() + Send),
 ) {
     let mut buf = vec![0u8; 64 * 1024];
@@ -352,6 +452,7 @@ fn reader_loop(
                 processor,
                 interceptor,
                 term_events,
+                ..
             } = &mut *guard;
             out.extend(interceptor.feed(bytes).into_iter().map(SessionEvent::Term));
             processor.advance(term, bytes);
@@ -390,8 +491,10 @@ fn reader_loop(
             wake();
         }
     }
-    let _ = events.send(SessionEvent::Exited);
-    wake();
+    if !exited.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        let _ = events.send(SessionEvent::Exited);
+        wake();
+    }
 }
 
 #[cfg(test)]
@@ -460,6 +563,56 @@ mod tests {
             _ => None,
         });
         assert_eq!(stored.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn search_finds_matches_newest_first_and_steps() {
+        let size = GridSize {
+            cols: 20,
+            rows: 3,
+            cell_width: 8,
+            cell_height: 16,
+        };
+        let (program, args) = if cfg!(windows) {
+            (
+                "cmd.exe".to_owned(),
+                vec![
+                    "/C".to_owned(),
+                    "echo alpha& echo beta& echo alpha2& echo gamma& echo delta".to_owned(),
+                ],
+            )
+        } else {
+            (
+                "/bin/sh".to_owned(),
+                vec![
+                    "-c".to_owned(),
+                    "printf 'alpha\nbeta\nalpha2\ngamma\ndelta\n'".to_owned(),
+                ],
+            )
+        };
+        let spec = SpawnSpec {
+            program: Some(program),
+            args,
+            ..SpawnSpec::default()
+        };
+        let session = Session::spawn(&spec, size, 1000, || {}).expect("spawn");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !session.drain_events().contains(&SessionEvent::Exited) {
+            assert!(Instant::now() < deadline, "command did not finish");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(session.search("alpha"), Ok(true));
+        assert_eq!(
+            session.selection_text().as_deref(),
+            Some("alpha"),
+            "newest match first"
+        );
+        assert!(session.search_step(true));
+        assert!(session.selection_text().is_some());
+        assert_eq!(session.search("zzz-not-there"), Ok(false));
+        assert!(session.search("(").is_err(), "invalid regex is reported");
+        session.search_clear();
+        assert!(session.selection_text().is_none());
     }
 
     #[test]

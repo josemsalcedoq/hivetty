@@ -89,6 +89,27 @@ struct App {
     ime_composing: bool,
     config: hv_config::Config,
     config_path: Option<std::path::PathBuf>,
+    /// Scrollback search in progress (F1-21).
+    search: Option<SearchUi>,
+}
+
+#[derive(Debug, Default)]
+struct SearchUi {
+    query: String,
+    /// `None` = not searched yet, `Some(Ok(found))`, or `Some(Err(regex error))`.
+    result: Option<Result<bool, String>>,
+}
+
+impl SearchUi {
+    /// The text shown in the search bar.
+    fn label(&self) -> String {
+        let status = match &self.result {
+            Some(Ok(false)) => "  (no matches)",
+            Some(Err(_)) => "  (invalid pattern)",
+            _ => "",
+        };
+        format!("Find: {}▏{status}", self.query)
+    }
 }
 
 /// Pointer position and click tracking for selection.
@@ -123,6 +144,7 @@ impl App {
             ime_composing: false,
             config: hv_config::Config::default(),
             config_path: None,
+            search: None,
         }
     }
 
@@ -177,6 +199,10 @@ impl App {
         if event.state != ElementState::Pressed || self.ime_composing {
             return;
         }
+        if self.search.is_some() {
+            self.on_search_key(event);
+            return;
+        }
         let m = self.modifiers;
         // The app's own shortcut modifier: Cmd on macOS, Ctrl+Shift elsewhere (docs/keybindings.md).
         let primary = if cfg!(target_os = "macos") {
@@ -187,6 +213,11 @@ impl App {
 
         if primary && let Key::Character(c) = &event.logical_key {
             match c.to_lowercase().as_str() {
+                "f" => {
+                    self.search = Some(SearchUi::default());
+                    self.refresh_search_bar();
+                    return;
+                }
                 "c" => {
                     copy_selection(&ui.session);
                     return;
@@ -324,6 +355,51 @@ impl App {
                 ui.window.request_redraw();
             }
             self.mouse.hover_link = hover;
+        }
+    }
+
+    /// Keys while the search bar is open: type the pattern, Enter = older match,
+    /// Shift+Enter = newer match, Esc = close.
+    fn on_search_key(&mut self, event: &KeyEvent) {
+        let (Some(ui), Some(search)) = (&self.ui, &mut self.search) else {
+            return;
+        };
+        let mut changed = false;
+        match &event.logical_key {
+            Key::Named(NamedKey::Escape) => {
+                ui.session.search_clear();
+                self.search = None;
+                self.refresh_search_bar();
+                return;
+            }
+            Key::Named(NamedKey::Enter) => {
+                let found = ui.session.search_step(!self.modifiers.shift_key());
+                search.result = Some(Ok(found));
+            }
+            Key::Named(NamedKey::Backspace) => {
+                search.query.pop();
+                changed = true;
+            }
+            _ => {
+                if let Some(text) = &event.text
+                    && !text.chars().any(char::is_control)
+                {
+                    search.query.push_str(text);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            search.result = (!search.query.is_empty()).then(|| ui.session.search(&search.query));
+        }
+        self.refresh_search_bar();
+    }
+
+    fn refresh_search_bar(&mut self) {
+        if let Some(ui) = &mut self.ui {
+            let label = self.search.as_ref().map(SearchUi::label);
+            ui.renderer.set_search_bar(label.as_deref());
+            ui.window.request_redraw();
         }
     }
 

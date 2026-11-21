@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 /// Terminal size in cells and pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,13 +50,32 @@ pub struct SpawnSpec {
 /// A running child process attached to a PTY.
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
-    child: Box<dyn Child + Send + Sync>,
+    /// `None` once [`Pty::take_waiter`] handed the child to a waiting thread.
+    child: Option<Box<dyn Child + Send + Sync>>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+    pid: Option<u32>,
+}
+
+/// Blocks until the child exits. Returned by [`Pty::take_waiter`].
+pub struct ChildWaiter(Box<dyn Child + Send + Sync>);
+
+impl ChildWaiter {
+    /// Waits for the child and returns its exit code.
+    pub fn wait(mut self) -> Option<u32> {
+        self.0.wait().ok().map(|status| status.exit_code())
+    }
+}
+
+impl fmt::Debug for ChildWaiter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChildWaiter").finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for Pty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pty")
-            .field("pid", &self.child.process_id())
+            .field("pid", &self.pid)
             .finish_non_exhaustive()
     }
 }
@@ -112,10 +131,14 @@ impl Pty {
             .try_clone_reader()
             .context("cannot read from PTY")?;
         let writer = pair.master.take_writer().context("cannot write to PTY")?;
+        let killer = child.clone_killer();
+        let pid = child.process_id();
         Ok((
             Pty {
                 master: pair.master,
-                child,
+                child: Some(child),
+                killer,
+                pid,
             },
             PtyIo { reader, writer },
         ))
@@ -130,12 +153,19 @@ impl Pty {
 
     /// Kills the child process.
     pub fn kill(&mut self) -> Result<()> {
-        self.child.kill().context("failed to kill child")
+        self.killer.kill().context("failed to kill child")
+    }
+
+    /// Hands the child to a thread that waits for it to exit. On Windows the PTY output does not
+    /// reach EOF when the child exits (ConPTY keeps it open), so exit must be detected this way.
+    pub fn take_waiter(&mut self) -> Option<ChildWaiter> {
+        self.child.take().map(ChildWaiter)
     }
 
     /// Returns the exit code if the child has exited.
     pub fn try_wait(&mut self) -> Option<u32> {
         self.child
+            .as_mut()?
             .try_wait()
             .ok()
             .flatten()
@@ -144,7 +174,7 @@ impl Pty {
 
     /// Process id of the child, if known.
     pub fn pid(&self) -> Option<u32> {
-        self.child.process_id()
+        self.pid
     }
 }
 
