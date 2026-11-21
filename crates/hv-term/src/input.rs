@@ -62,13 +62,23 @@ impl Mods {
 
 /// Terminal modes that change key encoding.
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct KeyModes {
     /// DECCKM: cursor keys send `ESC O x` instead of `ESC [ x`.
     pub app_cursor: bool,
+    /// Kitty keyboard protocol flag 1: disambiguate escape codes.
+    pub kitty_disambiguate: bool,
+    /// Kitty keyboard protocol flag 8: report all keys as escape codes.
+    pub kitty_all_keys: bool,
 }
 
 /// Encodes a key press. Returns `None` for keys that produce nothing.
 pub fn encode_key(key: &Key, mods: Mods, modes: KeyModes) -> Option<Vec<u8>> {
+    if (modes.kitty_disambiguate || modes.kitty_all_keys)
+        && let Some(seq) = encode_kitty(key, mods, modes)
+    {
+        return Some(seq);
+    }
     let mut out = Vec::new();
     match key {
         Key::Text(text) => {
@@ -126,6 +136,44 @@ pub fn encode_key(key: &Key, mods: Mods, modes: KeyModes) -> Option<Vec<u8>> {
         Key::F(_) => return None,
     }
     Some(out)
+}
+
+/// Kitty keyboard protocol (<https://sw.kovidgoyal.net/kitty/keyboard-protocol/>), flags 1 and 8.
+/// Returns `None` when the key keeps its legacy encoding.
+fn encode_kitty(key: &Key, mods: Mods, modes: KeyModes) -> Option<Vec<u8>> {
+    let modifier = mods.xterm_param(); // same 1 + shift + 2*alt + 4*ctrl scheme as kitty
+    let csi_u = |code: u32| {
+        let seq = match modifier {
+            Some(m) => format!("\x1b[{code};{m}u"),
+            None => format!("\x1b[{code}u"),
+        };
+        Some(seq.into_bytes())
+    };
+    let any_mod = modifier.is_some();
+    match key {
+        Key::Escape => csi_u(27),
+        Key::Enter if any_mod || modes.kitty_all_keys => csi_u(13),
+        Key::Tab if any_mod || modes.kitty_all_keys => csi_u(9),
+        Key::Backspace if any_mod || modes.kitty_all_keys => csi_u(127),
+        Key::Text(text) => {
+            let mut chars = text.chars();
+            let c = chars.next()?;
+            if chars.next().is_some() {
+                return None; // composed text (IME, dead keys): send as is
+            }
+            // With only Shift the produced text is sent as is (flag 1); with Ctrl/Alt, or when
+            // all keys are reported, the key is encoded by its unshifted code point.
+            let only_shift = mods.shift && !mods.ctrl && !mods.alt;
+            if !modes.kitty_all_keys && (!any_mod || only_shift) {
+                return None;
+            }
+            let base = c.to_lowercase().next().unwrap_or(c);
+            csi_u(u32::from(base))
+        }
+        // Arrows, Home/End, F-keys and the tilde keys keep their xterm encodings, which already
+        // carry the modifier parameter in the same format.
+        _ => None,
+    }
 }
 
 fn alt_prefixed(out: &mut Vec<u8>, mods: Mods, bytes: &[u8]) {
@@ -300,7 +348,7 @@ pub fn encode_mouse(
         } else {
             'M'
         };
-        return Some(format!("[<{code};{x};{y}{suffix}").into_bytes());
+        return Some(format!("\x1b[<{code};{x};{y}{suffix}").into_bytes());
     }
     // Classic X10 encoding: releases carry no button, coordinates are limited to 223.
     if action == MouseAction::Release {
@@ -357,7 +405,10 @@ mod tests {
     #[test]
     fn cursor_keys_respect_decckm_and_modifiers() {
         assert_eq!(enc(Key::Up, NONE), b"\x1b[A");
-        let app = KeyModes { app_cursor: true };
+        let app = KeyModes {
+            app_cursor: true,
+            ..KeyModes::default()
+        };
         assert_eq!(encode_key(&Key::Up, NONE, app).unwrap(), b"\x1bOA");
         assert_eq!(enc(Key::Right, CTRL), b"\x1b[1;5C");
     }
@@ -396,13 +447,13 @@ mod tests {
             ..MouseModes::default()
         };
         let press = encode_mouse(MouseButton::Left, MouseAction::Press, 4, 9, NONE, sgr).unwrap();
-        assert_eq!(press, b"[<0;10;5M");
+        assert_eq!(press, b"\x1b[<0;10;5M");
         let release =
             encode_mouse(MouseButton::Left, MouseAction::Release, 4, 9, NONE, sgr).unwrap();
-        assert_eq!(release, b"[<0;10;5m");
+        assert_eq!(release, b"\x1b[<0;10;5m");
         let wheel =
             encode_mouse(MouseButton::WheelDown, MouseAction::Press, 0, 0, CTRL, sgr).unwrap();
-        assert_eq!(wheel, b"[<81;1;1M");
+        assert_eq!(wheel, b"\x1b[<81;1;1M");
 
         let x10 = MouseModes {
             click: true,
@@ -435,7 +486,7 @@ mod tests {
         };
         assert_eq!(
             encode_mouse(MouseButton::None, MouseAction::Motion, 1, 1, NONE, all).unwrap(),
-            b"[<35;2;2M"
+            b"\x1b[<35;2;2M"
         );
         assert!(
             encode_mouse(
@@ -448,6 +499,46 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn kitty_disambiguate_mode() {
+        let kitty = KeyModes {
+            kitty_disambiguate: true,
+            ..KeyModes::default()
+        };
+        let enc = |key: Key, mods: Mods| encode_key(&key, mods, kitty).unwrap();
+        assert_eq!(enc(Key::Escape, NONE), b"\x1b[27u");
+        assert_eq!(enc(Key::Enter, SHIFT), b"\x1b[13;2u");
+        assert_eq!(
+            enc(Key::Enter, NONE),
+            b"\r",
+            "unmodified Enter stays legacy"
+        );
+        assert_eq!(
+            enc(Key::Text("i".into()), CTRL),
+            b"\x1b[105;5u",
+            "Ctrl+I is not Tab"
+        );
+        assert_eq!(
+            enc(Key::Text("A".into()), SHIFT),
+            b"A",
+            "shifted text is plain text"
+        );
+        assert_eq!(enc(Key::Text("x".into()), ALT), b"\x1b[120;3u");
+        assert_eq!(enc(Key::Up, CTRL), b"\x1b[1;5A");
+    }
+
+    #[test]
+    fn kitty_report_all_keys() {
+        let all = KeyModes {
+            kitty_all_keys: true,
+            ..KeyModes::default()
+        };
+        let enc = |key: Key, mods: Mods| encode_key(&key, mods, all).unwrap();
+        assert_eq!(enc(Key::Text("a".into()), NONE), b"\x1b[97u");
+        assert_eq!(enc(Key::Enter, NONE), b"\x1b[13u");
+        assert_eq!(enc(Key::Text("ñ".into()), NONE), "\x1b[241u".as_bytes());
     }
 
     #[test]

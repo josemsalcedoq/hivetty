@@ -127,6 +127,8 @@ impl Session {
         };
         let config = Config {
             scrolling_history: scrollback_lines,
+            // Track the kitty keyboard protocol stack (CSI > u / < u / ? u); encoding is ours.
+            kitty_keyboard: true,
             ..Config::default()
         };
         let term = Term::new(config, &dims, EventProxy(term_tx));
@@ -362,8 +364,11 @@ impl Session {
     /// Modes that affect key encoding.
     pub fn key_modes(&self) -> KeyModes {
         let state = lock(&self.state);
+        let mode = state.term.mode();
         KeyModes {
-            app_cursor: state.term.mode().contains(TermMode::APP_CURSOR),
+            app_cursor: mode.contains(TermMode::APP_CURSOR),
+            kitty_disambiguate: mode.contains(TermMode::DISAMBIGUATE_ESC_CODES),
+            kitty_all_keys: mode.contains(TermMode::REPORT_ALL_KEYS_AS_ESC),
         }
     }
 
