@@ -15,7 +15,7 @@ Datos de `alacritty_terminal` 0.26.0 (vte 0.15), verificados el 2026-11-21 contr
 `alacritty_terminal` **solo** atiende las OSC 0, 1, 2, 4, 8, 10, 11, 12, 50, 52, 104, 110, 111 y 112. El resto (7, 9, 133, 633, 777, 1337 y 7501) va a un log de depuración y se pierde. DCS no hace nada y APC/SOS/PM se tragan. El enum `Event` no tiene variantes para nada de eso.
 
 Por eso:
-1. **No se usa el `EventLoop` de serie** (es dueño del bucle de lectura del PTY). `th-term` tiene su propio hilo lector.
+1. **No se usa el `EventLoop` de serie** (es dueño del bucle de lectura del PTY). `hv-term` tiene su propio hilo lector.
 2. Cada bloque de bytes pasa primero por un **segundo `vte::Parser` con un `Perform` propio** que solo mira `osc_dispatch`, `hook`/`put`/`unhook` (DCS) y APC, y emite `TermEvent`s tipados (`Cwd`, `PromptMark`, `Notify`, `Progress`, `ProgramStatus`, `UserVar`…).
 3. Para anclar las marcas (OSC 133, chips, OSC 7501) a una fila, el bloque se **parte en el límite de cada OSC**: se alimenta a `Term` la parte anterior, se lee la fila del cursor y se registra el evento con esa fila.
 4. Después se alimenta todo a `vte::ansi::Processor<StdSyncHandler>` → `Term`. El hilo respeta `sync_timeout()` para la salida sincronizada.
@@ -85,7 +85,7 @@ Alternativa evaluada para el paso 2: el parser de `termwiz`, que ya devuelve OSC
 |---|---|---|
 | DA1 / DA2 / DA3 | M | AT (revisar qué anuncia) |
 | DSR 5/6 (estado y posición del cursor) | M | AT. **Obligatorio con ConPTY**: con `INHERIT_CURSOR` envía `CSI 6n` y **bloquea la entrada hasta que respondamos** |
-| XTVERSION (`CSI > q`) | S | INT/FE → `termhive <versión>` |
+| XTVERSION (`CSI > q`) | S | INT/FE → `hivetty <versión>` |
 | `CSI 14/16/18 t` (tamaños en píxeles y celdas) | S | AT/FE |
 | `CSI 21 t` (reportar el título) | — | **desactivado** (seguridad) |
 | DECRQSS, XTGETTCAP (DCS) | S | INT (DCS es un no-op en AT) |

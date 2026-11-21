@@ -8,7 +8,7 @@
 | **Turno** | Un mensaje del asistente (respuesta del modelo) dentro de una tarea. |
 | **Agent time** | Tiempo que una sesión pasa en estado `Working`. |
 | **Proyecto** | La raíz git del directorio de la sesión (o el propio directorio si no hay repo). |
-| **Hook** | Comando que el agente ejecuta en ciertos eventos; termhive lo usa para saber el estado. |
+| **Hook** | Comando que el agente ejecuta en ciertos eventos; hivetty lo usa para saber el estado. |
 | **PTY** | Pseudo-terminal: el par de extremos que conecta el terminal con la shell o el agente. En Windows, **ConPTY**. |
 | **VT / secuencias de escape** | Protocolo de texto (`ESC [ …`) con el que los programas controlan el terminal. |
 | **OSC** | *Operating System Command* (`ESC ] … BEL`): secuencias para título, directorio, enlaces, notificaciones… |

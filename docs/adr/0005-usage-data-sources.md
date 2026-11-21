@@ -5,7 +5,7 @@
 
 ## Contexto
 
-El panel de uso necesita tokens por modelo y agente, tareas, turnos y horas de agente, incluido el historial previo a instalar termhive y el uso de agentes que corrieron en otros terminales.
+El panel de uso necesita tokens por modelo y agente, tareas, turnos y horas de agente, incluido el historial previo a instalar hivetty y el uso de agentes que corrieron en otros terminales.
 
 ## Decisión
 
@@ -15,7 +15,7 @@ Tres fuentes, cada una para lo que hace mejor:
 |---|---|---|
 | Tokens (input, cache, output), modelo, turnos | **logs locales** de cada agente (transcripciones JSONL/JSON) | OpenTelemetry del agente si lo exporta (receptor OTLP local opcional) |
 | Tareas | hooks (`UserPromptSubmit`) | logs: mensajes del usuario que no son resultados de herramientas |
-| Agent time y concurrencia | **intervalos `Working` observados por termhive** (hooks o heurística) | logs: sumar los intervalos entre eventos con huecos < 5 min |
+| Agent time y concurrencia | **intervalos `Working` observados por hivetty** (hooks o heurística) | logs: sumar los intervalos entre eventos con huecos < 5 min |
 
 Reglas:
 - **Dedupe** por (agente, id de mensaje o petición): los agentes pueden escribir el mismo mensaje más de una vez.

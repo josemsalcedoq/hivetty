@@ -29,7 +29,7 @@ format = "claude-jsonl"
 paths = ["~/.claude/projects/**/*.jsonl"]
 ```
 
-Añadir un agente nuevo = un archivo TOML + (si tiene logs propios) un parser con fixtures. Skill propia `termhive-agent-hooks` (ver `docs/skills.md`).
+Añadir un agente nuevo = un archivo TOML + (si tiene logs propios) un parser con fixtures. Skill propia `hivetty-agent-hooks` (ver `docs/skills.md`).
 
 ## 2. Estado en vivo
 
@@ -56,7 +56,7 @@ Una fuente de más prioridad manda mientras haya emitido algo en los últimos 30
 | # | Fuente | Fiabilidad | Funciona por SSH/WSL | Detalle |
 |---|---|---|---|---|
 | 1 | **OSC 7501** (Program Status Protocol, borrador rev 0.4) | alta | ✔ (viaja por el terminal; **no** dentro de tmux, que lo descarta) | `ESC]7501;state=blocked:kind=permission:msg=<b64>ST`. Estados `idle`, `working` (con `progress` 0–100), `blocked`, `done`, `error` y `clear`; varios `id` por panel; hay que **responder a la consulta `?`**. Emisores ✔: Claude Code ≥ 2.1.295, Pi y Crush; Codex en main ◐ |
-| 2 | **Hooks** del agente → `termhive hook` → IPC | alta | WSL ✔ (vía `termhive.exe`); SSH ✗ | detalles en §2.3. Aportan lo que OSC 7501 no da: la acción actual (subtítulo), el id de sesión, la ruta de la transcripción y el modelo |
+| 2 | **Hooks** del agente → `hivetty hook` → IPC | alta | WSL ✔ (vía `hivetty.exe`); SSH ✗ | detalles en §2.3. Aportan lo que OSC 7501 no da: la acción actual (subtítulo), el id de sesión, la ruta de la transcripción y el modelo |
 | 3 | OSC 9 / 99 / 777 (notificaciones), OSC 9;4 (progreso) | media | ✔ | la notificación pasa a `Blocked` sin motivo; no distingue "done" de "blocked" |
 | 4 | Título (OSC 0/2) | media | ✔ | un spinner o cambio en el título → `Working` |
 | 5 | BEL | baja | ✔ | sin foco → `Blocked` probable |
@@ -94,28 +94,28 @@ Payload común por stdin ✔: `session_id`, `transcript_path`, `cwd`, `hook_even
 
 ### 2.4 Instalador de hooks
 
-`termhive agents install-hooks [--agent <id>] [--dry-run]`:
+`hivetty agents install-hooks [--agent <id>] [--dry-run]`:
 1. Lee la configuración actual del agente. Si no existe, propone crearla.
-2. Calcula las entradas que faltan (cada una con el marcador `termhive`).
+2. Calcula las entradas que faltan (cada una con el marcador `hivetty`).
 3. **Muestra el diff y pide confirmación.** Nunca toca las entradas del usuario.
-4. Hace una copia `*.termhive-bak` y escribe de forma atómica (archivo temporal + renombrar).
+4. Hace una copia `*.hivetty-bak` y escribe de forma atómica (archivo temporal + renombrar).
 5. `uninstall-hooks` quita solo las entradas con el marcador.
-6. `--doctor` comprueba que siguen instalados y que apuntan al binario actual (las rutas cambian al actualizar en Windows: usar un *shim* estable, `%LOCALAPPDATA%\termhive\bin\termhive.exe`).
+6. `--doctor` comprueba que siguen instalados y que apuntan al binario actual (las rutas cambian al actualizar en Windows: usar un *shim* estable, `%LOCALAPPDATA%\hivetty\bin\hivetty.exe`).
 
-Contrato de `termhive hook --agent <id> --event <evento>`:
-- Lee stdin (máximo 1 MiB), añade `TERMHIVE_SESSION_ID` y lo envía por IPC con el token.
-- **Siempre sale con 0 en menos de 1 s.** Si no hay IPC (agente fuera de termhive), no hace nada.
+Contrato de `hivetty hook --agent <id> --event <evento>`:
+- Lee stdin (máximo 1 MiB), añade `HIVETTY_SESSION_ID` y lo envía por IPC con el token.
+- **Siempre sale con 0 en menos de 1 s.** Si no hay IPC (agente fuera de hivetty), no hace nada.
 - Sin stdout (algunos agentes interpretan la salida de los hooks).
 
 ### 2.5 Casos especiales
-- **tmux** dentro de termhive: tmux descarta OSC 7501 y, sin `allow-passthrough on`, también las notificaciones. Los hooks siguen funcionando si el entorno conserva `TERMHIVE_*`: documentar `set -g update-environment "TERMHIVE_SESSION_ID TERMHIVE_IPC TERMHIVE_IPC_TOKEN"`.
+- **tmux** dentro de hivetty: tmux descarta OSC 7501 y, sin `allow-passthrough on`, también las notificaciones. Los hooks siguen funcionando si el entorno conserva `HIVETTY_*`: documentar `set -g update-environment "HIVETTY_SESSION_ID HIVETTY_IPC HIVETTY_IPC_TOKEN"`.
 - **SSH:** OSC 7501, notificaciones y título sí llegan; los hooks no. La sesión queda con estado de fuentes 1 y 3–6.
-- **WSL:** OSC 7501 sí. Los hooks funcionan si se instalan dentro de WSL apuntando a `termhive.exe` (interoperabilidad) y se reenvían las variables con `WSLENV=TERMHIVE_SESSION_ID/u:TERMHIVE_IPC/u:TERMHIVE_IPC_TOKEN/u`.
+- **WSL:** OSC 7501 sí. Los hooks funcionan si se instalan dentro de WSL apuntando a `hivetty.exe` (interoperabilidad) y se reenvían las variables con `WSLENV=HIVETTY_SESSION_ID/u:HIVETTY_IPC/u:HIVETTY_IPC_TOKEN/u`.
 - **Agente lanzado a mano** en un panel: se detecta por el árbol de procesos (`sysinfo`, cada 1 s). Se crea una sesión "observada" y, si emite OSC 7501, el estado es fiable sin hooks.
 
 ## 3. Uso (tokens, tareas y tiempo)
 
-Ver ADR 0005: logs = verdad para los tokens; tiempo de agente = intervalos observados por termhive.
+Ver ADR 0005: logs = verdad para los tokens; tiempo de agente = intervalos observados por hivetty.
 
 ### 3.1 Fuentes por agente
 
@@ -136,10 +136,10 @@ Notas:
 - **Tokens de razonamiento**: guardarlos aparte si el agente los informa (Codex, Gemini).
 
 ### 3.2 OpenTelemetry (opcional, F5-15)
-Claude Code exporta por OTel ✔: `claude_code.token.usage` (por tipo y modelo), `cost.usage`, **`active_time.total`** (distingue usuario y CLI), `session.count`, líneas de código, commits y PRs. termhive puede levantar un receptor OTLP local (`127.0.0.1`, puerto aleatorio) y pasar `CLAUDE_CODE_ENABLE_TELEMETRY=1` y `OTEL_*` **solo** a las sesiones que lanza (nunca tocar la configuración global). Así hay datos al instante; los logs siguen siendo la verdad.
+Claude Code exporta por OTel ✔: `claude_code.token.usage` (por tipo y modelo), `cost.usage`, **`active_time.total`** (distingue usuario y CLI), `session.count`, líneas de código, commits y PRs. hivetty puede levantar un receptor OTLP local (`127.0.0.1`, puerto aleatorio) y pasar `CLAUDE_CODE_ENABLE_TELEMETRY=1` y `OTEL_*` **solo** a las sesiones que lanza (nunca tocar la configuración global). Así hay datos al instante; los logs siguen siendo la verdad.
 
 ### 3.3 Límites del plan (5 h y semana) (S)
-- La statusline de Claude Code recibe por stdin un JSON que incluye `rate_limits` ◐ (lo usa Claude-Code-Usage-Monitor). termhive puede ofrecer una statusline propia que, además de pintar, reenvíe ese JSON por IPC → barra "week ▬ 15% ↻ 5d 11h" en la UI.
+- La statusline de Claude Code recibe por stdin un JSON que incluye `rate_limits` ◐ (lo usa Claude-Code-Usage-Monitor). hivetty puede ofrecer una statusline propia que, además de pintar, reenvíe ese JSON por IPC → barra "week ▬ 15% ↻ 5d 11h" en la UI.
 - Mostrar el ritmo de gasto y la hora estimada de agotamiento, como ccusage `blocks --live`.
 
 ### 3.4 Esquema SQLite
@@ -169,7 +169,7 @@ CREATE TABLE session (
   resume_cmd TEXT, worktree TEXT
 );
 
-CREATE TABLE agent_interval (            -- tiempo Working observado por termhive
+CREATE TABLE agent_interval (            -- tiempo Working observado por hivetty
   session_id TEXT NOT NULL, agent TEXT NOT NULL,
   start_ts INTEGER NOT NULL, end_ts INTEGER NOT NULL,
   source TEXT NOT NULL                   -- 'osc7501' | 'hooks' | 'heuristic' | 'logs'
@@ -182,4 +182,4 @@ CREATE TABLE ingest_cursor (path TEXT PRIMARY KEY, offset INTEGER, mtime INTEGER
 - Migraciones versionadas (`rusqlite_migration`). Cambiar la versión de un parser → reingestar sus archivos.
 
 ## 4. API para automatizar (F7-08, opcional)
-CLI y socket con salida JSON, desactivados por defecto (`remote_control = false`): `termhive cli list`, `spawn`, `split`, `send-text`, `capture`, `notify`, `set-status` y `wait --until blocked|done <sesión>`. Opcionalmente, servidor MCP con las mismas operaciones (de solo lectura por defecto).
+CLI y socket con salida JSON, desactivados por defecto (`remote_control = false`): `hivetty cli list`, `spawn`, `split`, `send-text`, `capture`, `notify`, `set-status` y `wait --until blocked|done <sesión>`. Opcionalmente, servidor MCP con las mismas operaciones (de solo lectura por defecto).

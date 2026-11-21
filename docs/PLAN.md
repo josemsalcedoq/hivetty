@@ -1,4 +1,4 @@
-# Plan maestro — termhive
+# Plan maestro — hivetty
 
 Terminal nativo en Rust, acelerado por GPU, para **macOS, Ubuntu y Windows**, diseñado para trabajar con muchos agentes de código en paralelo: barra lateral con el estado en vivo de cada sesión y panel de uso de tokens y horas de agente.
 
@@ -28,7 +28,7 @@ Este documento es el índice y el resumen. El detalle está en:
 ## 1. Visión y propuesta de valor
 
 1. **Saber de un vistazo qué agente te necesita**, sin recorrer pestañas: barra lateral por proyecto, bandeja de atención y "ir al siguiente que me necesita".
-2. **Primera clase en Windows**: casi todos los competidores son solo para macOS (cmux, Conductor, Rex) o dependen de tmux o WSL. termhive funciona igual en los tres SO con ConPTY moderno.
+2. **Primera clase en Windows**: casi todos los competidores son solo para macOS (cmux, Conductor, Rex) o dependen de tmux o WSL. hivetty funciona igual en los tres SO con ConPTY moderno.
 3. **Nativo y ligero** (Rust + GPU), frente a las alternativas en Electron.
 4. **Uso real y local**: tokens, caché, tareas y horas de agente por modelo y por agente, sin enviar nada fuera.
 5. **Sin parpadeo** con las TUIs de agentes (salida sincronizada bien hecha y sin saltos de scroll).
@@ -52,7 +52,7 @@ Alternativa en evaluación: **libghostty-vt 1.0** (ABI C estable desde el 6 de n
 |---|---|---|---|
 | **SP** Spikes | 1–2 | 8 spikes de riesgo con decisiones escritas | informe en `docs/spikes/` |
 | **F0** Cimientos | 3 | workspace, CI en 3 SO, licencia, skills | PR vacío en verde |
-| **F1** Terminal | 4–8 | terminal usable con agentes, sin parpadeo | Claude Code se usa a diario en termhive |
+| **F1** Terminal | 4–8 | terminal usable con agentes, sin parpadeo | Claude Code se usa a diario en hivetty |
 | **F2** Pestañas y paneles | 9–10 | pestañas, divisiones, atajos, paleta | layout de la captura 1 (sin barra lateral) |
 | **F3** Shell y chips | 11–13 | integración de 4 shells, chips | chips como en la captura 1 |
 | **F4** Barra de agentes | 14–18 | barra lateral, OSC 7501, hooks, notificaciones, reanudar, worktrees | **captura 1 completa** ★ |
@@ -85,7 +85,7 @@ Unos 6 meses a tiempo parcial con agentes ayudando. Los hitos ★ son los de má
 - Estado: con OSC 7501 o hooks, **0 falsos "Done"** y ≤ 300 ms de latencia en la prueba de 6 agentes.
 - Uso: totales de Claude Code a ±1% de `ccusage`.
 - Estabilidad: ≥ 99.5% de sesiones sin crash; resistencia de 8 h superada.
-- Uso propio: el autor usa termhive como terminal principal durante 2 semanas sin volver a otro.
+- Uso propio: el autor usa hivetty como terminal principal durante 2 semanas sin volver a otro.
 
 ## 6. Riesgos principales
 
@@ -94,7 +94,7 @@ Unos 6 meses a tiempo parcial con agentes ayudando. Los hitos ★ son los de má
 | alacritty_terminal no expone OSC/DCS/APC | **confirmado** | alto | interceptor propio (diseñado); alternativa libghostty-vt |
 | La codificación de teclado de Kitty, el ratón y el box-drawing viven en el frontend de Alacritty | **confirmado** | medio | portarlos con atribución (Apache-2.0) |
 | ConPTY del sistema reordena o filtra secuencias | alta en 1809–22H2 | alto | incluir ConPTY 1.25 (deja pasar todo); `--doctor` verifica que se usa |
-| `portable-pty` sin releases desde feb 2025 | confirmado | medio | dependencia git fijada o fork en `th-pty` |
+| `portable-pty` sin releases desde feb 2025 | confirmado | medio | dependencia git fijada o fork en `hv-pty` |
 | OSC 7501 es un borrador y puede cambiar | media | medio | parser tolerante y versionado; hooks como respaldo |
 | Formatos de logs y hooks de agentes cambian | alta | medio | fixtures por versión, parsers tolerantes, avisos en `--doctor` |
 | IME en Windows solo con IMM32 (winit 0.30) | media | medio | probar con japonés y chino en SP-3; subir a winit 0.31 cuando egui lo soporte |
@@ -115,7 +115,7 @@ Unos 6 meses a tiempo parcial con agentes ayudando. Los hitos ★ son los de má
 | GitHub Actions | gratis para repos públicos; en privados hay minutos incluidos, y macOS los gasta 10 veces más rápido |
 
 ## 8. Preguntas abiertas (decidir antes o durante F0)
-1. Nombre definitivo (¿"termhive"?) y licencia (¿MIT/Apache o GPL?).
+1. Nombre definitivo (¿"hivetty"?) y licencia (¿MIT/Apache o GPL?).
 2. ¿Repo público desde el principio o privado hasta la v0.5?
 3. ¿Hay acceso a un Mac (aunque sea en la nube) y a un equipo Ubuntu con GPU?
 4. ¿Organización legal para firmar en Windows, o certificado OV?

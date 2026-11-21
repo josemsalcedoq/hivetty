@@ -1,4 +1,4 @@
-# termhive — instructions for agents
+# hivetty — instructions for agents
 
 A GPU-accelerated, cross-platform (macOS, Ubuntu, Windows) terminal written in Rust, with a sidebar for coding agents and a usage dashboard. The docs are in Spanish.
 
@@ -8,17 +8,17 @@ A GPU-accelerated, cross-platform (macOS, Ubuntu, Windows) terminal written in R
 
 ## Fixed rules
 - The stack and architecture are in `docs/adr/` and `docs/architecture.md`. To change them, write a new ADR. Never change them silently.
-- `unsafe` is allowed only in `crates/th-platform`.
+- `unsafe` is allowed only in `crates/hv-platform`.
 - The main thread never does blocking I/O. Painting never holds the terminal lock (copy a snapshot first).
-- `th-ui`/`th-render` never depend on `th-pty`; they use `PaneHost`.
+- `hv-ui`/`hv-render` never depend on `hv-pty`; they use `PaneHost`.
 - Never run project tools to detect technologies; only read files (`docs/security.md` §2.5).
 - Never write to the user's config files (`~/.claude/settings.json`, etc.) without showing the diff and asking for confirmation.
-- `termhive hook` must always exit with code 0 in under 1 s and print nothing to stdout.
+- `hivetty hook` must always exit with code 0 in under 1 s and print nothing to stdout.
 - Code ported from Alacritty or other projects keeps its license header and attribution.
 
 ## Conventions
-- **The whole app is English only**: UI strings, notifications, errors, CLI help, config keys and comments, user docs. Keep UI strings centralized in `th-ui/src/strings.rs`.
+- **The whole app is English only**: UI strings, notifications, errors, CLI help, config keys and comments, user docs. Keep UI strings centralized in `hv-ui/src/strings.rs`.
 - Code, identifiers and commits are in English (Conventional Commits). Only the planning docs in `docs/` are in Spanish.
 - No AI attribution in commits or PRs.
-- Before finishing: the `termhive-platform-check` skill, `/code-review` and, if you touch IPC, parsers, hooks or updates, `/security-review`.
+- Before finishing: the `hivetty-platform-check` skill, `/code-review` and, if you touch IPC, parsers, hooks or updates, `/security-review`.
 - Tests at the right level (`docs/testing.md`). New agent-log parsers need real fixtures for each version.

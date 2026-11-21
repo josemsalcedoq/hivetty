@@ -37,7 +37,7 @@ GPU en CI: lavapipe (`mesa-vulkan-drivers`) en Linux, WARP en Windows y Metal en
 
 ## 2. Herramientas de empaquetado
 
-| Herramienta | Formatos | Estado | Uso en termhive |
+| Herramienta | Formatos | Estado | Uso en hivetty |
 |---|---|---|---|
 | **cargo-packager** (CrabNebula) | `.app`, **dmg**, **deb**, **AppImage**, pacman, **NSIS**, **MSI** + `cargo-packager-updater` | 0.11.8 (nov 2025); el ritmo ha bajado | **candidata principal** para los artefactos (SP-7) |
 | dist (cargo-dist) | shell, powershell, npm, homebrew, **msi** (dmg y app aún no; deb y AppImage no) | 0.34.0 (nov 2026), activo | útil para los instaladores por script y Homebrew; no cubre dmg, deb ni AppImage |
@@ -51,9 +51,9 @@ Decisión en SP-7: **cargo-packager** para dmg, deb, AppImage y MSI, y **Velopac
 ### macOS
 1. Cuenta de Apple Developer (99 $/año) con un certificado **Developer ID Application**.
 2. En CI: importar el `.p12` en un llavero temporal.
-3. `codesign --options runtime --timestamp --entitlements termhive.entitlements` (hardened runtime) sobre el binario universal (`lipo` de arm64 y x86_64).
-4. `xcrun notarytool submit termhive.dmg --key … --key-id … --issuer … --wait` (con clave de API de App Store Connect; `altool` ya no sirve).
-5. `xcrun stapler staple termhive.dmg`.
+3. `codesign --options runtime --timestamp --entitlements hivetty.entitlements` (hardened runtime) sobre el binario universal (`lipo` de arm64 y x86_64).
+4. `xcrun notarytool submit hivetty.dmg --key … --key-id … --issuer … --wait` (con clave de API de App Store Connect; `altool` ya no sirve).
+5. `xcrun stapler staple hivetty.dmg`.
 6. Sin sandbox (un terminal no puede ir en sandbox), así que no hay Mac App Store.
 
 ### Windows
@@ -72,7 +72,7 @@ Firma ed25519 propia (minisign) además de la del SO, y comprobación de que la 
 
 ## 4. Notificaciones en Windows (requisito del instalador)
 Una app de escritorio sin empaquetar **no puede mostrar toasts sin un AUMID** registrado mediante un acceso directo en el menú Inicio. Si no, `notify-rust` (tauri-winrt-notification) usa el AUMID de PowerShell y las notificaciones aparecen como "PowerShell". El instalador debe:
-1. Crear el acceso directo en el menú Inicio con la propiedad `System.AppUserModel.ID = "dev.termhive.app"`.
+1. Crear el acceso directo en el menú Inicio con la propiedad `System.AppUserModel.ID = "dev.hivetty.app"`.
 2. La app llama a `SetCurrentProcessExplicitAppUserModelID` al arrancar.
 3. Opcional: registrar `HKCU\Software\Classes\AppUserModelId\<AUMID>` (DisplayName, IconUri) y un activador COM para que el clic en la notificación abra la sesión.
 
@@ -82,9 +82,9 @@ En la versión portable (zip), avisar de que las notificaciones necesitan el ins
 
 | SO | Artefactos |
 |---|---|
-| macOS | `termhive-<v>-universal.dmg` (firmado, notarizado y grapado) |
-| Windows | `termhive-<v>-x64.msi`, `termhive-<v>-arm64.msi`, Setup de Velopack y un zip portable |
-| Linux | `termhive_<v>_amd64.deb`, `termhive_<v>_arm64.deb`, `termhive-<v>-x86_64.AppImage`, `termhive-<v>-aarch64.AppImage` |
+| macOS | `hivetty-<v>-universal.dmg` (firmado, notarizado y grapado) |
+| Windows | `hivetty-<v>-x64.msi`, `hivetty-<v>-arm64.msi`, Setup de Velopack y un zip portable |
+| Linux | `hivetty_<v>_amd64.deb`, `hivetty_<v>_arm64.deb`, `hivetty-<v>-x86_64.AppImage`, `hivetty-<v>-aarch64.AppImage` |
 | Todos | `SHA256SUMS` + firma minisign, SBOM CycloneDX, `THIRD_PARTY_NOTICES` y atestación de procedencia |
 
 ## 6. Canales

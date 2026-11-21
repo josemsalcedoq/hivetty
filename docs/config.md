@@ -1,6 +1,6 @@
 # Configuración
 
-- Archivo: `config.toml` en el directorio de configuración (`~/Library/Application Support/termhive/` en macOS, `$XDG_CONFIG_HOME/termhive/` en Linux y `%APPDATA%\termhive\` en Windows). Se puede cambiar con `--config <ruta>` o `TERMHIVE_CONFIG`.
+- Archivo: `config.toml` en el directorio de configuración (`~/Library/Application Support/hivetty/` en macOS, `$XDG_CONFIG_HOME/hivetty/` en Linux y `%APPDATA%\hivetty\` en Windows). Se puede cambiar con `--config <ruta>` o `HIVETTY_CONFIG`.
 - **Recarga en caliente**: los cambios se aplican sin reiniciar, salvo los marcados con ⟳ (necesitan reinicio).
 - Un error de configuración nunca impide arrancar: se usa el valor por defecto y se muestra un aviso con la línea del error.
 - Se puede incluir otro archivo con `import = ["themes/mi-tema.toml"]`.
@@ -38,10 +38,10 @@ builtin_box_drawing = true     # dibujar ─│┌ y powerline por código, alin
 thicken = false                # macOS: trazo más grueso
 
 [theme]
-name = "termhive-dark"         # o la ruta a un .toml; importa temas de iTerm2/Alacritty
+name = "hivetty-dark"         # o la ruta a un .toml; importa temas de iTerm2/Alacritty
 follow_system = true
-light = "termhive-light"
-dark = "termhive-dark"
+light = "hivetty-light"
+dark = "hivetty-dark"
 minimum_contrast = 1.0         # >1 ajusta colores para garantizar el contraste
 
 [terminal]
@@ -151,7 +151,7 @@ low_power_gpu = true           # preferir la iGPU en portátiles  ⟳
 
 [ipc]
 enabled = true                 # ⟳
-remote_control = false         # permitir `termhive cli send-text` y similares
+remote_control = false         # permitir `hivetty cli send-text` y similares
 allow_hooks = true
 
 [log]
@@ -166,9 +166,9 @@ channel = "stable"             # "stable" | "beta"
 
 | Variable | Efecto |
 |---|---|
-| `TERMHIVE_CONFIG` | ruta del archivo de configuración |
-| `TERMHIVE_LOG` | nivel de log (sintaxis de `tracing`, p. ej. `th_agents=debug`) |
-| `TERMHIVE_RENDERER` | fuerza el backend (`software` para diagnosticar) |
-| `TERMHIVE_SAFE=1` | igual que `--safe` |
+| `HIVETTY_CONFIG` | ruta del archivo de configuración |
+| `HIVETTY_LOG` | nivel de log (sintaxis de `tracing`, p. ej. `hv_agents=debug`) |
+| `HIVETTY_RENDERER` | fuerza el backend (`software` para diagnosticar) |
+| `HIVETTY_SAFE=1` | igual que `--safe` |
 
-Variables que **termhive pone** en cada PTY: `TERM`, `COLORTERM`, `TERM_PROGRAM=termhive`, `TERM_PROGRAM_VERSION`, `TERMHIVE_SESSION_ID`, `TERMHIVE_IPC` y `TERMHIVE_IPC_TOKEN`.
+Variables que **hivetty pone** en cada PTY: `TERM`, `COLORTERM`, `TERM_PROGRAM=hivetty`, `TERM_PROGRAM_VERSION`, `HIVETTY_SESSION_ID`, `HIVETTY_IPC` y `HIVETTY_IPC_TOKEN`.

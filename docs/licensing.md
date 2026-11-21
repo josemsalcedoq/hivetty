@@ -19,5 +19,5 @@
 - No usar los logos en el icono de la app, en publicidad ni de forma que sugiera respaldo oficial.
 
 ## Nombre
-- "termhive" es provisional. Antes de publicar, comprobar que no choca con marcas registradas (USPTO, EUIPO, OEPM), con crates de crates.io, con paquetes de Homebrew/winget/apt ni con dominios.
+- Nombre elegido: **Hivetty** (2026-11-21; libre en crates.io y con solo 1 repo homónimo en GitHub). Antes de publicar, comprobar también que no choca con marcas registradas (USPTO, EUIPO, OEPM), con crates de crates.io, con paquetes de Homebrew/winget/apt ni con dominios.
 - Diseño propio: no copiar el nombre, el aspecto exacto ni los recursos de productos existentes (por ejemplo, el terminal de las capturas).

@@ -1,4 +1,4 @@
-# termhive
+# hivetty
 
 Terminal nativo escrito en Rust, acelerado por GPU, pensado para trabajar con **muchos agentes de código a la vez** (Claude Code, Codex, Gemini CLI, opencode…). Funciona en **macOS, Ubuntu y Windows**.
 

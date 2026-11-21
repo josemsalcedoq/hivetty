@@ -21,7 +21,7 @@ Soportadas: macOS 13 o posterior (arm64 + x86_64) · Ubuntu 22.04, 24.04 y 26.04
 | Badge | contador en el icono del dock | urgency hint, contador en Unity/launcher si existe | overlay en la barra de tareas (`ITaskbarList3`) y progreso |
 | Menús | barra nativa (`muda`) | **pintados con egui** (muda necesita GTK) | `muda` (con `TranslateAcceleratorW` en el bucle) o egui |
 | TTS (narrador) | `AVSpeechSynthesizer` / `say` | `speech-dispatcher` | SAPI / WinRT `SpeechSynthesizer` |
-| Rutas de datos | `~/Library/Application Support/termhive` | `$XDG_CONFIG_HOME` / `$XDG_DATA_HOME` / `$XDG_STATE_HOME` | `%APPDATA%\termhive`, `%LOCALAPPDATA%\termhive` |
+| Rutas de datos | `~/Library/Application Support/hivetty` | `$XDG_CONFIG_HOME` / `$XDG_DATA_HOME` / `$XDG_STATE_HOME` | `%APPDATA%\hivetty`, `%LOCALAPPDATA%\hivetty` |
 | Paquete | dmg universal firmado y notarizado | deb, AppImage | MSI / Setup, winget, Scoop |
 
 ## Windows en detalle
@@ -43,7 +43,7 @@ Soportadas: macOS 13 o posterior (arm64 + x86_64) · Ubuntu 22.04, 24.04 y 26.04
 ### Shells y WSL
 - PowerShell 7 y 5.1: la integración envuelve `prompt` y respeta PSReadLine.
 - `cmd`: solo título y cwd mediante `PROMPT` con secuencias `$e]`; sin marcas completas.
-- WSL: perfil por distro. Los hooks de agentes que corren dentro de WSL llaman a `termhive.exe hook` por la interoperabilidad de WSL (llega al named pipe). Los logs de uso de WSL se leen desde `\\wsl.localhost\<distro>\home\<usuario>\…` (U-64).
+- WSL: perfil por distro. Los hooks de agentes que corren dentro de WSL llaman a `hivetty.exe hook` por la interoperabilidad de WSL (llega al named pipe). Los logs de uso de WSL se leen desde `\\wsl.localhost\<distro>\home\<usuario>\…` (U-64).
 - Git Bash (MSYS2): se lanza con `--login -i`. Sus rutas `/c/...` se convierten al soltar archivos.
 
 ### Otros

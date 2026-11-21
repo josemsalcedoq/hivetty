@@ -118,7 +118,7 @@ Rejilla de 12 columnas, que pasa a 4 en ventanas de menos de 900 px de ancho.
 - Fila 3: "MODELS" (6 columnas) y "AGENTS" (6 columnas).
 - Selector de rango arriba a la derecha y botón `esc`.
 - Al pasar el ratón por cualquier punto: tooltip con el valor exacto y la fecha.
-- Estado vacío: "No usage data yet. termhive reads usage from: Claude Code (~/.claude/projects), Codex…" con un botón "Open doctor".
+- Estado vacío: "No usage data yet. hivetty reads usage from: Claude Code (~/.claude/projects), Codex…" con un botón "Open doctor".
 - Datos parciales (un parser falló): aviso discreto con enlace al detalle.
 
 ## 7. Notificaciones
@@ -141,7 +141,7 @@ Rejilla de 12 columnas, que pasa a 4 en ventanas de menos de 900 px de ancho.
 
 ## 9. Idioma
 - **Toda la app está en inglés**: interfaz, menús, diálogos, notificaciones, mensajes de error, `--help`, `--doctor`, configuración, documentación de usuario y web. No hay traducciones en la v1.0.
-- Los textos de la UI se escriben en un solo módulo (`th-ui/src/strings.rs`) en lugar de repartirse por el código, para poder añadir idiomas en el futuro sin reescribir nada.
+- Los textos de la UI se escriben en un solo módulo (`hv-ui/src/strings.rs`) en lugar de repartirse por el código, para poder añadir idiomas en el futuro sin reescribir nada.
 - Fechas en inglés (`Oct 23 – today`) y números en formato compacto (`11.6B`, `1,110`), independientes del idioma del sistema.
 - La zona horaria y el primer día de la semana sí son configurables (afectan al mapa de calor y a los totales diarios).
 - El contenido del terminal es Unicode completo: ver la anchura de caracteres en `docs/vt-compliance.md`.
@@ -159,5 +159,5 @@ Rejilla de 12 columnas, que pasa a 4 en ventanas de menos de 900 px de ancho.
 Se puede repetir desde el menú Ayuda.
 
 ## 11. Menús nativos
-- macOS: barra de menús completa (termhive, File, Edit, View, Session, Window, Help) con `muda`.
+- macOS: barra de menús completa (hivetty, File, Edit, View, Session, Window, Help) con `muda`.
 - Windows y Linux: menú de hamburguesa en la barra de pestañas con los mismos elementos y la paleta de comandos.

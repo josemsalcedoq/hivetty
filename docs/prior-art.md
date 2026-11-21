@@ -11,7 +11,7 @@ Borrador rev 0.4 (oct 2026), escrito por el autor de Rex (Mitchell Hashimoto): `
 - Los hooks de Claude **no** pueden emitirlo (no escriben en el terminal).
 - Fuente: https://stackness.dev/blog/osc-7501-program-status-terminal-protocol-for-coding-agents
 
-**Consecuencia para termhive:** OSC 7501 pasa a ser la **fuente de estado nº 1** (ver `docs/agent-integration.md`), por delante de los hooks. Además se puede ver dentro de SSH, porque viaja por el propio terminal. Hay que verificar pronto (SP-2) que ConPTY lo deja pasar.
+**Consecuencia para hivetty:** OSC 7501 pasa a ser la **fuente de estado nº 1** (ver `docs/agent-integration.md`), por delante de los hooks. Además se puede ver dentro de SSH, porque viaja por el propio terminal. Hay que verificar pronto (SP-2) que ConPTY lo deja pasar.
 
 ## Terminales y multiplexores centrados en agentes
 
@@ -71,12 +71,12 @@ No se encontró ningún proyecto público "midterm" de midudev: el terminal de l
 - Reenvío de notificaciones al móvil (ntfy, Telegram o Slack).
 - Uso: precios de LiteLLM con caché offline, ventanas de 5 h y cuota semanal con cuenta atrás, ritmo de gasto, tokens de razonamiento y separar tiempo de usuario frente al del agente.
 
-## Problemas conocidos que termhive debe evitar
+## Problemas conocidos que hivetty debe evitar
 - **Parpadeo y saltos de scroll** con TUIs de Ink (peor con ConPTY): salida sincronizada correcta (incluido `CSI 2J` dentro del bloque) y no mover el scroll si el usuario está arriba.
-- **Windows olvidado** por casi todos los competidores: **es la oportunidad de termhive**.
+- **Windows olvidado** por casi todos los competidores: **es la oportunidad de hivetty**.
 - **Notificaciones poco fiables o tardías** (el aviso de inactividad de Claude tarda unos 60 s y el de permiso unos 6 s; la campana no distingue "done" de "blocked"): OSC 7501 + hooks + agrupado.
 - **Perder la pista** con 3–4 o más agentes: barra lateral y bandeja de atención.
 - **Coste de los worktrees** (node_modules, `.env`, puertos y worktrees abandonados): script de preparación y limpieza.
 - **Restauración superficial**: servidor de PTYs (ADR 0002) y reanudación por id.
 - **Peso de Electron**: nativo en Rust.
-- **Riesgo de facturación** en GUIs que usan el SDK del agente: termhive envuelve el CLI en un PTY y no tiene ese problema.
+- **Riesgo de facturación** en GUIs que usan el SDK del agente: hivetty envuelve el CLI en un PTY y no tiene ese problema.

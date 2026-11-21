@@ -29,17 +29,17 @@ Cualquier programa (o un archivo con `cat`, o un servidor por SSH) puede emitir 
 - Aviso al pegar varias líneas en una shell sin bracketed paste.
 
 ### 2.3 IPC local
-- Socket Unix en un directorio privado (`$XDG_RUNTIME_DIR/termhive/` o `$TMPDIR`, permisos `0700`) y archivo `0600`.
+- Socket Unix en un directorio privado (`$XDG_RUNTIME_DIR/hivetty/` o `$TMPDIR`, permisos `0700`) y archivo `0600`.
 - En Windows, named pipe con una DACL solo para el usuario actual y `PIPE_REJECT_REMOTE_CLIENTS`.
-- **Token** aleatorio de 128 bits por arranque en `TERMHIVE_IPC_TOKEN`, que cada mensaje debe incluir. Un proceso de otro usuario no puede hablar con el IPC, y uno del mismo usuario sin el entorno de un panel tampoco.
+- **Token** aleatorio de 128 bits por arranque en `HIVETTY_IPC_TOKEN`, que cada mensaje debe incluir. Un proceso de otro usuario no puede hablar con el IPC, y uno del mismo usuario sin el entorno de un panel tampoco.
 - Los hooks solo pueden **informar** de eventos. Escribir en un PTY (`send-text`) o abrir paneles por IPC está **desactivado** por defecto (`remote_control = false`).
 - Mensajes con tamaño máximo (1 MiB) y esquema estricto; la versión del protocolo se negocia.
 
 ### 2.4 Hooks en la configuración de los agentes
-- Nunca se escribe sin mostrar el diff y pedir confirmación. Se crea una copia (`settings.json.termhive-bak`).
-- Las entradas llevan un marcador (`"termhive": true` o un comentario según el formato) para poder desinstalarlas exactamente.
+- Nunca se escribe sin mostrar el diff y pedir confirmación. Se crea una copia (`settings.json.hivetty-bak`).
+- Las entradas llevan un marcador (`"hivetty": true` o un comentario según el formato) para poder desinstalarlas exactamente.
 - El comando del hook usa la ruta absoluta del binario entre comillas y no interpola datos.
-- `termhive hook` **termina siempre en < 1 s con código 0**: si el IPC no responde, descarta el evento. Nunca bloquea ni rompe el agente.
+- `hivetty hook` **termina siempre en < 1 s con código 0**: si el IPC no responde, descarta el evento. Nunca bloquea ni rompe el agente.
 - El JSON de entrada se lee con un límite de tamaño.
 
 ### 2.5 Detección de proyecto

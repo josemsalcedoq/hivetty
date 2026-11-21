@@ -15,7 +15,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | SP-1b | libghostty-vt 1.0 con bindings mínimos propios sobre su ABI C en los 3 SO (incluye el toolchain de Zig en CI) | ¿Compensa cambiar de motor VT? | M |
 | SP-2 | ConPTY: ¿llegan OSC 7, 8, 9, 9;4, 52, 133, 777, **7501** y DECSET 2026? Con el ConPTY del sistema y con el incluido (NuGet 1.25); Windows 10 22H2 y 11; respuesta a `CSI 6n` con `INHERIT_CURSOR` | ¿El ConPTY incluido resuelve todo? | M |
 | SP-3 | egui y la rejilla propia en la misma pasada; IME en el panel; AccessKit leyendo la barra lateral | ¿Se valida el ADR 0003? | M |
-| SP-4 | Hook de Claude Code → `termhive hook` → IPC → cambio de estado; medir la latencia en los 3 SO; invocarlo desde WSL | ¿Se cumple N-08 (≤ 300 ms)? | M |
+| SP-4 | Hook de Claude Code → `hivetty hook` → IPC → cambio de estado; medir la latencia en los 3 SO; invocarlo desde WSL | ¿Se cumple N-08 (≤ 300 ms)? | M |
 | SP-5 | Parser de logs de Claude Code frente a `ccusage` con datos reales | ¿Cuadran los totales (±1%)? | S |
 | SP-6 | Calidad de texto: `swash` frente a los rasterizadores del SO; box-drawing por código; mezcla lineal o sRGB | ¿Qué pipeline de texto usamos? | M |
 | SP-7 | Paquetes sin firmar (`.dmg`, `.deb`, AppImage y MSI) generados en CI con la herramienta elegida | ¿Qué herramienta de empaquetado? | S |
@@ -28,7 +28,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 |---|---|---|---|---|
 | F0-01 | Instalar Rust (rustup, MSVC en Windows) y fijar la versión en `rust-toolchain.toml` | — | XS | `cargo --version` en las máquinas de desarrollo |
 | F0-02 | Workspace con los crates de `architecture.md` vacíos y un crate `xtask` | F0-01 | S | `cargo build` en los 3 SO |
-| F0-03 | `[workspace.lints]`, `rustfmt.toml` y `clippy.toml`; `unsafe_code = "forbid"` salvo en `th-platform` | F0-02 | XS | clippy limpio |
+| F0-03 | `[workspace.lints]`, `rustfmt.toml` y `clippy.toml`; `unsafe_code = "forbid"` salvo en `hv-platform` | F0-02 | XS | clippy limpio |
 | F0-04 | CI: fmt, clippy, nextest y deny; matriz macOS, Ubuntu y Windows; caché; Actions fijadas por SHA | F0-02 | M | PR vacío en verde |
 | F0-05 | `deny.toml` (licencias, advisories, orígenes) | F0-02 | XS | `cargo deny check` en verde |
 | F0-06 | Decidir la licencia (`docs/licensing.md`) y añadir `LICENSE-*` | — | XS | archivos presentes |
@@ -37,7 +37,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | F0-09 | Renovate o Dependabot (crates y Actions) y `cargo-audit` diario | F0-04 | XS | primer PR automático |
 | F0-10 | Revisar e instalar las skills elegidas (`docs/skills.md`) | — | S | revisión anotada en `docs/skills.md` |
 | F0-11 | `xtask`: `golden-update`, `fixtures`, `dist`, `bench` | F0-02 | S | `cargo xtask --help` |
-| F0-12 | Subcomando `termhive --doctor` (esqueleto) | F0-02 | XS | imprime la versión, el SO y la GPU |
+| F0-12 | Subcomando `hivetty --doctor` (esqueleto) | F0-02 | XS | imprime la versión, el SO y la GPU |
 
 ## F1 — Terminal mínimo usable
 
@@ -45,12 +45,12 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 |---|---|---|---|---|---|
 | F1-01 | Ventana `winit`: DPI por monitor, redimensionado, foco, cierre y cambio de monitor | W-01 | F0 | M | ventana estable en los 3 SO |
 | F1-02 | Barra de título personalizada: semáforos en macOS, botones en Windows y CSD en Wayland | W-02 | F1-01 | M | arrastrar, doble clic y maximizar funcionan |
-| F1-03 | `th-pty`: abrir, leer y escribir, redimensionar, matar el árbol (grupos de procesos en Unix, *job objects* en Windows) | — | F0 | L | test de integración en los 3 SO |
+| F1-03 | `hv-pty`: abrir, leer y escribir, redimensionar, matar el árbol (grupos de procesos en Unix, *job objects* en Windows) | — | F0 | L | test de integración en los 3 SO |
 | F1-04 | Detección de shell y perfiles (pwsh, powershell, cmd, WSL y Git Bash); shell de login en macOS | — | F1-03 | S | test por SO |
-| F1-05 | Variables de entorno del PTY (`TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERMHIVE_*`) | — | F1-03 | XS | `env` dentro de la shell |
-| F1-06 | `th-term`: envolver `Term`, hilo lector con lotes y *backpressure*, instantáneas sin bloqueo | P-01 | F1-03 | L | `cat` de 1 GB no congela (N-12) |
+| F1-05 | Variables de entorno del PTY (`TERM`, `COLORTERM`, `TERM_PROGRAM`, `HIVETTY_*`) | — | F1-03 | XS | `env` dentro de la shell |
+| F1-06 | `hv-term`: envolver `Term`, hilo lector con lotes y *backpressure*, instantáneas sin bloqueo | P-01 | F1-03 | L | `cat` de 1 GB no congela (N-12) |
 | F1-07 | Salida sincronizada (DECSET 2026) con timeout | P-02 | F1-06 | M | grabación de Claude Code sin frames rotos |
-| F1-08 | `th-render`: dispositivo wgpu, selección de backend, pérdida de dispositivo y respaldo | N-22 | F1-01 | M | arranca con `TERMHIVE_RENDERER=gl/software` |
+| F1-08 | `hv-render`: dispositivo wgpu, selección de backend, pérdida de dispositivo y respaldo | N-22 | F1-01 | M | arranca con `HIVETTY_RENDERER=gl/software` |
 | F1-09 | Atlas de glifos (`swash` + `etagere`), variantes, emoji en color y fallback (`cosmic-text`/`fontdb`) | — | F1-08 | L | pantalla de prueba con CJK, emoji y Nerd Font |
 | F1-10 | Box-drawing y powerline dibujados por código | — | F1-09 | M | dorado pixel-perfect |
 | F1-11 | Pasadas de fondos, glifos, cursor y decoraciones (subrayados de cinco estilos y color 58) | — | F1-09 | L | dorados |
@@ -68,7 +68,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | F1-23 | Campana (visual, sonido y atención del SO) | P-15 | F1-11 | S | — |
 | F1-24 | Zoom de fuente y recarga de la fuente | P-14 | F1-09 | S | — |
 | F1-25 | Arrastrar y soltar archivos → ruta entre comillas según la shell | P-06 | F1-04 | S | rutas con espacios en las 4 shells |
-| F1-26 | `th-config` mínimo: fuente, tema, shell y recarga en caliente | — | F0 | M | cambiar la fuente en caliente |
+| F1-26 | `hv-config` mínimo: fuente, tema, shell y recarga en caliente | — | F0 | M | cambiar la fuente en caliente |
 | F1-27 | Grabación (`--record`, asciicast v2) y reproductor para tests | — | F1-06 | S | reproducir el corpus |
 | F1-28 | Medidas de N-01…N-07 y N-12; informe en `docs/perf.md` | N-* | todo F1 | M | objetivos cumplidos o con issue abierto |
 | F1-29 | Interceptor de OSC/DCS/APC con partición por límite de OSC y anclaje a filas (`vt-compliance.md` §1) | P-01 | F1-06 | L | tests con bytes de OSC 7/9/133/777/7501 mezclados con texto |
@@ -100,7 +100,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | F3-02 | Script de bash (`--rcfile` envolvente que carga `~/.bashrc`) | C-01 | F1 | M |
 | F3-03 | Script de fish (`XDG_DATA_DIRS` + `vendor_conf.d`) | C-01 | F1 | S |
 | F3-04 | Script de PowerShell 7 y 5.1 (prompt envuelto y PSReadLine) | C-01 | F1 | M |
-| F3-05 | Recibir OSC 133 y OSC 7 en `th-term` (interceptor si `alacritty_terminal` no los expone) | C-02, C-03 | F3-01 | M |
+| F3-05 | Recibir OSC 133 y OSC 7 en `hv-term` (interceptor si `alacritty_terminal` no los expone) | C-02, C-03 | F3-01 | M |
 | F3-06 | Plan B por IPC si SP-2 demostró que ConPTY filtra las secuencias | — | SP-2 | M |
 | F3-07 | Marcas de prompt en el margen, saltar entre prompts y copiar la última salida | P-13 | F3-05 | M |
 | F3-08 | Heredar el cwd en pestañas y paneles nuevos | C-03 | F3-05 | S |
@@ -115,12 +115,12 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 | ID | Tarea | Req | Depende | Tam. |
 |---|---|---|---|---|
-| F4-01 | `th-agents`: perfiles TOML y perfiles incluidos (los 11 agentes) | A-01 | F2 | M |
+| F4-01 | `hv-agents`: perfiles TOML y perfiles incluidos (los 11 agentes) | A-01 | F2 | M |
 | F4-02 | Detección de agentes instalados (PATH y rutas por SO) | A-02 | F4-01 | S |
 | F4-03 | Detección por árbol de procesos (`sysinfo`, 1 s) | A-03 | F4-01 | M |
 | F4-04 | Máquina de estados con prioridades de fuente y tests exhaustivos | A-04, A-05 | F4-01 | M |
-| F4-05 | `th-ipc`: servidor (socket o pipe), token y protocolo versionado | — | F0 | L |
-| F4-06 | Subcomando `termhive hook`: lee stdin, reenvía, sale en < 1 s y siempre con 0 | A-05 | F4-05 | S |
+| F4-05 | `hv-ipc`: servidor (socket o pipe), token y protocolo versionado | — | F0 | L |
+| F4-06 | Subcomando `hivetty hook`: lee stdin, reenvía, sale en < 1 s y siempre con 0 | A-05 | F4-05 | S |
 | F4-07 | Instalador y desinstalador de hooks con diff, copia y marcador (Claude Code primero; después el resto) | A-06 | F4-06 | L |
 | F4-08 | Fuente 2: OSC 9/777, título y BEL → eventos de estado | A-05 | F4-04 | S |
 | F4-09 | Fuente 3: heurística de actividad | A-05, A-19 | F4-04 | S |
@@ -153,7 +153,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 | ID | Tarea | Req | Depende | Tam. |
 |---|---|---|---|---|
-| F5-01 | `th-usage`: esquema SQLite, migraciones (`rusqlite_migration`) y cursores de ingesta | — | F0 | M |
+| F5-01 | `hv-usage`: esquema SQLite, migraciones (`rusqlite_migration`) y cursores de ingesta | — | F0 | M |
 | F5-02 | Parser de Claude Code con dedupe y fixtures | ADR 0005 | F5-01 | M |
 | F5-03 | Parsers de Codex, Gemini CLI, opencode y los demás con datos disponibles | ADR 0005 | F5-01 | L |
 | F5-04 | Vigilancia de archivos e ingesta incremental en segundo plano | N-09 | F5-02 | M |
@@ -198,14 +198,14 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 | ID | Tarea | Req |
 |---|---|---|
-| F7-01 | `termhive-mux`: servidor de PTYs separado y reconexión | A-13, ADR 0002 |
+| F7-01 | `hivetty-mux`: servidor de PTYs separado y reconexión | A-13, ADR 0002 |
 | F7-02 | Imágenes inline (Kitty, iTerm2, sixel) | P-19 |
 | F7-03 | Vista de cambios (diff) por sesión | A-15 |
 | F7-04 | Puertos detectados → navegador (globo) | A-24, W-07 |
 | F7-05 | Modo copia vi y selección rápida con pistas | P-11 |
 | F7-06 | Modo desplegable (quake), siempre encima | W-11 |
 | F7-07 | Plugins WASM | — |
-| F7-08 | Control remoto por CLI (`termhive cli send-text`…) con permisos | — |
+| F7-08 | Control remoto por CLI (`hivetty cli send-text`…) con permisos | — |
 | F7-09 | Accesibilidad completa del texto (UIA, NSAccessibility, AT-SPI) | §8 UI |
 | F7-10 | Compartir o exportar la transcripción de una sesión | A-22 |
 | F7-11 | Cola de sesiones y límite de concurrencia | A-23 |

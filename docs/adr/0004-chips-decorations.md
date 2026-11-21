@@ -12,7 +12,7 @@ En la captura, el prompt muestra *chips* con el logo de la tecnología del proye
 1. La **shell** solo informa: OSC 133 (marcas de prompt) y OSC 7 (directorio).
 2. El **terminal** (Rust) detecta la tecnología (`docs/requirements.md` §8), lee la rama git y las versiones, y decide qué chips caben.
 3. Los chips se pintan como **decoraciones ancladas a una línea** de la rejilla, la del inicio del prompt (OSC 133;A). Se dibujan en una franja sobre el prompt reservada por la shell:
-   - La integración de shell imprime una **línea vacía reservada** antes del prompt solo si el terminal lo pide (variable `TERMHIVE_CHIPS=1`).
+   - La integración de shell imprime una **línea vacía reservada** antes del prompt solo si el terminal lo pide (variable `HIVETTY_CHIPS=1`).
    - El terminal pinta los chips sobre esa línea. Al hacer scroll se mueven con ella porque están anclados a la línea, no a la pantalla.
 4. Si un chip no cabe en el ancho del panel, **no se pinta** (se evalúan en orden y se para en el primero que no cabe).
 5. Los logos son SVG en `assets/icons/tech/`, rasterizados con `resvg` al atlas de iconos según el DPI.

@@ -14,7 +14,7 @@ Necesitamos un terminal nativo para macOS, Ubuntu y Windows, con render por GPU 
 | Ventana | `winit` 0.30.13 | Apache-2.0 | **Quedarse en 0.30** hasta que egui-winit y accesskit_winit soporten 0.31 (en beta; trae mejoras de IME). |
 | GPU | `wgpu` 30.0.x | MIT/Apache | |
 | Emulación VT | `alacritty_terminal` 0.26.0 (vte 0.15) | Apache-2.0 | con un **interceptor propio** de OSC/DCS/APC (`docs/vt-compliance.md` §1), sin su `EventLoop` |
-| PTY | `portable-pty` 0.9.0 | MIT | lleva meses sin publicarse: los arreglos de Windows (paso a windows-sys, `kill()`) solo están en main de WezTerm. Usar **dependencia git fijada a un commit** o un fork propio (`th-pty`) |
+| PTY | `portable-pty` 0.9.0 | MIT | lleva meses sin publicarse: los arreglos de Windows (paso a windows-sys, `kill()`) solo están en main de WezTerm. Usar **dependencia git fijada a un commit** o un fork propio (`hv-pty`) |
 | ConPTY | **`conpty.dll` + `OpenConsole.exe` incluidos** (NuGet `Microsoft.Windows.Console.ConPTY` 1.25.x, MIT, Windows 1809+) | MIT | como hace Zed. Deja pasar las secuencias sin modificarlas (ver `docs/platforms.md`) |
 | UI | `egui` / `egui-wgpu` / `egui-winit` 0.37 | MIT/Apache | ADR 0003. egui-wgpu 0.37 usa wgpu 30: **un único Device** compartido |
 | Texto | `cosmic-text` 0.19 (shaping con harfrust/skrifa) + `swash` 0.2.10 (rasterizado); `glyphon` 0.12 como referencia o para el texto de la UI | MIT/Apache | glyphon 0.12 usa wgpu 30 y cosmic-text 0.19 |
@@ -36,7 +36,7 @@ Inconvenientes hoy:
 - Hace falta el toolchain de Zig para compilar.
 - No es thread-safe: hay que encerrarla en un hilo dueño.
 
-**Decisión:** empezar con AT (Rust puro, ecosistema probado en Zed), pero encapsulado tras el trait `VtEngine` en `th-term`. **SP-1b** (2 días) monta libghostty-vt con bindings propios mínimos sobre la ABI 1.0 en los 3 SO. Si el coste es razonable, se reconsidera antes de F3, porque ahorraría el interceptor, la codificación de teclado y las imágenes.
+**Decisión:** empezar con AT (Rust puro, ecosistema probado en Zed), pero encapsulado tras el trait `VtEngine` en `hv-term`. **SP-1b** (2 días) monta libghostty-vt con bindings propios mínimos sobre la ABI 1.0 en los 3 SO. Si el coste es razonable, se reconsidera antes de F3, porque ahorraría el interceptor, la codificación de teclado y las imágenes.
 
 ## Otras alternativas descartadas
 | Opción | Motivo |

@@ -3,22 +3,22 @@
 ## 1. Workspace
 
 ```
-termhive/
+hivetty/
 ├── Cargo.toml                 # [workspace], [workspace.lints], [workspace.dependencies]
 ├── rust-toolchain.toml
 ├── crates/
-│   ├── th-app/                # binario `termhive`: ventana, bucle de eventos, composición, subcomandos (hook, cli, doctor)
-│   ├── th-term/               # trait VtEngine; impl. con alacritty_terminal; interceptor de OSC/DCS/APC; lector de PTY
-│   ├── th-pty/                # fork o envoltorio de portable-pty; ConPTY incluido; matar árboles de procesos
-│   ├── th-render/             # wgpu: atlas, celdas, cursor, decoraciones, box-drawing; renderer por software
-│   ├── th-ui/                 # egui: barra lateral, pestañas, bandeja de atención, diálogos, panel de uso
-│   ├── th-agents/             # perfiles, detección, máquina de estados, instalador de hooks, reanudar, worktrees
-│   ├── th-usage/              # parsers de logs, SQLite, agregaciones, receptor OTLP opcional
-│   ├── th-shell/              # scripts de integración, detección de tecnología, chips
-│   ├── th-ipc/                # servidor y cliente IPC; protocolo versionado (postcard)
-│   ├── th-config/             # TOML, esquema, temas, atajos, recarga en caliente
-│   ├── th-platform/           # código por SO (único crate con unsafe): AUMID, badge, ITaskbarList3, NSDockTile, TTS…
-│   └── th-fake-agent/         # binario de pruebas (docs/testing.md §4)
+│   ├── hv-app/                # binario `hivetty`: ventana, bucle de eventos, composición, subcomandos (hook, cli, doctor)
+│   ├── hv-term/               # trait VtEngine; impl. con alacritty_terminal; interceptor de OSC/DCS/APC; lector de PTY
+│   ├── hv-pty/                # fork o envoltorio de portable-pty; ConPTY incluido; matar árboles de procesos
+│   ├── hv-render/             # wgpu: atlas, celdas, cursor, decoraciones, box-drawing; renderer por software
+│   ├── hv-ui/                 # egui: barra lateral, pestañas, bandeja de atención, diálogos, panel de uso
+│   ├── hv-agents/             # perfiles, detección, máquina de estados, instalador de hooks, reanudar, worktrees
+│   ├── hv-usage/              # parsers de logs, SQLite, agregaciones, receptor OTLP opcional
+│   ├── hv-shell/              # scripts de integración, detección de tecnología, chips
+│   ├── hv-ipc/                # servidor y cliente IPC; protocolo versionado (postcard)
+│   ├── hv-config/             # TOML, esquema, temas, atajos, recarga en caliente
+│   ├── hv-platform/           # código por SO (único crate con unsafe): AUMID, badge, ITaskbarList3, NSDockTile, TTS…
+│   └── hv-fake-agent/         # binario de pruebas (docs/testing.md §4)
 ├── xtask/                     # golden-update, fixtures, dist, bench, conpty-fetch
 ├── assets/
 │   ├── shell/                 # zsh, bash, fish, pwsh
@@ -32,9 +32,9 @@ termhive/
 ```
 
 Reglas de dependencias (se comprueban en CI con `cargo-deny` + un test de `cargo metadata`):
-- `th-ui` y `th-render` **no** dependen de `th-pty` (hablan con los paneles por `PaneHost`).
-- Solo `th-platform` usa `unsafe`.
-- `th-usage` no depende de nada gráfico (se puede usar desde la CLI).
+- `hv-ui` y `hv-render` **no** dependen de `hv-pty` (hablan con los paneles por `PaneHost`).
+- Solo `hv-platform` usa `unsafe`.
+- `hv-usage` no depende de nada gráfico (se puede usar desde la CLI).
 
 ## 2. Traits principales
 
@@ -72,12 +72,12 @@ trait PaneHost {
              └────────────────┬───────────────────────────────────────────────┘
                               │ HostEvent::Dirty / eventos (canal + EventLoopProxy, lotes de 4 ms)
 ┌──────────────────────┐      ▼
-│ hilo principal       │  winit + egui + th-render: un frame por vsync si hay algo sucio;
+│ hilo principal       │  winit + egui + hv-render: un frame por vsync si hay algo sucio;
 │ (no hace I/O)        │  copia la instantánea con el lock corto y pinta sin el lock (patrón de Zed)
 └─────────┬────────────┘
           │ comandos (escribir, resize, kill) ─► PaneHost
 ┌─────────┴───────┐ ┌──────────────────────┐ ┌───────────────────┐ ┌─────────────────┐
-│ hilo IPC        │ │ hilo th-usage        │ │ sondeo de procesos│ │ hilo de shell/  │
+│ hilo IPC        │ │ hilo hv-usage        │ │ sondeo de procesos│ │ hilo de shell/  │
 │ (hooks, cli)    │ │ notify + SQLite (W)  │ │ (sysinfo, 1 s)    │ │ chips (notify)  │
 └─────────────────┘ └──────────────────────┘ └───────────────────┘ └─────────────────┘
 ```
@@ -106,7 +106,7 @@ struct Tab { root: PaneNode, title_override: Option<String> }
 enum PaneNode { Leaf(PaneId), Split { axis: Axis, ratio: f32, a: Box<PaneNode>, b: Box<PaneNode> } }
 
 struct AgentSession {
-    id: SessionId,                   // = TERMHIVE_SESSION_ID
+    id: SessionId,                   // = HIVETTY_SESSION_ID
     agent_session_id: Option<String>,// id propio del agente (para resume)
     agent: AgentId,
     pane: Option<PaneId>,            // None si está archivada
@@ -130,6 +130,6 @@ struct AgentSession {
 |---|---|---|
 | Configuración | directorio de config | `config.toml` |
 | Sesiones, layout, uso, intervalos | directorio de datos | `state.sqlite` (WAL) |
-| Logs de la app | directorio de estado o caché | `termhive.log` con rotación (`tracing-appender`) |
+| Logs de la app | directorio de estado o caché | `hivetty.log` con rotación (`tracing-appender`) |
 | Crashes | directorio de estado | `crash-<fecha>.txt` |
 | Grabaciones de depuración | donde diga el usuario | `.cast` (asciicast v2) |

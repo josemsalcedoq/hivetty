@@ -9,8 +9,8 @@ Hace falta una interfaz rica (listas, búsqueda, menús, tooltips, gráficos, ac
 
 ## Decisión
 
-- La **rejilla del terminal** la pinta `th-render` (instancing propio en wgpu).
-- **Todo lo demás** se hace con `egui` sobre `egui-wgpu`, en el mismo dispositivo y la misma pasada de render. Los paneles de terminal son "huecos" en el layout de egui donde `th-render` dibuja.
+- La **rejilla del terminal** la pinta `hv-render` (instancing propio en wgpu).
+- **Todo lo demás** se hace con `egui` sobre `egui-wgpu`, en el mismo dispositivo y la misma pasada de render. Los paneles de terminal son "huecos" en el layout de egui donde `hv-render` dibuja.
 - Gráficos del panel de uso: dibujados con el `Painter` de egui (barras, sparklines y mapa de calor son formas simples). No hace falta `egui_plot`.
 - Accesibilidad: AccessKit integrado en egui.
 

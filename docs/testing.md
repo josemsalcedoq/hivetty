@@ -12,7 +12,7 @@
 | Integración de PTY | por SO | lanzar la shell, escribir y leer, redimensionar, matar el árbol de procesos, ConPTY | CI en las 3 plataformas |
 | Integración de shell | zsh, bash, fish y pwsh instalados en CI | OSC 133/7 emitidos correctamente, inyección sin romper la configuración del usuario | CI |
 | UI | `egui_kittest` | barra lateral, filtros, panel de uso; aserciones sobre el árbol de accesibilidad | CI |
-| End-to-end | app real + `th-fake-agent` + CLI por IPC | flujos completos (ver §4) | CI (Linux con Xvfb, Windows y macOS) |
+| End-to-end | app real + `hv-fake-agent` + CLI por IPC | flujos completos (ver §4) | CI (Linux con Xvfb, Windows y macOS) |
 | Conformidad VT | `vttest` (manual), `esctest2` (automatizado), `ucs-detect` (anchura Unicode) | secuencias de escape y anchura de caracteres | semanal en CI y antes de cada release |
 | Fuzzing | `cargo-fuzz` (libFuzzer) | alimentación del parser, OSC propios, parsers de logs y decodificador IPC | nocturno, 30 min por objetivo |
 | Rendimiento | `criterion`, `vtebench`, `hyperfine` | throughput, coste por frame, arranque | CI con presupuesto; aviso si empeora > 10% |
@@ -23,7 +23,7 @@
 
 ## 2. Grabaciones de sesiones reales
 
-- `termhive --record <archivo>` guarda la salida del PTY con marcas de tiempo en formato **asciicast v2** (compatible con asciinema).
+- `hivetty --record <archivo>` guarda la salida del PTY con marcas de tiempo en formato **asciicast v2** (compatible con asciinema).
 - Corpus en `tests/fixtures/recordings/` con sesiones reales anonimizadas de Claude Code, Codex, Gemini CLI, `vim`, `htop`, `tmux`, `npm install` y `cargo build`.
 - Usos:
   1. Regresión del parser (snapshot de la rejilla al final de la reproducción).
@@ -41,7 +41,7 @@
 
 Si un runner no tiene adaptador, esas pruebas se marcan como omitidas (no fallidas) y se registra el aviso.
 
-## 4. Agente simulado (`th-fake-agent`)
+## 4. Agente simulado (`hv-fake-agent`)
 
 Binario de prueba que imita a un agente de forma determinista a partir de un guion YAML:
 
@@ -60,7 +60,7 @@ steps:
 usage_log: claude-jsonl                    # escribe un log de uso falso compatible
 ```
 
-Los tests end-to-end lanzan `termhive` con una configuración temporal, crean sesiones del agente simulado con `termhive cli` y comprueban por IPC (`termhive cli list --json`):
+Los tests end-to-end lanzan `hivetty` con una configuración temporal, crean sesiones del agente simulado con `hivetty cli` y comprueban por IPC (`hivetty cli list --json`):
 - transiciones de estado y tiempos (≤ 300 ms con hooks),
 - contadores de filtros, agrupación por proyecto y archivado,
 - notificaciones (capturadas por un backend de prueba),

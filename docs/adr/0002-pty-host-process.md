@@ -23,7 +23,7 @@ trait PaneHost {
 ```
 
 1. **Paso 1 (F1–F5):** `InProcessHost`, con los PTYs y los `Term` en hilos dentro de la app.
-2. **Paso 2 (F7, v1.1):** `termhive-mux`, un proceso servidor por usuario que posee los PTYs, el estado VT de cada panel, la máquina de estados de agentes y el servidor IPC de hooks. La UI se conecta con `RemoteHost` por el mismo transporte local (socket Unix o named pipe).
+2. **Paso 2 (F7, v1.1):** `hivetty-mux`, un proceso servidor por usuario que posee los PTYs, el estado VT de cada panel, la máquina de estados de agentes y el servidor IPC de hooks. La UI se conecta con `RemoteHost` por el mismo transporte local (socket Unix o named pipe).
    - Protocolo: mensajes con prefijo de longitud serializados con `postcard`, versionados.
    - El servidor envía **diferencias de líneas** (no bytes crudos), como el multiplexor de WezTerm, para que reconectar sea instantáneo.
    - El servidor se cierra solo si no hay paneles ni clientes durante 30 s.

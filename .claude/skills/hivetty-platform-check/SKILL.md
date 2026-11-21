@@ -1,16 +1,16 @@
 ---
-name: termhive-platform-check
-description: Checklist to run before finishing any termhive change that touches PTY, input, windows, paths, IPC, fonts, notifications or packaging, so it keeps working on macOS, Ubuntu and Windows.
+name: hivetty-platform-check
+description: Checklist to run before finishing any hivetty change that touches PTY, input, windows, paths, IPC, fonts, notifications or packaging, so it keeps working on macOS, Ubuntu and Windows.
 ---
 
-# Cross-platform check for termhive
+# Cross-platform check for hivetty
 
 Before you call a change done, go through every item that applies and say which ones you checked.
 
 ## Code
 - Paths: use `std::path` and `directories::ProjectDirs`. Never use hardcoded `/` or `~`; expand `~` with `dirs::home_dir()`.
 - Line endings: the PTY can send `\r\n` on Windows. Parsers must accept both.
-- Platform-specific code goes in `th-platform` behind `#[cfg(target_os = "...")]`, with an implementation (even a no-op) for all three systems.
+- Platform-specific code goes in `hv-platform` behind `#[cfg(target_os = "...")]`, with an implementation (even a no-op) for all three systems.
 - IPC: Unix socket on macOS/Linux, named pipe on Windows, both through `interprocess`.
 - Shortcuts: use `Primary` (Cmd on macOS, Ctrl+Shift elsewhere). Never hardcode `Cmd` or `Ctrl`.
 - Processes: executable names end in `.exe` on Windows (`claude` vs `claude.exe`).
