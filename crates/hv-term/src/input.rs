@@ -233,10 +233,13 @@ pub enum Quoting {
 impl Quoting {
     /// Picks the quoting style from the program name (`pwsh`, `powershell.exe`, `cmd`…).
     pub fn for_program(program: &str) -> Self {
-        let name = std::path::Path::new(program)
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
+        // Split on both separators: a Windows path must work the same on every OS.
+        let file = program.rsplit(['/', '\\']).next().unwrap_or(program);
+        let name = file
+            .strip_suffix(".exe")
+            .or_else(|| file.strip_suffix(".EXE"))
+            .unwrap_or(file)
+            .to_ascii_lowercase();
         match name.as_str() {
             "pwsh" | "powershell" => Self::PowerShell,
             "cmd" => Self::Cmd,
