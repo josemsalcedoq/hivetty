@@ -133,7 +133,13 @@ fn main() -> ExitCode {
     )
     .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let command = match parse_args(&args) {
+    let parsed = parse_args(&args);
+    // Everything except opening the window prints to the console; in Windows release builds
+    // (GUI subsystem) that needs the parent console attached first.
+    if !matches!(parsed, Ok(Command::Run(_))) {
+        hv_platform::attach_parent_console();
+    }
+    let command = match parsed {
         Ok(c) => c,
         Err(message) => {
             println!("error: {message}\n\n{HELP}");

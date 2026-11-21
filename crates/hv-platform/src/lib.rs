@@ -2,3 +2,30 @@
 
 // Platform APIs (Win32, Cocoa, D-Bus) need FFI; unsafe is confined to this crate.
 #![allow(unsafe_code)]
+
+/// Makes `println!` reach the console the app was started from.
+///
+/// Release builds on Windows use the GUI subsystem (no console window of their own), so
+/// command-line subcommands like `--doctor` or `usage` would print nowhere. Attaching to the
+/// parent process's console fixes that. It does nothing on other platforms, or when there is
+/// no parent console (started from Explorer).
+pub fn attach_parent_console() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+        // SAFETY: AttachConsole has no preconditions; failure (no parent console, or already
+        // attached as in debug builds) is reported through the return value and ignored.
+        unsafe {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn attaching_twice_is_harmless() {
+        super::attach_parent_console();
+        super::attach_parent_console();
+    }
+}
