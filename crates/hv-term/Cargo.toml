@@ -10,3 +10,10 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+alacritty_terminal = "0.26"
+anyhow = "1.0.104"
+base64 = "0.23.1"
+hv-pty = { version = "0.0.0", path = "../hv-pty" }
+log = "0.4.35"

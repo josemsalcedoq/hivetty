@@ -14,3 +14,13 @@ path = "src/main.rs"
 
 [lints]
 workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+env_logger = "0.11.12"
+hv-pty = { version = "0.0.0", path = "../hv-pty" }
+hv-render = { version = "0.0.0", path = "../hv-render" }
+hv-term = { version = "0.0.0", path = "../hv-term" }
+log = "0.4.35"
+pollster = "1.0.3"
+winit = "0.30"

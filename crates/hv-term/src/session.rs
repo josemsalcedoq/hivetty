@@ -1,0 +1,365 @@
+//! A terminal session: a PTY, its reader thread and the VT emulator state.
+
+use std::fmt;
+use std::io::{Read, Write};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
+
+use alacritty_terminal::Term;
+use alacritty_terminal::event::{Event, EventListener};
+use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::term::{Config, TermMode};
+use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+use anyhow::Result;
+use hv_pty::{GridSize, Pty, SpawnSpec};
+
+use crate::input::KeyModes;
+use crate::osc::{Interceptor, TermEvent};
+use crate::snapshot::{self, Snapshot};
+
+/// Something the UI should react to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionEvent {
+    /// The program set the window/tab title (OSC 0/2).
+    Title(String),
+    /// The program reset the title.
+    ResetTitle,
+    /// BEL.
+    Bell,
+    /// A sequence caught by the interceptor (cwd, prompt marks, notifications, OSC 7501…).
+    Term(TermEvent),
+    /// The child process exited (PTY closed).
+    Exited,
+}
+
+/// Forwards emulator events to the reader thread.
+#[derive(Clone)]
+struct EventProxy(Sender<Event>);
+
+impl EventListener for EventProxy {
+    fn send_event(&self, event: Event) {
+        let _ = self.0.send(event);
+    }
+}
+
+struct Dims {
+    cols: usize,
+    rows: usize,
+}
+
+impl Dimensions for Dims {
+    fn total_lines(&self) -> usize {
+        self.rows
+    }
+    fn screen_lines(&self) -> usize {
+        self.rows
+    }
+    fn columns(&self) -> usize {
+        self.cols
+    }
+}
+
+struct TermState {
+    term: Term<EventProxy>,
+    processor: Processor<StdSyncHandler>,
+    interceptor: Interceptor,
+    term_events: Receiver<Event>,
+}
+
+/// A running terminal session.
+pub struct Session {
+    state: Arc<Mutex<TermState>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    pty: Mutex<Pty>,
+    events: Receiver<SessionEvent>,
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Session").finish_non_exhaustive()
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Session {
+    /// Spawns `spec` and starts reading its output. `wake` is called (from the reader thread)
+    /// whenever the screen changed or an event is ready, so the UI can schedule a redraw.
+    pub fn spawn(
+        spec: &SpawnSpec,
+        size: GridSize,
+        wake: impl Fn() + Send + 'static,
+    ) -> Result<Self> {
+        let (pty, io) = Pty::spawn(spec, size)?;
+        let (term_tx, term_rx) = mpsc::channel();
+        let dims = Dims {
+            cols: usize::from(size.cols.max(1)),
+            rows: usize::from(size.rows.max(1)),
+        };
+        let term = Term::new(Config::default(), &dims, EventProxy(term_tx));
+        let state = Arc::new(Mutex::new(TermState {
+            term,
+            processor: Processor::new(),
+            interceptor: Interceptor::new(),
+            term_events: term_rx,
+        }));
+        let writer = Arc::new(Mutex::new(io.writer));
+        let (events_tx, events_rx) = mpsc::channel();
+
+        let thread_state = Arc::clone(&state);
+        let thread_writer = Arc::clone(&writer);
+        std::thread::Builder::new()
+            .name("hivetty-pty-reader".into())
+            .spawn(move || {
+                reader_loop(io.reader, &thread_state, &thread_writer, &events_tx, &wake)
+            })?;
+
+        Ok(Self {
+            state,
+            writer,
+            pty: Mutex::new(pty),
+            events: events_rx,
+        })
+    }
+
+    /// Sends bytes to the program (keystrokes, paste).
+    pub fn write(&self, bytes: &[u8]) {
+        let mut writer = lock(&self.writer);
+        let _ = writer.write_all(bytes).and_then(|()| writer.flush());
+    }
+
+    /// Resizes the emulator and the PTY.
+    pub fn resize(&self, size: GridSize) {
+        {
+            let mut state = lock(&self.state);
+            let dims = Dims {
+                cols: usize::from(size.cols.max(1)),
+                rows: usize::from(size.rows.max(1)),
+            };
+            state.term.resize(dims);
+        }
+        if let Err(err) = lock(&self.pty).resize(size) {
+            log::warn!("PTY resize failed: {err:#}");
+        }
+    }
+
+    /// Copies the visible screen.
+    pub fn snapshot(&self) -> Snapshot {
+        snapshot::take(&lock(&self.state).term)
+    }
+
+    /// Modes that affect key encoding.
+    pub fn key_modes(&self) -> KeyModes {
+        let state = lock(&self.state);
+        KeyModes {
+            app_cursor: state.term.mode().contains(TermMode::APP_CURSOR),
+        }
+    }
+
+    /// Whether the program enabled the alternate screen (full-screen TUIs).
+    pub fn alt_screen(&self) -> bool {
+        lock(&self.state).term.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    /// Scrolls the view by `lines` (positive = up into the scrollback).
+    pub fn scroll(&self, lines: i32) {
+        lock(&self.state).term.scroll_display(Scroll::Delta(lines));
+    }
+
+    /// Jumps back to the bottom of the scrollback.
+    pub fn scroll_to_bottom(&self) {
+        lock(&self.state).term.scroll_display(Scroll::Bottom);
+    }
+
+    /// Deadline of a pending synchronized update (DECSET 2026), if any.
+    pub fn sync_deadline(&self) -> Option<Instant> {
+        lock(&self.state).processor.sync_timeout().sync_timeout()
+    }
+
+    /// Ends a synchronized update whose deadline has passed. Returns true if it did.
+    pub fn flush_expired_sync(&self) -> bool {
+        let mut state = lock(&self.state);
+        let TermState {
+            term, processor, ..
+        } = &mut *state;
+        match processor.sync_timeout().sync_timeout() {
+            Some(deadline) if deadline <= Instant::now() => {
+                processor.stop_sync(term);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Takes the events that arrived since the last call.
+    pub fn drain_events(&self) -> Vec<SessionEvent> {
+        self.events.try_iter().collect()
+    }
+
+    /// Kills the program.
+    pub fn kill(&self) {
+        let _ = lock(&self.pty).kill();
+    }
+}
+
+fn reader_loop(
+    mut reader: Box<dyn Read + Send>,
+    state: &Mutex<TermState>,
+    writer: &Mutex<Box<dyn Write + Send>>,
+    events: &Sender<SessionEvent>,
+    wake: &(impl Fn() + Send),
+) {
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        let bytes = &buf[..n];
+        let mut out = Vec::new();
+        let sync_pending = {
+            let mut guard = lock(state);
+            let TermState {
+                term,
+                processor,
+                interceptor,
+                term_events,
+            } = &mut *guard;
+            out.extend(interceptor.feed(bytes).into_iter().map(SessionEvent::Term));
+            processor.advance(term, bytes);
+            for event in term_events.try_iter() {
+                match event {
+                    // Answers to queries (DA, DSR/CSI 6n, colors…). ConPTY blocks until it gets
+                    // the cursor position report, so this must go out right away.
+                    Event::PtyWrite(text) => {
+                        let mut w = lock(writer);
+                        let _ = w.write_all(text.as_bytes()).and_then(|()| w.flush());
+                    }
+                    Event::Title(title) => out.push(SessionEvent::Title(title)),
+                    Event::ResetTitle => out.push(SessionEvent::ResetTitle),
+                    Event::Bell => out.push(SessionEvent::Bell),
+                    _ => {}
+                }
+            }
+            processor.sync_timeout().sync_timeout().is_some()
+        };
+        for event in out {
+            let _ = events.send(event);
+        }
+        // While a synchronized update is open the screen is mid-frame: don't redraw yet.
+        // The UI flushes it when the deadline passes (see `flush_expired_sync`).
+        if !sync_pending {
+            wake();
+        }
+    }
+    let _ = events.send(SessionEvent::Exited);
+    wake();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Feeds bytes straight into an emulator (no PTY) and returns the snapshot.
+    fn render(bytes: &[u8], cols: usize, rows: usize) -> Snapshot {
+        let (tx, _rx) = mpsc::channel();
+        let mut term = Term::new(Config::default(), &Dims { cols, rows }, EventProxy(tx));
+        let mut processor: Processor<StdSyncHandler> = Processor::new();
+        processor.advance(&mut term, bytes);
+        snapshot::take(&term)
+    }
+
+    #[test]
+    fn plain_text_and_newlines() {
+        let snap = render(b"hello\r\nworld", 20, 4);
+        assert_eq!(snap.row_text(0), "hello");
+        assert_eq!(snap.row_text(1), "world");
+        assert_eq!(snap.cursor.map(|c| (c.row, c.col)), Some((1, 5)));
+    }
+
+    #[test]
+    fn sgr_colors_are_resolved() {
+        let snap = render(b"\x1b[31mR\x1b[38;2;1;2;3mT\x1b[7mI", 10, 2);
+        assert_eq!(snap.cell(0, 0).fg, crate::snapshot::palette::indexed(1));
+        assert_eq!(snap.cell(0, 1).fg, Rgb8Ext::rgb(1, 2, 3));
+        // Inverse swaps fg and bg.
+        assert_eq!(snap.cell(0, 2).bg, Rgb8Ext::rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn wide_characters_take_two_cells() {
+        let snap = render("日本".as_bytes(), 10, 1);
+        assert!(snap.cell(0, 1).wide_spacer);
+        assert_eq!(snap.row_text(0), "日本");
+    }
+
+    #[test]
+    fn synchronized_output_defers_rendering() {
+        let (tx, _rx) = mpsc::channel();
+        let mut term = Term::new(
+            Config::default(),
+            &Dims { cols: 10, rows: 2 },
+            EventProxy(tx),
+        );
+        let mut processor: Processor<StdSyncHandler> = Processor::new();
+        processor.advance(&mut term, b"\x1b[?2026hframe");
+        assert!(processor.sync_timeout().sync_timeout().is_some());
+        assert_eq!(
+            snapshot::take(&term).row_text(0),
+            "",
+            "content must not show mid-frame"
+        );
+        processor.advance(&mut term, b"\x1b[?2026l");
+        assert!(processor.sync_timeout().sync_timeout().is_none());
+        assert_eq!(snapshot::take(&term).row_text(0), "frame");
+    }
+
+    #[test]
+    fn session_runs_a_command_end_to_end() {
+        let (program, args) = if cfg!(windows) {
+            (
+                "cmd.exe".to_owned(),
+                vec!["/C".to_owned(), "echo hivetty-session-ok".to_owned()],
+            )
+        } else {
+            (
+                "/bin/sh".to_owned(),
+                vec!["-c".to_owned(), "echo hivetty-session-ok".to_owned()],
+            )
+        };
+        let spec = SpawnSpec {
+            program: Some(program),
+            args,
+            ..SpawnSpec::default()
+        };
+        let size = GridSize {
+            cols: 80,
+            rows: 10,
+            cell_width: 8,
+            cell_height: 16,
+        };
+        let session = Session::spawn(&spec, size, || {}).expect("spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let snap = session.snapshot();
+            if (0..snap.rows).any(|r| snap.row_text(r).contains("hivetty-session-ok")) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "output never appeared on screen");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Small helper so tests can build colors tersely.
+    struct Rgb8Ext;
+    impl Rgb8Ext {
+        fn rgb(r: u8, g: u8, b: u8) -> crate::snapshot::Rgb8 {
+            crate::snapshot::Rgb8 { r, g, b }
+        }
+    }
+}

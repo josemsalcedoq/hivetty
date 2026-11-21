@@ -10,3 +10,7 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+portable-pty = "0.9"
