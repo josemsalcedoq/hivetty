@@ -36,7 +36,7 @@ pub(crate) enum AppEvent {
 }
 
 /// Runs the terminal window until the shell exits or the window is closed.
-pub(crate) fn run(spec: SpawnSpec) -> Result<()> {
+pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result<()> {
     let event_loop = EventLoop::<AppEvent>::with_user_event()
         .build()
         .context("cannot start event loop")?;
@@ -63,6 +63,7 @@ pub(crate) fn run(spec: SpawnSpec) -> Result<()> {
     let mut app = App::new(spec, proxy);
     app.config = config;
     app.config_path = config_path;
+    app.record = record;
     event_loop.run_app(&mut app).context("event loop failed")?;
     if let Some(err) = app.fatal.take() {
         return Err(err);
@@ -91,6 +92,8 @@ struct App {
     config_path: Option<std::path::PathBuf>,
     /// Scrollback search in progress (F1-21).
     search: Option<SearchUi>,
+    /// `--record` target.
+    record: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -145,6 +148,7 @@ impl App {
             config: hv_config::Config::default(),
             config_path: None,
             search: None,
+            record: None,
         }
     }
 
@@ -185,6 +189,9 @@ impl App {
             self.config.terminal.scrollback_lines,
             wake,
         )?;
+        if let Some(path) = &self.record {
+            session.start_recording(path, grid)?;
+        }
         let mut ui = Ui {
             window,
             renderer,

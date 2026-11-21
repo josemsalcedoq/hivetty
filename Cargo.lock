@@ -1129,6 +1129,7 @@ dependencies = [
  "hv-grid",
  "hv-pty",
  "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -1139,7 +1140,6 @@ version = "0.0.0"
 name = "hv-usage"
 version = "0.0.0"
 dependencies = [
- "anyhow",
  "jiff",
  "serde",
  "serde_json",

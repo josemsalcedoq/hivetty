@@ -89,6 +89,7 @@ struct TermState {
 /// A running terminal session.
 pub struct Session {
     state: Arc<Mutex<TermState>>,
+    recorder: Arc<Mutex<Option<crate::record::Recorder>>>,
     cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pty: Mutex<Pty>,
@@ -161,6 +162,8 @@ impl Session {
                     }
                 })?;
         }
+        let recorder = Arc::new(Mutex::new(None));
+        let thread_recorder = Arc::clone(&recorder);
         let thread_exited = Arc::clone(&exited);
         let thread_state = Arc::clone(&state);
         let thread_writer = Arc::clone(&writer);
@@ -174,11 +177,13 @@ impl Session {
                     &thread_cwd,
                     &events_tx,
                     &thread_exited,
+                    &thread_recorder,
                     &*wake,
                 )
             })?;
 
         Ok(Self {
+            recorder,
             state,
             cwd,
             writer,
@@ -307,6 +312,13 @@ impl Session {
             .intersects(TermMode::MOUSE_MODE)
     }
 
+    /// Starts recording all output of this session to an asciicast v2 file.
+    pub fn start_recording(&self, path: &std::path::Path, size: GridSize) -> Result<()> {
+        let rec = crate::record::Recorder::create(path, size.cols, size.rows)?;
+        *lock(&self.recorder) = Some(rec);
+        Ok(())
+    }
+
     /// Pastes text. Escape characters are removed so pasted text can never end bracketed-paste
     /// mode early and run commands (docs/security.md 2.2).
     pub fn paste(&self, text: &str) {
@@ -333,6 +345,9 @@ impl Session {
                 rows: usize::from(size.rows.max(1)),
             };
             state.term.resize(dims);
+        }
+        if let Some(rec) = lock(&self.recorder).as_mut() {
+            rec.resize(size.cols, size.rows);
         }
         if let Err(err) = lock(&self.pty).resize(size) {
             log::warn!("PTY resize failed: {err:#}");
@@ -428,6 +443,9 @@ fn side(right_half: bool) -> Side {
     if right_half { Side::Right } else { Side::Left }
 }
 
+// Each argument is one piece of state shared with the UI thread; bundling them would only move
+// the list into a struct used in this one place.
+#[allow(clippy::too_many_arguments)]
 fn reader_loop(
     mut reader: Box<dyn Read + Send>,
     state: &Mutex<TermState>,
@@ -435,6 +453,7 @@ fn reader_loop(
     cwd: &Mutex<Option<std::path::PathBuf>>,
     events: &Sender<SessionEvent>,
     exited: &std::sync::atomic::AtomicBool,
+    recorder: &Mutex<Option<crate::record::Recorder>>,
     wake: &(impl Fn() + Send),
 ) {
     let mut buf = vec![0u8; 64 * 1024];
@@ -444,6 +463,9 @@ fn reader_loop(
             Ok(n) => n,
         };
         let bytes = &buf[..n];
+        if let Some(rec) = lock(recorder).as_mut() {
+            rec.output(bytes);
+        }
         let mut out = Vec::new();
         let sync_pending = {
             let mut guard = lock(state);

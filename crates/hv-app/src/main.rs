@@ -28,6 +28,7 @@ OPTIONS:
     --wait <SECONDS>     Max time --screenshot waits for the program to exit (default 5)
     --events             With --screenshot, print the terminal events seen (OSC 7/9/133/777/7501)
     --scroll <LINES>     With --screenshot, scroll up into the scrollback before capturing
+    --record <FILE>      Record all terminal output to an asciicast v2 file (debugging)
     --find <PATTERN>     With --screenshot, search the scrollback (regex) and show the result
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
@@ -41,7 +42,7 @@ ENVIRONMENT:
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]
 enum Command {
-    Run(SpawnSpec),
+    Run(SpawnSpec, Option<PathBuf>),
     Screenshot {
         spec: SpawnSpec,
         out: PathBuf,
@@ -67,6 +68,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut events = false;
     let mut scroll = 0;
     let mut find = None;
+    let mut record: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
         let value = |i: usize| {
@@ -103,6 +105,10 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 i += 1;
             }
             "--events" => events = true,
+            "--record" => {
+                record = Some(PathBuf::from(value(i)?));
+                i += 1;
+            }
             "--find" => {
                 find = Some(value(i)?.clone());
                 i += 1;
@@ -131,7 +137,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             scroll,
             find,
         },
-        None => Command::Run(spec),
+        None => Command::Run(spec, record),
     })
 }
 
@@ -144,7 +150,7 @@ fn main() -> ExitCode {
     let parsed = parse_args(&args);
     // Everything except opening the window prints to the console; in Windows release builds
     // (GUI subsystem) that needs the parent console attached first.
-    if !matches!(parsed, Ok(Command::Run(_))) {
+    if !matches!(parsed, Ok(Command::Run(..))) {
         hv_platform::attach_parent_console();
     }
     let command = match parsed {
@@ -167,7 +173,7 @@ fn main() -> ExitCode {
             print!("{}", doctor_report());
             Ok(())
         }
-        Command::Run(spec) => app::run(spec),
+        Command::Run(spec, record) => app::run(spec, record),
         Command::Usage { json } => {
             print!("{}", usage_report(json));
             Ok(())
@@ -325,12 +331,15 @@ mod tests {
 
     #[test]
     fn no_args_runs_the_default_shell() {
-        assert_eq!(parse_args(&[]), Ok(Command::Run(SpawnSpec::default())));
+        assert_eq!(
+            parse_args(&[]),
+            Ok(Command::Run(SpawnSpec::default(), None))
+        );
     }
 
     #[test]
     fn command_takes_the_rest_of_the_line() {
-        let Ok(Command::Run(spec)) = parse_args(&args("-e git log --oneline")) else {
+        let Ok(Command::Run(spec, _)) = parse_args(&args("-e git log --oneline")) else {
             panic!()
         };
         assert_eq!(spec.program.as_deref(), Some("git"));
