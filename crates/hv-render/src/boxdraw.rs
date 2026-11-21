@@ -31,11 +31,11 @@ fn arms(c: char) -> Option<[W; 4]> {
         '━' | '┅' | '┉' | '╍' => [H, H, N, N],
         '│' | '┆' | '┊' | '╎' => [N, N, L, L],
         '┃' | '┇' | '┋' | '╏' => [N, N, H, H],
-        // Corners (rounded corners are drawn square for now).
-        '┌' | '╭' => [N, L, N, L],
-        '┐' | '╮' => [L, N, N, L],
-        '└' | '╰' => [N, L, L, N],
-        '┘' | '╯' => [L, N, L, N],
+        // Corners (the rounded ones are drawn by `rounded_corner`).
+        '┌' => [N, L, N, L],
+        '┐' => [L, N, N, L],
+        '└' => [N, L, L, N],
+        '┘' => [L, N, L, N],
         '┏' => [N, H, N, H],
         '┓' => [H, N, N, H],
         '┗' => [N, H, H, N],
@@ -74,7 +74,72 @@ fn arms(c: char) -> Option<[W; 4]> {
 
 /// Whether `c` is drawn by [`rects_for`] instead of the font.
 pub(crate) fn is_builtin(c: char) -> bool {
-    arms(c).is_some() || block(c).is_some()
+    arms(c).is_some() || block(c).is_some() || corner_dir(c).is_some()
+}
+
+/// Rounded corners: which way the two arms go, as (horizontal, vertical) signs.
+/// `╭` goes right (+1) and down (+1).
+fn corner_dir(c: char) -> Option<(f32, f32)> {
+    Some(match c {
+        '╭' => (1.0, 1.0),
+        '╮' => (-1.0, 1.0),
+        '╰' => (1.0, -1.0),
+        '╯' => (-1.0, -1.0),
+        _ => return None,
+    })
+}
+
+/// A quarter circle joining the two arms, plus straight segments out to the cell edges.
+fn rounded_corner(
+    dir: (f32, f32),
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    color: Rgb8,
+    t: f32,
+) -> Vec<Rect> {
+    let (sx, sy) = dir;
+    // Line centre, snapped like the straight lines so the corner meets them exactly.
+    let cx = x + ((w - t) / 2.0).round() + t / 2.0;
+    let cy = y + ((h - t) / 2.0).round() + t / 2.0;
+    let r = (w.min(h) / 2.0).floor().max(t);
+    let (ox, oy) = (cx + sx * r, cy + sy * r); // arc centre
+    let mut out = Vec::new();
+    let steps = (r * 2.0).ceil().max(4.0) as u32;
+    for i in 0..=steps {
+        let a = std::f32::consts::FRAC_PI_2 * i as f32 / steps as f32;
+        // From the vertical arm's end (angle 0) to the horizontal arm's end (angle 90°).
+        let px = ox - sx * r * a.cos();
+        let py = oy - sy * r * a.sin();
+        // Keep every dot inside the cell so neighbouring cells never get stray pixels.
+        let dx = (px - t / 2.0).round().clamp(x, x + w - t);
+        let dy = (py - t / 2.0).round().clamp(y, y + h - t);
+        out.push(Rect::new(dx, dy, t, t, color));
+    }
+    // Horizontal segment from the arc to the left/right edge.
+    let (hx0, hx1) = if sx > 0.0 { (ox, x + w) } else { (x, ox) };
+    if hx1 > hx0 {
+        out.push(Rect::new(
+            hx0.round(),
+            (cy - t / 2.0).round(),
+            hx1.round() - hx0.round(),
+            t,
+            color,
+        ));
+    }
+    // Vertical segment from the arc to the top/bottom edge.
+    let (vy0, vy1) = if sy > 0.0 { (oy, y + h) } else { (y, oy) };
+    if vy1 > vy0 {
+        out.push(Rect::new(
+            (cx - t / 2.0).round(),
+            vy0.round(),
+            t,
+            vy1.round() - vy0.round(),
+            color,
+        ));
+    }
+    out
 }
 
 /// Block elements as fractions of the cell: (x0, y0, x1, y1, alpha).
@@ -127,6 +192,9 @@ pub(crate) fn rects_for(
             color,
             alpha,
         )];
+    }
+    if let Some(dir) = corner_dir(c) {
+        return rounded_corner(dir, x, y, w, h, color, scale.round().max(1.0));
     }
     let Some([left, right, up, down]) = arms(c) else {
         return Vec::new();
@@ -208,6 +276,16 @@ mod tests {
     fn cross_has_four_arms_and_double_line_two_strokes() {
         assert_eq!(rects_for('┼', 0.0, 0.0, 8.0, 16.0, WHITE, 1.0).len(), 4);
         assert_eq!(rects_for('═', 0.0, 0.0, 8.0, 16.0, WHITE, 1.0).len(), 4);
+    }
+
+    #[test]
+    fn rounded_corner_reaches_both_edges() {
+        // ╭ must touch the right edge (x = 8) and the bottom edge (y = 16).
+        let rects = rects_for('╭', 0.0, 0.0, 8.0, 16.0, WHITE, 1.0);
+        assert!(rects.len() > 4);
+        let max_x = rects.iter().map(|r| r.x() + r.w()).fold(f32::MIN, f32::max);
+        let max_y = rects.iter().map(|r| r.y() + r.h()).fold(f32::MIN, f32::max);
+        assert_eq!((max_x, max_y), (8.0, 16.0));
     }
 
     #[test]

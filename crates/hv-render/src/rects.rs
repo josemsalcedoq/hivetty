@@ -37,6 +37,11 @@ impl Rect {
     }
 
     #[cfg(test)]
+    pub(crate) fn y(&self) -> f32 {
+        self.pos[1]
+    }
+
+    #[cfg(test)]
     pub(crate) fn w(&self) -> f32 {
         self.size[0]
     }
