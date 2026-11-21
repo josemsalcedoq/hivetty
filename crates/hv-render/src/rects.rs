@@ -15,6 +15,10 @@ pub(crate) struct Rect {
 
 impl Rect {
     pub(crate) fn new(x: f32, y: f32, w: f32, h: f32, c: Rgb8) -> Self {
+        Self::with_alpha(x, y, w, h, c, 1.0)
+    }
+
+    pub(crate) fn with_alpha(x: f32, y: f32, w: f32, h: f32, c: Rgb8, alpha: f32) -> Self {
         Self {
             pos: [x, y],
             size: [w, h],
@@ -22,9 +26,24 @@ impl Rect {
                 f32::from(c.r) / 255.0,
                 f32::from(c.g) / 255.0,
                 f32::from(c.b) / 255.0,
-                1.0,
+                alpha,
             ],
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn x(&self) -> f32 {
+        self.pos[0]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn w(&self) -> f32 {
+        self.size[0]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn h(&self) -> f32 {
+        self.size[1]
     }
 }
 

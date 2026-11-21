@@ -4,6 +4,7 @@
 //! monospace advance so glyphs stay on the cell grid. Phase F1 replaces it with our own glyph
 //! atlas, built-in box drawing and damage tracking (docs/architecture.md section 4).
 
+mod boxdraw;
 mod rects;
 
 use std::fmt;
@@ -485,6 +486,25 @@ impl Renderer {
             }
             for c in 0..snap.cols {
                 let cell = snap.cell(row, c);
+                if boxdraw::is_builtin(cell.ch) {
+                    let fg = match snap.cursor {
+                        Some(cur)
+                            if cur.row == row && cur.col == c && cur.shape == CursorKind::Block =>
+                        {
+                            snap.background
+                        }
+                        _ => cell.fg,
+                    };
+                    over.extend(boxdraw::rects_for(
+                        cell.ch,
+                        pad + c as f32 * cw,
+                        y,
+                        cw,
+                        ch,
+                        fg,
+                        self.scale,
+                    ));
+                }
                 if cell.underline {
                     let thickness = (self.scale).max(1.0).round();
                     over.push(Rect::new(
@@ -582,6 +602,12 @@ fn row_spans(cells: &[SnapCell], cursor_col: Option<usize>, background: Rgb8) ->
         if cell.wide_spacer {
             continue;
         }
+        // Box drawing and blocks are drawn as rectangles (boxdraw.rs), not by the font.
+        let ch = if boxdraw::is_builtin(cell.ch) {
+            ' '
+        } else {
+            cell.ch
+        };
         let fg = if cursor_col == Some(col) {
             background
         } else {
@@ -589,10 +615,10 @@ fn row_spans(cells: &[SnapCell], cursor_col: Option<usize>, background: Rgb8) ->
         };
         match spans.last_mut() {
             Some(last) if last.fg == fg && last.bold == cell.bold && last.italic == cell.italic => {
-                last.text.push(cell.ch)
+                last.text.push(ch)
             }
             _ => spans.push(Span {
-                text: cell.ch.to_string(),
+                text: ch.to_string(),
                 fg,
                 bold: cell.bold,
                 italic: cell.italic,
