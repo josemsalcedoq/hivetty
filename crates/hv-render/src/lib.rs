@@ -311,6 +311,17 @@ impl Renderer {
         )
     }
 
+    /// Position and size of a cell in physical pixels: `(x, y, w, h)`.
+    pub fn cell_rect(&self, row: usize, col: usize) -> (f32, f32, f32, f32) {
+        let pad = (PADDING * self.scale).round();
+        (
+            pad + col as f32 * self.cell_w,
+            pad + row as f32 * self.cell_h,
+            self.cell_w,
+            self.cell_h,
+        )
+    }
+
     /// The cell under a point in physical pixels: `(row, col, right_half)`, clamped to the grid.
     pub fn cell_at(&self, x: f32, y: f32) -> (usize, usize, bool) {
         let pad = (PADDING * self.scale).round();

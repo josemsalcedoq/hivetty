@@ -171,6 +171,104 @@ fn ctrl_byte(text: &str) -> Option<u8> {
     }
 }
 
+/// Mouse button for reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    /// Left button.
+    Left,
+    /// Middle button.
+    Middle,
+    /// Right button.
+    Right,
+    /// Wheel up one notch.
+    WheelUp,
+    /// Wheel down one notch.
+    WheelDown,
+    /// Pointer moved with no button held.
+    None,
+}
+
+/// What happened to the mouse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseAction {
+    /// Button pressed (or wheel notch).
+    Press,
+    /// Button released.
+    Release,
+    /// Pointer moved (with `button` held, or `MouseButton::None`).
+    Motion,
+}
+
+/// Mouse reporting modes requested by the program (DECSET 1000/1002/1003/1006).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct MouseModes {
+    /// 1000: report presses and releases.
+    pub click: bool,
+    /// 1002: also report motion while a button is held.
+    pub drag: bool,
+    /// 1003: report all motion.
+    pub motion: bool,
+    /// 1006: SGR extended coordinates.
+    pub sgr: bool,
+}
+
+impl MouseModes {
+    /// Whether the program wants any mouse events at all.
+    pub fn any(self) -> bool {
+        self.click || self.drag || self.motion
+    }
+}
+
+/// Encodes a mouse event at a 0-based cell for a program that asked for mouse reporting.
+/// Returns `None` when the current modes do not report this kind of event.
+pub fn encode_mouse(
+    button: MouseButton,
+    action: MouseAction,
+    row: usize,
+    col: usize,
+    mods: Mods,
+    modes: MouseModes,
+) -> Option<Vec<u8>> {
+    if !modes.any() {
+        return None;
+    }
+    if action == MouseAction::Motion {
+        let held = button != MouseButton::None;
+        if !(modes.motion || (modes.drag && held)) {
+            return None;
+        }
+    }
+    let mut code: u32 = match button {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+        MouseButton::None => 3,
+        MouseButton::WheelUp => 64,
+        MouseButton::WheelDown => 65,
+    };
+    if action == MouseAction::Motion {
+        code += 32;
+    }
+    code += 4 * u32::from(mods.shift) + 8 * u32::from(mods.alt) + 16 * u32::from(mods.ctrl);
+    let (x, y) = (col + 1, row + 1);
+    if modes.sgr {
+        let suffix = if action == MouseAction::Release {
+            'm'
+        } else {
+            'M'
+        };
+        return Some(format!("[<{code};{x};{y}{suffix}").into_bytes());
+    }
+    // Classic X10 encoding: releases carry no button, coordinates are limited to 223.
+    if action == MouseAction::Release {
+        code = (code & !0b11) | 3;
+    }
+    let byte = |v: usize| u8::try_from(32 + v.min(223)).unwrap_or(255);
+    let code = u8::try_from(32 + code).ok()?;
+    Some(vec![0x1b, b'[', b'M', code, byte(x), byte(y)])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +318,68 @@ mod tests {
         let app = KeyModes { app_cursor: true };
         assert_eq!(encode_key(&Key::Up, NONE, app).unwrap(), b"\x1bOA");
         assert_eq!(enc(Key::Right, CTRL), b"\x1b[1;5C");
+    }
+
+    #[test]
+    fn mouse_sgr_and_x10() {
+        let sgr = MouseModes {
+            click: true,
+            sgr: true,
+            ..MouseModes::default()
+        };
+        let press = encode_mouse(MouseButton::Left, MouseAction::Press, 4, 9, NONE, sgr).unwrap();
+        assert_eq!(press, b"[<0;10;5M");
+        let release =
+            encode_mouse(MouseButton::Left, MouseAction::Release, 4, 9, NONE, sgr).unwrap();
+        assert_eq!(release, b"[<0;10;5m");
+        let wheel =
+            encode_mouse(MouseButton::WheelDown, MouseAction::Press, 0, 0, CTRL, sgr).unwrap();
+        assert_eq!(wheel, b"[<81;1;1M");
+
+        let x10 = MouseModes {
+            click: true,
+            ..MouseModes::default()
+        };
+        let press = encode_mouse(MouseButton::Right, MouseAction::Press, 0, 0, NONE, x10).unwrap();
+        assert_eq!(press, [0x1b, b'[', b'M', 32 + 2, 33, 33]);
+        let release =
+            encode_mouse(MouseButton::Right, MouseAction::Release, 0, 0, NONE, x10).unwrap();
+        assert_eq!(release[3], 32 + 3);
+    }
+
+    #[test]
+    fn mouse_motion_only_when_requested() {
+        let click = MouseModes {
+            click: true,
+            sgr: true,
+            ..MouseModes::default()
+        };
+        assert!(encode_mouse(MouseButton::Left, MouseAction::Motion, 0, 0, NONE, click).is_none());
+        let drag = MouseModes {
+            drag: true,
+            ..click
+        };
+        assert!(encode_mouse(MouseButton::Left, MouseAction::Motion, 0, 0, NONE, drag).is_some());
+        assert!(encode_mouse(MouseButton::None, MouseAction::Motion, 0, 0, NONE, drag).is_none());
+        let all = MouseModes {
+            motion: true,
+            ..click
+        };
+        assert_eq!(
+            encode_mouse(MouseButton::None, MouseAction::Motion, 1, 1, NONE, all).unwrap(),
+            b"[<35;2;2M"
+        );
+        assert!(
+            encode_mouse(
+                MouseButton::Left,
+                MouseAction::Press,
+                0,
+                0,
+                NONE,
+                MouseModes::default()
+            )
+            .is_none()
+        );
     }
 
     #[test]

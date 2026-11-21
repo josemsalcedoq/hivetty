@@ -5,14 +5,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use hv_render::Renderer;
-use hv_term::input::{Key as TermKey, Mods, encode_key};
+use hv_term::input::{
+    Key as TermKey, Mods, MouseAction, MouseButton as TermButton, encode_key, encode_mouse,
+};
 use std::time::{Duration, Instant};
 
 use hv_term::{GridSize, SelectKind, Session, SessionEvent, SpawnSpec};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
+use winit::dpi::{PhysicalPosition, PhysicalSize as PhysSize};
 use winit::event::{
-    ElementState, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
+    ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -56,6 +59,8 @@ struct App {
     scroll_remainder: f32,
     fatal: Option<anyhow::Error>,
     mouse: MouseState,
+    /// An input method is composing text; raw key presses belong to it, not to the program.
+    ime_composing: bool,
 }
 
 /// Pointer position and click tracking for selection.
@@ -66,6 +71,9 @@ struct MouseState {
     selecting: bool,
     last_click: Option<(Instant, usize, usize)>,
     click_count: u8,
+    /// Button held while reporting to the program, and the last cell reported.
+    reported_button: Option<TermButton>,
+    last_reported_cell: Option<(usize, usize)>,
 }
 
 /// Max time between clicks to count as a double / triple click.
@@ -82,6 +90,7 @@ impl App {
             scroll_remainder: 0.0,
             fatal: None,
             mouse: MouseState::default(),
+            ime_composing: false,
         }
     }
 
@@ -94,6 +103,8 @@ impl App {
                 .create_window(attrs)
                 .context("cannot create window")?,
         );
+        // Needed for CJK input methods and, on macOS, for dead-key composition (´ + a = á).
+        window.set_ime_allowed(true);
         let size = window.inner_size();
         let scale = window.scale_factor() as f32;
         let renderer = Renderer::new(
@@ -124,7 +135,7 @@ impl App {
 
     fn on_key(&mut self, event: &KeyEvent) {
         let Some(ui) = &mut self.ui else { return };
-        if event.state != ElementState::Pressed {
+        if event.state != ElementState::Pressed || self.ime_composing {
             return;
         }
         let m = self.modifiers;
@@ -202,7 +213,64 @@ impl App {
         }
     }
 
+    fn on_ime(&mut self, ime: Ime) {
+        match ime {
+            Ime::Preedit(text, _) => self.ime_composing = !text.is_empty(),
+            Ime::Commit(text) => {
+                self.ime_composing = false;
+                if let Some(ui) = &self.ui {
+                    ui.session.select_clear();
+                    ui.session.scroll_to_bottom();
+                    ui.session.write(text.as_bytes());
+                }
+            }
+            Ime::Enabled | Ime::Disabled => self.ime_composing = false,
+        }
+    }
+
+    fn current_mods(&self) -> Mods {
+        Mods {
+            shift: self.modifiers.shift_key(),
+            ctrl: self.modifiers.control_key(),
+            alt: self.modifiers.alt_key(),
+        }
+    }
+
+    /// Sends a mouse event to the program if it asked for them (and Shift is not held).
+    /// Returns true if the event was consumed by reporting.
+    fn report_mouse(&mut self, button: TermButton, action: MouseAction) -> bool {
+        let Some(ui) = &self.ui else { return false };
+        let modes = ui.session.mouse_modes();
+        if !modes.any() || self.modifiers.shift_key() {
+            return false;
+        }
+        let (row, col, _) = ui.renderer.cell_at(self.mouse.x, self.mouse.y);
+        if action == MouseAction::Motion && self.mouse.last_reported_cell == Some((row, col)) {
+            return true;
+        }
+        self.mouse.last_reported_cell = Some((row, col));
+        if let Some(bytes) = encode_mouse(button, action, row, col, self.current_mods(), modes) {
+            ui.session.write(&bytes);
+        }
+        true
+    }
+
     fn on_mouse_button(&mut self, state: ElementState, button: MouseButton) {
+        let term_button = match button {
+            MouseButton::Left => TermButton::Left,
+            MouseButton::Middle => TermButton::Middle,
+            MouseButton::Right => TermButton::Right,
+            _ => return,
+        };
+        let action = if state == ElementState::Pressed {
+            MouseAction::Press
+        } else {
+            MouseAction::Release
+        };
+        if self.report_mouse(term_button, action) {
+            self.mouse.reported_button = (action == MouseAction::Press).then_some(term_button);
+            return;
+        }
         let Some(ui) = &mut self.ui else { return };
         if button != MouseButton::Left {
             return;
@@ -255,6 +323,10 @@ impl App {
     fn on_cursor_moved(&mut self, x: f32, y: f32) {
         self.mouse.x = x;
         self.mouse.y = y;
+        let held = self.mouse.reported_button.unwrap_or(TermButton::None);
+        if self.report_mouse(held, MouseAction::Motion) {
+            return;
+        }
         if let (true, Some(ui)) = (self.mouse.selecting, &self.ui) {
             let (row, col, right) = ui.renderer.cell_at(x, y);
             ui.session.select_update(row, col, right);
@@ -275,6 +347,19 @@ impl App {
         if whole == 0 {
             return;
         }
+        if ui.session.mouse_modes().any() && !self.modifiers.shift_key() {
+            let button = if whole > 0 {
+                TermButton::WheelUp
+            } else {
+                TermButton::WheelDown
+            };
+            for _ in 0..whole.unsigned_abs() {
+                self.report_mouse(button, MouseAction::Press);
+                self.mouse.last_reported_cell = None;
+            }
+            return;
+        }
+        let Some(ui) = &mut self.ui else { return };
         if ui.session.alt_screen() {
             // Full-screen programs (vim, less, agent TUIs) get arrow keys, like xterm's alternate scroll.
             let key = if whole > 0 {
@@ -366,6 +451,7 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => self.on_key(&event),
+            WindowEvent::Ime(ime) => self.on_ime(ime),
             WindowEvent::MouseWheel { delta, .. } => self.on_wheel(delta),
             WindowEvent::MouseInput { state, button, .. } => self.on_mouse_button(state, button),
             WindowEvent::CursorMoved { position, .. } => {
@@ -375,6 +461,12 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(ui) = &mut self.ui {
                     ui.session.flush_expired_sync();
                     let snapshot = ui.session.snapshot();
+                    // Keep the IME candidate window next to the text cursor.
+                    if let Some(cursor) = snapshot.cursor {
+                        let (x, y, w, h) = ui.renderer.cell_rect(cursor.row, cursor.col);
+                        ui.window
+                            .set_ime_cursor_area(PhysicalPosition::new(x, y), PhysSize::new(w, h));
+                    }
                     if let Err(err) = ui.renderer.render(&snapshot) {
                         log::error!("render failed: {err:#}");
                     }

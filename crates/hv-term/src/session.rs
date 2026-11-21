@@ -16,7 +16,7 @@ use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use anyhow::Result;
 use hv_pty::{GridSize, Pty, SpawnSpec};
 
-use crate::input::KeyModes;
+use crate::input::{KeyModes, MouseModes};
 use crate::osc::{Interceptor, TermEvent};
 use crate::snapshot::{self, Snapshot};
 
@@ -178,6 +178,18 @@ impl Session {
     pub fn selection_text(&self) -> Option<String> {
         let state = lock(&self.state);
         state.term.selection_to_string().filter(|s| !s.is_empty())
+    }
+
+    /// Mouse reporting modes the program enabled.
+    pub fn mouse_modes(&self) -> MouseModes {
+        let state = lock(&self.state);
+        let mode = state.term.mode();
+        MouseModes {
+            click: mode.contains(TermMode::MOUSE_REPORT_CLICK),
+            drag: mode.contains(TermMode::MOUSE_DRAG),
+            motion: mode.contains(TermMode::MOUSE_MOTION),
+            sgr: mode.contains(TermMode::SGR_MOUSE),
+        }
     }
 
     /// Whether the program asked for mouse events (then clicks go to it, not to selection).
