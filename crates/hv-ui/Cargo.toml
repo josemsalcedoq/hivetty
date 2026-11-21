@@ -10,3 +10,6 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+egui = { version = "0.37", features = ["default_fonts"] }

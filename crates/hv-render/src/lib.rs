@@ -43,6 +43,24 @@ const PILL_BORDER: Rgb8 = Rgb8::hex(0x3A3A40);
 /// Padding around the grid, in logical pixels.
 const PADDING: f32 = 8.0;
 
+/// One frame of egui chrome, ready to paint (from `hv-ui`).
+pub struct UiFrame {
+    /// Tessellated egui shapes.
+    pub primitives: Vec<egui::ClippedPrimitive>,
+    /// Font atlas and image updates. Applied and cleared by the renderer.
+    pub textures: egui::TexturesDelta,
+    /// egui's pixels per point.
+    pub pixels_per_point: f32,
+}
+
+impl fmt::Debug for UiFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UiFrame")
+            .field("primitives", &self.primitives.len())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Renders terminal snapshots into a window surface or an offscreen texture.
 pub struct Renderer {
     /// `None` when rendering offscreen (screenshots, golden tests).
@@ -71,6 +89,10 @@ pub struct Renderer {
     search_label: Buffer,
     /// Visual bell flash in progress.
     flash: bool,
+    /// Where the grid goes, `[x, y, w, h]` in physical pixels; `None` = the whole surface.
+    area: Option<[f32; 4]>,
+    /// egui renderer for the window chrome (ADR 0003), sharing this device and pass.
+    egui: egui_wgpu::Renderer,
     /// Where the jump pill was drawn last frame, for hit testing: `[x, y, w, h]`.
     pill_rect: Option<[f32; 4]>,
 }
@@ -198,6 +220,11 @@ impl Renderer {
         font_size: f32,
     ) -> Self {
         let rects = RectPipeline::new(&device, config.format);
+        let egui = egui_wgpu::Renderer::new(
+            &device,
+            config.format,
+            egui_wgpu::RendererOptions::default(),
+        );
         let mut font_system = FontSystem::new();
         let font_family = pick_font(&font_system);
         log::info!("terminal font: {font_family}");
@@ -245,6 +272,8 @@ impl Renderer {
             search_text: None,
             search_label,
             flash: false,
+            area: None,
+            egui,
         }
     }
 
@@ -340,12 +369,34 @@ impl Renderer {
         )
     }
 
+    /// Restricts the grid to `[x, y, w, h]` (physical pixels), e.g. the space egui leaves next
+    /// to the sidebar. `None` uses the whole surface.
+    pub fn set_grid_area(&mut self, area: Option<[f32; 4]>) {
+        self.area = area;
+    }
+
+    fn area(&self) -> [f32; 4] {
+        self.area.unwrap_or([
+            0.0,
+            0.0,
+            self.config.width as f32,
+            self.config.height as f32,
+        ])
+    }
+
+    /// Top-left corner of the first cell.
+    fn origin(&self) -> (f32, f32) {
+        let pad = (PADDING * self.scale).round();
+        let [x, y, ..] = self.area();
+        ((x + pad).round(), (y + pad).round())
+    }
+
     /// Position and size of a cell in physical pixels: `(x, y, w, h)`.
     pub fn cell_rect(&self, row: usize, col: usize) -> (f32, f32, f32, f32) {
-        let pad = (PADDING * self.scale).round();
+        let (ox, oy) = self.origin();
         (
-            pad + col as f32 * self.cell_w,
-            pad + row as f32 * self.cell_h,
+            ox + col as f32 * self.cell_w,
+            oy + row as f32 * self.cell_h,
             self.cell_w,
             self.cell_h,
         )
@@ -353,10 +404,10 @@ impl Renderer {
 
     /// The cell under a point in physical pixels: `(row, col, right_half)`, clamped to the grid.
     pub fn cell_at(&self, x: f32, y: f32) -> (usize, usize, bool) {
-        let pad = (PADDING * self.scale).round();
+        let (ox, oy) = self.origin();
         let (cols, rows) = self.grid_size();
-        let fx = ((x - pad) / self.cell_w).max(0.0);
-        let fy = ((y - pad) / self.cell_h).max(0.0);
+        let fx = ((x - ox) / self.cell_w).max(0.0);
+        let fy = ((y - oy) / self.cell_h).max(0.0);
         let col = (fx.floor() as usize).min(usize::from(cols).saturating_sub(1));
         let row = (fy.floor() as usize).min(usize::from(rows).saturating_sub(1));
         (row, col, fx.fract() >= 0.5)
@@ -365,17 +416,19 @@ impl Renderer {
     /// How many columns and rows fit in the window.
     pub fn grid_size(&self) -> (u16, u16) {
         let pad = PADDING * self.scale * 2.0;
-        let cols = ((self.config.width as f32 - pad) / self.cell_w)
-            .floor()
-            .max(1.0);
-        let rows = ((self.config.height as f32 - pad) / self.cell_h)
-            .floor()
-            .max(1.0);
+        let [_, _, area_w, area_h] = self.area();
+        let cols = ((area_w - pad) / self.cell_w).floor().max(1.0);
+        let rows = ((area_h - pad) / self.cell_h).floor().max(1.0);
         (cols as u16, rows as u16)
     }
 
     /// Draws one frame to the window.
     pub fn render(&mut self, snap: &Snapshot) -> Result<()> {
+        self.render_with_ui(snap, None)
+    }
+
+    /// Draws one frame to the window: the terminal grid, then the egui chrome on top.
+    pub fn render_with_ui(&mut self, snap: &Snapshot, ui: Option<&mut UiFrame>) -> Result<()> {
         let Some(surface) = &self.surface else {
             return Err(anyhow!("headless renderer: use render_to_rgba"));
         };
@@ -391,15 +444,28 @@ impl Renderer {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let encoder = self.encode(snap, &view)?;
-        self.queue.submit([encoder.finish()]);
+        let mut ui = ui;
+        let (extra, encoder) = self.encode(snap, &view, ui.as_deref_mut())?;
+        self.queue
+            .submit(extra.into_iter().chain([encoder.finish()]));
         self.queue.present(frame);
+        self.finish_ui(ui);
         self.atlas.trim();
         Ok(())
     }
 
     /// Draws one frame offscreen and returns it as tightly packed RGBA8 rows.
     pub fn render_to_rgba(&mut self, snap: &Snapshot) -> Result<(u32, u32, Vec<u8>)> {
+        self.render_to_rgba_with_ui(snap, None)
+    }
+
+    /// Like [`Renderer::render_to_rgba`], with egui chrome on top.
+    pub fn render_to_rgba_with_ui(
+        &mut self,
+        snap: &Snapshot,
+        ui: Option<&mut UiFrame>,
+    ) -> Result<(u32, u32, Vec<u8>)> {
+        let mut ui = ui;
         let (width, height) = (self.config.width, self.config.height);
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
@@ -416,7 +482,7 @@ impl Renderer {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.encode(snap, &view)?;
+        let (extra, mut encoder) = self.encode(snap, &view, ui.as_deref_mut())?;
         let padded_row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
             * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -441,7 +507,9 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
-        self.queue.submit([encoder.finish()]);
+        self.queue
+            .submit(extra.into_iter().chain([encoder.finish()]));
+        self.finish_ui(ui);
         let slice = readback.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
@@ -468,9 +536,10 @@ impl Renderer {
         &mut self,
         snap: &Snapshot,
         view: &wgpu::TextureView,
-    ) -> Result<wgpu::CommandEncoder> {
-        let pad = (PADDING * self.scale).round();
-        let (back, mut over) = self.build_rects(snap, pad);
+        ui: Option<&mut UiFrame>,
+    ) -> Result<(Vec<wgpu::CommandBuffer>, wgpu::CommandEncoder)> {
+        let (ox, oy) = self.origin();
+        let (back, mut over) = self.build_rects(snap, (ox, oy));
         self.update_rows(snap);
         let pill = self.layout_pill(snap, &mut over);
         let search = self.layout_search(&mut over);
@@ -485,8 +554,8 @@ impl Renderer {
             .update(&self.queue, Resolution { width, height });
         let areas = self.rows.iter().enumerate().map(|(row, cache)| TextArea {
             buffer: &cache.buffer,
-            left: pad,
-            top: pad + row as f32 * self.cell_h,
+            left: ox,
+            top: oy + row as f32 * self.cell_h,
             scale: 1.0,
             bounds: TextBounds {
                 left: 0,
@@ -562,6 +631,26 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [width, height],
+            pixels_per_point: ui.as_ref().map_or(1.0, |u| u.pixels_per_point),
+        };
+        let mut extra = Vec::new();
+        if let Some(ui) = ui.as_ref() {
+            for (id, deltas) in &ui.textures.set {
+                for delta in deltas {
+                    self.egui
+                        .update_texture(&self.device, &self.queue, *id, delta);
+                }
+            }
+            extra = self.egui.update_buffers(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &ui.primitives,
+                &screen,
+            );
+        }
         {
             let bg = snap.background;
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -593,8 +682,22 @@ impl Renderer {
             self.ui_text
                 .render(&self.atlas, &self.viewport, &mut pass)
                 .map_err(|e| anyhow!("label render failed: {e}"))?;
+            if let Some(ui) = ui.as_ref() {
+                let mut pass = pass.forget_lifetime();
+                self.egui.render(&mut pass, &ui.primitives, &screen);
+            }
         }
-        Ok(encoder)
+        Ok((extra, encoder))
+    }
+
+    /// Frees egui textures that are no longer used and marks the deltas as handled.
+    fn finish_ui(&mut self, ui: Option<&mut UiFrame>) {
+        if let Some(ui) = ui {
+            for id in &ui.textures.free {
+                self.egui.free_texture(id);
+            }
+            ui.textures.clear();
+        }
     }
 
     /// Adds the "Jump to bottom" pill when the view is scrolled up. Returns where its label goes.
@@ -629,8 +732,9 @@ impl Renderer {
         let chars = text.chars().count().max(24) as f32;
         let (w, h) = ((chars * cw + cw * 2.0).round(), (ch * 1.5).round());
         let margin = (PADDING * self.scale).round();
-        let x = (self.config.width as f32 - w - margin).max(0.0).round();
-        let y = margin;
+        let [ax, ay, aw, _] = self.area();
+        let x = (ax + aw - w - margin).max(ax).round();
+        let y = ay + margin;
         let border = self.scale.round().max(1.0);
         over.push(Rect::new(
             x - border,
@@ -651,8 +755,9 @@ impl Renderer {
         let (cw, ch) = (self.cell_w, self.cell_h);
         let label_w = JUMP_LABEL.chars().count() as f32 * cw;
         let (w, h) = ((label_w + cw * 2.0).round(), (ch * 1.5).round());
-        let x = ((self.config.width as f32 - w) / 2.0).round();
-        let y = (self.config.height as f32 - h - ch).round();
+        let [ax, ay, aw, ah] = self.area();
+        let x = (ax + (aw - w) / 2.0).round();
+        let y = (ay + ah - h - ch).round();
         let border = self.scale.round().max(1.0);
         over.push(Rect::new(
             x - border,
@@ -667,12 +772,12 @@ impl Renderer {
     }
 
     /// Background rectangles (merged runs) plus overlay rectangles (underlines, thin cursors).
-    fn build_rects(&self, snap: &Snapshot, pad: f32) -> (Vec<Rect>, Vec<Rect>) {
+    fn build_rects(&self, snap: &Snapshot, (ox, oy): (f32, f32)) -> (Vec<Rect>, Vec<Rect>) {
         let (cw, ch) = (self.cell_w, self.cell_h);
         let mut back = Vec::new();
         let mut over = Vec::new();
         for row in 0..snap.rows {
-            let y = pad + row as f32 * ch;
+            let y = oy + row as f32 * ch;
             let mut col = 0;
             while col < snap.cols {
                 let bg = snap.cell(row, col).bg;
@@ -682,7 +787,7 @@ impl Renderer {
                 }
                 if bg != snap.background {
                     back.push(Rect::new(
-                        pad + start as f32 * cw,
+                        ox + start as f32 * cw,
                         y,
                         (col - start) as f32 * cw,
                         ch,
@@ -703,7 +808,7 @@ impl Renderer {
                     };
                     over.extend(boxdraw::rects_for(
                         cell.ch,
-                        pad + c as f32 * cw,
+                        ox + c as f32 * cw,
                         y,
                         cw,
                         ch,
@@ -714,7 +819,7 @@ impl Renderer {
                 if cell.underline {
                     let thickness = (self.scale).max(1.0).round();
                     over.push(Rect::new(
-                        pad + c as f32 * cw,
+                        ox + c as f32 * cw,
                         y + ch - thickness * 2.0,
                         cw,
                         thickness,
@@ -724,8 +829,8 @@ impl Renderer {
             }
         }
         if let Some(cursor) = snap.cursor {
-            let x = pad + cursor.col as f32 * cw;
-            let y = pad + cursor.row as f32 * ch;
+            let x = ox + cursor.col as f32 * cw;
+            let y = oy + cursor.row as f32 * ch;
             let color = snap.foreground;
             let thin = (2.0 * self.scale).round();
             match cursor.shape {

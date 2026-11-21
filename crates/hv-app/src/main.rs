@@ -5,6 +5,7 @@
 
 mod app;
 mod headless;
+mod model;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -29,6 +30,7 @@ OPTIONS:
     --events             With --screenshot, print the terminal events seen (OSC 7/9/133/777/7501)
     --scroll <LINES>     With --screenshot, scroll up into the scrollback before capturing
     --record <FILE>      Record all terminal output to an asciicast v2 file (debugging)
+    --ui                 With --screenshot, also draw the window chrome (sidebar)
     --find <PATTERN>     With --screenshot, search the scrollback (regex) and show the result
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
@@ -52,6 +54,7 @@ enum Command {
         events: bool,
         scroll: i32,
         find: Option<String>,
+        ui: bool,
     },
     Doctor,
     Usage {
@@ -68,6 +71,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut events = false;
     let mut scroll = 0;
     let mut find = None;
+    let mut ui = false;
     let mut record: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
@@ -109,6 +113,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 record = Some(PathBuf::from(value(i)?));
                 i += 1;
             }
+            "--ui" => ui = true,
             "--find" => {
                 find = Some(value(i)?.clone());
                 i += 1;
@@ -136,6 +141,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             events,
             scroll,
             find,
+            ui,
         },
         None => Command::Run(spec, record),
     })
@@ -187,6 +193,7 @@ fn main() -> ExitCode {
             events,
             scroll,
             find,
+            ui,
         } => {
             let opts = headless::Capture {
                 cols,
@@ -195,6 +202,7 @@ fn main() -> ExitCode {
                 print_events: events,
                 scroll_up: scroll,
                 find,
+                ui,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))
