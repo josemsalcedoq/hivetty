@@ -24,4 +24,4 @@ En la captura, el prompt muestra *chips* con el logo de la tecnología del proye
 - − Por SSH no hay chips salvo que el servidor tenga la integración instalada (C-09).
 
 ## Alternativa descartada
-Calcular los chips en la shell (como en la captura, con `midterm.zsh`): obliga a reimplementarlo en cuatro lenguajes de shell y a un protocolo de imágenes.
+Calcular los chips en la shell (como hace el terminal de referencia con un script de zsh): obliga a reimplementarlo en cuatro lenguajes de shell y a un protocolo de imágenes.

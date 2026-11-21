@@ -1,0 +1,12 @@
+[package]
+name = "hv-fake-agent"
+description = "Deterministic fake coding agent used by end-to-end tests (see docs/testing.md section 4)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

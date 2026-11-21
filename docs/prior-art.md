@@ -34,10 +34,9 @@ Borrador rev 0.4 (oct 2026), escrito por el autor de Rex (Mitchell Hashimoto): `
 | [vibe-kanban](https://github.com/BloopAI/vibe-kanban) (en cierre) | tareas en kanban con worktree; comentarios en el diff que vuelven al agente |
 | Sculptor (Imbue) | un contenedor por agente; *pairing mode* que refleja la rama en local |
 | [Paseo](https://github.com/getpaseo/paseo) | demonio con clientes de escritorio, móvil y web |
-| [tlbx / MidTerm](https://github.com/tlbx-ai/MidTerm) | entorno web autoalojado (**no** es el de las capturas ni de midudev) |
-| [Terax](https://github.com/crynta/terax-ai) (Tauri; promocionado por midudev) | ligero (~7 MB), agente propio, panel git, vista previa del servidor de desarrollo |
+| [tlbx / MidTerm](https://github.com/tlbx-ai/MidTerm) | entorno web autoalojado |
+| [Terax](https://github.com/crynta/terax-ai) (Tauri) | ligero (~7 MB), agente propio, panel git, vista previa del servidor de desarrollo |
 
-No se encontró ningún proyecto público "midterm" de midudev: el terminal de las capturas parece privado o inédito.
 
 ## Apps oficiales
 - **[Claude Code Desktop](https://code.claude.com/docs/en/desktop):** barra lateral por proyecto o estado, entornos (local, nube, SSH, WSL), worktree, diff con comentarios, estado de CI y PR, anillo de uso.

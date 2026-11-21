@@ -1,0 +1,16 @@
+[package]
+name = "hv-app"
+description = "The hivetty application binary: window, event loop and CLI subcommands."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "hivetty"
+path = "src/main.rs"
+
+[lints]
+workspace = true

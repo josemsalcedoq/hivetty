@@ -1,0 +1,12 @@
+[package]
+name = "hv-term"
+description = "VT engine abstraction, PTY reader and OSC/DCS/APC interceptor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

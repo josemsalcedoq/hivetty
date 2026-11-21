@@ -1,0 +1,12 @@
+[package]
+name = "hv-render"
+description = "GPU (wgpu) and software (tiny-skia) renderers for the terminal grid."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

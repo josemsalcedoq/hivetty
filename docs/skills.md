@@ -37,7 +37,7 @@ Revisado el **2026-11-21**: cada `SKILL.md` se leyó en su repo de origen. ★ =
 | Revisión de PRs | `differential-review`, `sharp-edges` | trailofbits/skills | solo markdown |
 | Revisión de PRs | `pr-review-toolkit` | anthropics/claude-plugins-official | oficial; 6 agentes revisores |
 | Dependencias | `supply-chain-risk-auditor` | trailofbits/skills | consulta osv.dev, deps.dev, scorecard.dev y la API de GitHub |
-| CI | `gh-fix-ci` | [openai/skills](https://github.com/openai/skills) | necesita `gh` autenticado (**el token de `gh` de este PC no es válido ahora mismo**) |
+| CI | `gh-fix-ci` | [openai/skills](https://github.com/openai/skills) | necesita `gh` autenticado |
 | CI | `add-zizmor` | [Seldaek/zizmorify](https://github.com/Seldaek/zizmorify) | abre un PR al final: revisarlo |
 | ADRs | `architecture-decision-records` | [wshobson/agents](https://github.com/wshobson/agents) | plantillas MADR |
 | Docs | `doc-coauthoring` | [anthropics/skills](https://github.com/anthropics/skills) | oficial |

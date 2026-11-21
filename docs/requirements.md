@@ -13,7 +13,7 @@ Prioridad: **M** = imprescindible para la v1.0 · **S** = debería estar en la v
 | W-01 | Ventana con tres zonas: barra lateral, barra de pestañas y área de paneles | M | |
 | W-02 | Barra de título integrada: en macOS los botones semáforo dentro de la barra lateral; en Windows minimizar/maximizar/cerrar a la derecha; en Linux decoraciones del cliente en Wayland y nativas en X11 | M | captura de macOS con barra transparente |
 | W-03 | Botón para ocultar/mostrar la barra lateral junto a los semáforos | M | icono de panel junto al semáforo |
-| W-04 | Barra de pestañas: icono del agente o de la shell, título (de OSC 2) truncado con fundido, pestaña activa resaltada, cerrar al pasar el ratón, `+` para nueva pestaña | M | "✳ Logos que no se muestran…", "✳ Claude Code", icono de OpenAI en "midulive" |
+| W-04 | Barra de pestañas: icono del agente o de la shell, título (de OSC 2) truncado con fundido, pestaña activa resaltada, cerrar al pasar el ratón, `+` para nueva pestaña | M | "✳ Logos que no se muestran…", "✳ Claude Code", icono de OpenAI en otra pestaña |
 | W-05 | Reordenar pestañas arrastrando; arrastrar una pestaña a un panel para dividir; arrastrar fuera para nueva ventana | S | |
 | W-06 | Doble clic en una pestaña para renombrarla; clic central para cerrar | S | |
 | W-07 | Iconos a la derecha de la barra de pestañas: **actividad** (abre el panel de uso) y **globo** (puertos/servidores de desarrollo detectados, ver A-24) | M / C | iconos de pulso y globo arriba a la derecha |
@@ -31,7 +31,7 @@ Prioridad: **M** = imprescindible para la v1.0 · **S** = debería estar en la v
 | S-02 | Botón de carpeta junto a New session: elegir el directorio o proyecto de la nueva sesión | M | icono de carpeta |
 | S-03 | Campo **Search agents** con el atajo `/` visible; busca por título, subtítulo, proyecto, agente y rama | M | "Search agents /" |
 | S-04 | Filtro segmentado **All N · Waiting N · Working N** con contadores en vivo; Waiting con punto y Working con spinner | M | "All 6 · Waiting · Working 5" |
-| S-05 | Agrupar por **proyecto** (nombre de la raíz git del directorio de la sesión); los grupos se ordenan por actividad reciente | M | bid-model-detector, midterm, midulive, midu-videos |
+| S-05 | Agrupar por **proyecto** (nombre de la raíz git del directorio de la sesión); los grupos se ordenan por actividad reciente | M | cuatro grupos de proyecto con sus sesiones |
 | S-06 | Fila de sesión con icono del agente, **título**, **subtítulo** (estado o acción actual) y **tiempo** relativo | M | "Claude Code / Converting screenshot to PNG / 21m" |
 | S-07 | Indicador de **no visto** (punto) cuando una sesión termina o pide algo y el usuario no la ha mirado | M | punto verde sobre el icono de la primera sesión |
 | S-08 | Colores de estado: `Done` en verde, `Working` en gris con animación, `Waiting` en ámbar, `Error` en rojo. **Nunca solo color**: también icono o texto | M | "Done" en verde |

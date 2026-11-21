@@ -1,0 +1,25 @@
+name: Support a new agent
+description: Ask hivetty to detect and track another coding agent CLI
+labels: ["type:feat", "crate:hv-agents"]
+body:
+  - type: input
+    id: agent
+    attributes:
+      label: Agent name, version and homepage
+    validations:
+      required: true
+  - type: checkboxes
+    id: signals
+    attributes:
+      label: Which status signals does it support?
+      options:
+        - label: OSC 7501 (program status)
+        - label: Hooks / notify command
+        - label: OSC 9 / 99 / 777 notifications
+        - label: Terminal title updates
+        - label: Local usage logs with token counts
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Hook config file and payload, log paths per OS, resume command, links to docs.
