@@ -18,7 +18,6 @@ termhive/
 │   ├── th-ipc/                # servidor y cliente IPC; protocolo versionado (postcard)
 │   ├── th-config/             # TOML, esquema, temas, atajos, recarga en caliente
 │   ├── th-platform/           # código por SO (único crate con unsafe): AUMID, badge, ITaskbarList3, NSDockTile, TTS…
-│   ├── th-i18n/               # Fluent
 │   └── th-fake-agent/         # binario de pruebas (docs/testing.md §4)
 ├── xtask/                     # golden-update, fixtures, dist, bench, conpty-fetch
 ├── assets/

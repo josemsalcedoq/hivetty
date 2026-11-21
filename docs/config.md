@@ -12,7 +12,6 @@
 import = []
 
 [general]
-language = "system"            # "system" | "es" | "en"
 confirm_quit_with_running = true
 check_updates = true           # ⟳
 telemetry = false              # nunca se envía nada sin opt-in

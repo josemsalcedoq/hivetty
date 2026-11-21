@@ -132,7 +132,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | F4-15 | Archivar y la sección Archived | S-12 | F4-11 | M |
 | F4-16 | Menús contextuales de sesión y de proyecto | S-13, S-14 | F4-11 | M |
 | F4-17 | Tarjeta al pasar el ratón | S-15 | F5-03 | M |
-| F4-18 | Notificaciones del sistema con acción "Enfocar" y agrupado | A-09 | F4-04 | L |
+| F4-18 | Notificaciones del sistema con acción "Focus" y agrupado | A-09 | F4-04 | L |
 | F4-19 | Badge en el dock o la barra de tareas y urgency hint | A-10 | F4-04 | M |
 | F4-20 | "Ir a la siguiente sesión que te necesita" | A-11 | F4-11 | S |
 | F4-21 | Reanudar sesiones tras reiniciar (comando de resume por agente) | A-12 | F4-10 | M |
@@ -164,7 +164,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | F5-09 | UI: mapa de calor | U-30…U-33 | F5-06 | M |
 | F5-10 | UI: tablas de modelos y agentes con filtro por agente | U-40…U-53 | F5-06 | M |
 | F5-11 | Selector de rango, `Esc`, estados vacío y parcial | U-01…U-03 | F5-07 | S |
-| F5-12 | Formato de números e idioma | §6.7 | F5-07 | S |
+| F5-12 | Formato compacto de números y fechas en inglés | §6.7 | F5-07 | S |
 | F5-13 | Coste estimado con `pricing.toml` | U-60 | F5-06 | S |
 | F5-14 | Exportar a CSV/JSON y filtro por proyecto | U-61, U-62 | F5-06 | S |
 | F5-15 | Receptor OTLP local opcional | ADR 0005 | F5-06 | M |
@@ -180,7 +180,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 | F6-01 | Temas: claro, oscuro, alto contraste; importar temas de iTerm2 y Alacritty; seguir el tema del sistema | F1 | M |
 | F6-02 | Configuración completa (`docs/config.md`), esquema JSON y avisos de error | F1-26 | M |
 | F6-03 | Asistente de primer arranque | F4, F5 | M |
-| F6-04 | Idiomas (Fluent, es/en) | F4 | M |
+| F6-04 | Revisión de todos los textos en inglés (UI, errores, `--help`, docs de usuario) y que estén centralizados en `strings.rs` | F4 | S |
 | F6-05 | Accesibilidad del texto del terminal (líneas visibles) y alto contraste | F4-25 | L |
 | F6-06 | Narrador (TTS por SO) | F4 | M |
 | F6-07 | Empaquetado macOS: universal, `.app`, `.dmg`, firma y notarización | SP-7 | L |

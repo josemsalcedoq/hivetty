@@ -179,9 +179,9 @@ Reconstrucción exacta de la segunda captura. Las fórmulas están **comprobadas
 | U-53 | La suma de input de los agentes ≈ el total | 10.6B + 447M + 419M + 74M + 5.9M ≈ 11.55B ✔ |
 
 ### 6.7 Formato de números
-- Compacto: `11.6B`, `61.3M`, `22.9K`, `963K`, `70.2K`; enteros con separador de miles: `1,110` (según el idioma).
+- Compacto: `11.6B`, `61.3M`, `22.9K`, `963K`, `70.2K`; enteros con coma de miles: `1,110`.
 - Tiempo: `347 h`, `9.2 h`, `23 min`, `1 min`.
-- Configurable a formato local (`11,6 mil M` en español) o compacto internacional (por defecto).
+- Siempre en formato inglés, independiente del idioma del sistema (la app es solo en inglés).
 
 ### 6.8 Extras del panel
 | ID | Requisito | Prio |
@@ -228,8 +228,9 @@ Reconstrucción exacta de la segunda captura. Las fórmulas están **comprobadas
 | Ubuntu | 22.04, 24.04 y 26.04 LTS (X11 y Wayland; GNOME y KDE) | x86_64, aarch64 |
 | Windows | 10 22H2 (mínimo técnico 1809, por ConPTY) y 11 | x86_64, aarch64 |
 
-### 7.4 Accesibilidad, idioma y privacidad
-Ver `docs/ui-spec.md` §8 (accesibilidad), §9 (idiomas) y `docs/security.md` (privacidad y seguridad).
+### 7.4 Idioma, accesibilidad y privacidad
+- **N-30: toda la app en inglés** (UI, notificaciones, errores, CLI, configuración y documentación de usuario). Sin traducciones en la v1.0. Ver `docs/ui-spec.md` §9.
+- Accesibilidad: `docs/ui-spec.md` §8. Privacidad y seguridad: `docs/security.md`.
 
 ## 8. Reglas de detección de tecnología (C-04)
 

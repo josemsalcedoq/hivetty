@@ -45,7 +45,7 @@ Starting ─► Working ◄──► Blocked(kind) ─► …
         Error · Exited
 ```
 
-- `Blocked.kind` ∈ { `permission`, `question`, `auth` } (de OSC 7501). En la UI se muestra como **Waiting** más el motivo ("Necesita permiso: Bash(cargo test)").
+- `Blocked.kind` ∈ { `permission`, `question`, `auth` } (de OSC 7501). En la UI se muestra como **Waiting** más el motivo ("Needs permission: Bash(cargo test)").
 - **`Done` persiste como no leído** hasta que el usuario enfoca la sesión. Mientras tanto, la fila y la pestaña llevan el punto.
 - El estado se **agrega**: panel → pestaña → proyecto → icono de la app (badge = sesiones Waiting más Done sin leer).
 

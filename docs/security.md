@@ -48,7 +48,7 @@ Cualquier programa (o un archivo con `cat`, o un servidor por SSH) puede emitir 
 ### 2.6 Logs de agentes y datos de uso
 - Se parsean como datos no confiables: límites de tamaño por línea (16 MiB) y errores tolerados.
 - La base de datos guarda **números, modelos, ids, títulos y rutas de proyecto**, nunca el contenido de los prompts ni del código.
-- Opciones: excluir proyectos, borrar todo el historial ("Purgar datos de uso") y retención en días.
+- Opciones: excluir proyectos, borrar todo el historial ("Purge usage data") y retención en días.
 
 ### 2.7 Actualizaciones
 - Solo HTTPS. Paquetes firmados por el sistema operativo (Developer ID + notarización en macOS, Authenticode en Windows) y, además, firma propia ed25519 (minisign) del feed de actualización.

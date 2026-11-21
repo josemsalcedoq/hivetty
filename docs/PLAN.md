@@ -33,6 +33,8 @@ Este documento es el índice y el resumen. El detalle está en:
 4. **Uso real y local**: tokens, caché, tareas y horas de agente por modelo y por agente, sin enviar nada fuera.
 5. **Sin parpadeo** con las TUIs de agentes (salida sincronizada bien hecha y sin saltos de scroll).
 
+**Idioma:** toda la app (interfaz, CLI, mensajes y documentación de usuario) está **en inglés**. Solo la planificación de `docs/` está en español.
+
 ### No-objetivos
 - No es un IDE ni un editor de código.
 - No llama a las APIs de los modelos: lanza y observa los CLIs oficiales en un PTY (así evita los problemas de facturación de las GUIs que usan los SDKs).
@@ -117,6 +119,5 @@ Unos 6 meses a tiempo parcial con agentes ayudando. Los hitos ★ son los de má
 2. ¿Repo público desde el principio o privado hasta la v0.5?
 3. ¿Hay acceso a un Mac (aunque sea en la nube) y a un equipo Ubuntu con GPU?
 4. ¿Organización legal para firmar en Windows, o certificado OV?
-5. ¿Idioma por defecto de la interfaz: español o el del sistema?
-6. ¿Se mantiene alacritty_terminal o se pasa a libghostty-vt tras SP-1b?
-7. ¿El panel de uso muestra coste estimado por defecto?
+5. ¿Se mantiene alacritty_terminal o se pasa a libghostty-vt tras SP-1b?
+6. ¿El panel de uso muestra coste estimado por defecto?

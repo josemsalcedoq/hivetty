@@ -17,7 +17,8 @@ A GPU-accelerated, cross-platform (macOS, Ubuntu, Windows) terminal written in R
 - Code ported from Alacritty or other projects keeps its license header and attribution.
 
 ## Conventions
-- Code, identifiers and commits are in English (Conventional Commits). Docs are in Spanish.
+- **The whole app is English only**: UI strings, notifications, errors, CLI help, config keys and comments, user docs. Keep UI strings centralized in `th-ui/src/strings.rs`.
+- Code, identifiers and commits are in English (Conventional Commits). Only the planning docs in `docs/` are in Spanish.
 - No AI attribution in commits or PRs.
 - Before finishing: the `termhive-platform-check` skill, `/code-review` and, if you touch IPC, parsers, hooks or updates, `/security-review`.
 - Tests at the right level (`docs/testing.md`). New agent-log parsers need real fixtures for each version.
