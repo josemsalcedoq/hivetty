@@ -187,10 +187,15 @@ fn body(ui: &mut egui::Ui, d: &Dashboard) {
         ),
         (
             strings::KPI_AGENT_TIME,
-            "—".to_owned(),
-            strings::AGENT_TIME_SOON.to_owned(),
+            duration_text(d.agent_seconds),
+            format!(
+                "{} {} {}",
+                strings::UP_TO,
+                d.max_concurrency,
+                strings::AT_ONCE
+            ),
             None,
-            Vec::new(),
+            d.daily.iter().map(|x| x.seconds).collect(),
         ),
     ];
     let per_row = if narrow { 2 } else { 4 };
@@ -299,6 +304,22 @@ pub(crate) fn delta_text(delta: f64) -> String {
         format!("+{pct:.0}%")
     } else {
         format!("{pct:.0}%")
+    }
+}
+
+/// Agent time the dashboard way: "347 h", "12 min", "40 s".
+pub(crate) fn duration_text(seconds: u64) -> String {
+    match seconds {
+        0..60 => format!("{seconds} s"),
+        60..3600 => format!("{} min", seconds / 60),
+        _ => {
+            let hours = seconds as f64 / 3600.0;
+            if hours < 10.0 {
+                format!("{hours:.1} h")
+            } else {
+                format!("{hours:.0} h")
+            }
+        }
     }
 }
 
@@ -573,7 +594,7 @@ fn agents(ui: &mut egui::Ui, d: &Dashboard) {
             a.input,
             max,
             a.output,
-            Some(a.tasks),
+            Some(duration_text(a.seconds)),
         );
     }
 }
@@ -586,7 +607,7 @@ fn table_row(
     input: u64,
     max: u64,
     output: u64,
-    tasks: Option<u64>,
+    extra: Option<String>,
 ) {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
@@ -601,7 +622,7 @@ fn table_row(
             font,
             theme::TEXT_PRIMARY,
         );
-        let numbers = if tasks.is_some() { 170.0 } else { 120.0 };
+        let numbers = if extra.is_some() { 180.0 } else { 120.0 };
         let bar_w = (ui.available_width() - numbers).max(20.0);
         let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(bar_w, 18.0), Sense::hover());
         let w = (bar_w * input as f32 / max as f32).max(1.0);
@@ -614,12 +635,8 @@ fn table_row(
             INPUT_COLOR,
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if let Some(t) = tasks {
-                ui.label(
-                    RichText::new(group_thousands(t))
-                        .size(12.0)
-                        .color(theme::TEXT_SECONDARY),
-                );
+            if let Some(text) = &extra {
+                ui.label(RichText::new(text).size(12.0).color(theme::TEXT_SECONDARY));
             }
             ui.label(
                 RichText::new(compact(output))
@@ -647,5 +664,9 @@ mod tests {
         assert_eq!(group_thousands(1110), "1,110");
         assert_eq!(group_thousands(2_674_000), "2,674,000");
         assert_eq!(group_thousands(12), "12");
+        assert_eq!(duration_text(40), "40 s");
+        assert_eq!(duration_text(720), "12 min");
+        assert_eq!(duration_text(5400), "1.5 h");
+        assert_eq!(duration_text(347 * 3600), "347 h");
     }
 }

@@ -1848,6 +1848,7 @@ name = "hv-usage"
 version = "0.0.0"
 dependencies = [
  "jiff",
+ "postcard",
  "serde",
  "serde_json",
 ]

@@ -5,6 +5,7 @@
 
 pub mod claude;
 pub mod dashboard;
+pub mod store;
 
 use std::collections::BTreeMap;
 

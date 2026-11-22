@@ -17,6 +17,8 @@ pub struct Day {
     pub input: u64,
     pub output: u64,
     pub tasks: u64,
+    /// Agent time that day, in seconds.
+    pub seconds: u64,
 }
 
 /// A row of the models table.
@@ -35,6 +37,8 @@ pub struct AgentRow {
     pub input: u64,
     pub output: u64,
     pub tasks: u64,
+    /// Agent time in seconds (U-50).
+    pub seconds: u64,
 }
 
 /// The dashboard for one range.
@@ -55,6 +59,9 @@ pub struct Dashboard {
     pub output_per_turn: u64,
     /// TASKS (U-12).
     pub tasks: u64,
+    /// AGENT TIME in seconds and the most sessions active at once (U-13).
+    pub agent_seconds: u64,
+    pub max_concurrency: u32,
     /// Change against the previous period of the same length (U-14); `None` without data or
     /// for "All".
     pub delta_input: Option<f64>,
@@ -84,6 +91,40 @@ fn local(ts: &str, tz: &TimeZone) -> Option<(Date, usize, u8)> {
     let weekday = zoned.weekday().to_monday_zero_offset() as usize;
     let hour = u8::try_from(zoned.hour()).ok()?;
     Some((zoned.date(), weekday, hour))
+}
+
+/// Gaps between a session's events longer than this end a working stretch (docs/adr/0005).
+const IDLE_GAP: i64 = 5 * 60;
+
+/// Working stretches `[start, end]` (Unix seconds) of one session from its event times.
+fn stretches(mut times: Vec<i64>) -> Vec<(i64, i64)> {
+    times.sort_unstable();
+    let mut out: Vec<(i64, i64)> = Vec::new();
+    for t in times {
+        match out.last_mut() {
+            Some((_, end)) if t - *end < IDLE_GAP => *end = t,
+            _ => out.push((t, t)),
+        }
+    }
+    out
+}
+
+/// The most stretches overlapping at one moment.
+fn max_overlap(stretches: &[(i64, i64)]) -> u32 {
+    let mut edges: Vec<(i64, i32)> = stretches
+        .iter()
+        .filter(|(s, e)| e > s)
+        .flat_map(|(s, e)| [(*s, 1), (*e, -1)])
+        .collect();
+    // Ends before starts at the same instant: touching stretches do not overlap.
+    edges.sort_by_key(|(t, d)| (*t, *d));
+    let mut current = 0;
+    let mut best = 0;
+    for (_, d) in edges {
+        current += d;
+        best = best.max(current);
+    }
+    best as u32
 }
 
 /// `(current - previous) / previous`, or `None` when there is nothing to compare with.
@@ -158,6 +199,7 @@ pub fn build(
             input: 0,
             output: 0,
             tasks: 0,
+            seconds: 0,
         });
         day.input += r.total_input();
         day.output += r.output_tokens;
@@ -179,10 +221,52 @@ pub fn build(
                 input: 0,
                 output: 0,
                 tasks: 0,
+                seconds: 0,
             });
         agent.input += r.total_input();
         agent.output += r.output_tokens;
     }
+    // Event times per (agent, session) inside the range, for agent time (U-13).
+    let mut sessions: BTreeMap<(String, String), Vec<i64>> = BTreeMap::new();
+    let seconds_of = |ts: &str| ts.parse::<Timestamp>().ok().map(|t| t.as_second());
+    for (r, (date, ..)) in &located {
+        if in_range(*date)
+            && let (Some(session), Some(t)) = (&r.session_id, seconds_of(&r.timestamp))
+        {
+            sessions
+                .entry((r.agent.to_owned(), session.clone()))
+                .or_default()
+                .push(t);
+        }
+    }
+    for (t, date) in &task_days {
+        if in_range(*date)
+            && let (Some(session), Some(secs)) = (&t.session_id, seconds_of(&t.timestamp))
+        {
+            sessions
+                .entry((t.agent.to_owned(), session.clone()))
+                .or_default()
+                .push(secs);
+        }
+    }
+    let mut all_stretches = Vec::new();
+    let mut agent_seconds: BTreeMap<String, u64> = BTreeMap::new();
+    let mut day_seconds: BTreeMap<Date, u64> = BTreeMap::new();
+    for ((agent, _), times) in sessions {
+        for (start, end) in stretches(times) {
+            let length = u64::try_from(end - start).unwrap_or(0);
+            *agent_seconds.entry(agent.clone()).or_default() += length;
+            if let Ok(ts) = Timestamp::from_second(start) {
+                *day_seconds
+                    .entry(ts.to_zoned_datetime(tz.clone()).date())
+                    .or_default() += length;
+            }
+            all_stretches.push((start, end));
+        }
+    }
+    let total_agent_seconds: u64 = agent_seconds.values().sum();
+    let max_concurrency = max_overlap(&all_stretches);
+
     let mut task_count = 0;
     let mut prev_tasks = 0;
     for (t, date) in &task_days {
@@ -200,6 +284,7 @@ pub fn build(
                 input: 0,
                 output: 0,
                 tasks: 0,
+                seconds: 0,
             })
             .tasks += 1;
         agents
@@ -209,6 +294,7 @@ pub fn build(
                 input: 0,
                 output: 0,
                 tasks: 0,
+                seconds: 0,
             })
             .tasks += 1;
     }
@@ -217,12 +303,15 @@ pub fn build(
     let mut daily = Vec::new();
     let mut d = first_day;
     while d <= today {
-        daily.push(by_day.get(&d).copied().unwrap_or(Day {
+        let mut day = by_day.get(&d).copied().unwrap_or(Day {
             date: d,
             input: 0,
             output: 0,
             tasks: 0,
-        }));
+            seconds: 0,
+        });
+        day.seconds = day_seconds.get(&d).copied().unwrap_or(0);
+        daily.push(day);
         let Ok(next) = d.tomorrow() else { break };
         d = next;
     }
@@ -264,6 +353,18 @@ pub fn build(
         })
         .collect();
     providers.sort_by(|a, b| b.1.total_cmp(&a.1));
+    for (agent, seconds) in &agent_seconds {
+        agents
+            .entry(agent.clone())
+            .or_insert_with(|| AgentRow {
+                agent: agent.clone(),
+                input: 0,
+                output: 0,
+                tasks: 0,
+                seconds: 0,
+            })
+            .seconds = *seconds;
+    }
     let mut agents: Vec<AgentRow> = agents.into_values().collect();
     agents.sort_by(|a, b| b.input.cmp(&a.input).then(b.tasks.cmp(&a.tasks)));
 
@@ -280,6 +381,8 @@ pub fn build(
         turns,
         output_per_turn: output.checked_div(turns).unwrap_or(0),
         tasks: task_count,
+        agent_seconds: total_agent_seconds,
+        max_concurrency,
         delta_input: previous.and_then(|_| delta(input, prev_input)),
         delta_output: previous.and_then(|_| delta(output, prev_output)),
         delta_tasks: previous.and_then(|_| delta(task_count, prev_tasks)),
@@ -406,6 +509,30 @@ mod tests {
         // Rows add up to the totals (U-43).
         assert_eq!(d.models.iter().map(|m| m.output).sum::<u64>(), d.output);
         assert_eq!(d.most_active, Some((Weekday::Saturday, 10)));
+    }
+
+    #[test]
+    fn agent_time_sums_stretches_and_counts_overlap() {
+        let tz = TimeZone::UTC;
+        let mk = |ts: &str, session: &str| {
+            let mut r = rec(ts, "m", "anthropic", 1, 0, 1);
+            r.session_id = Some(session.into());
+            r
+        };
+        let records = vec![
+            // Session a: 10:00 → 10:04 (one stretch, 4 min), then 10:30 alone (0 s).
+            mk("2026-11-21T10:00:00Z", "a"),
+            mk("2026-11-21T10:04:00Z", "a"),
+            mk("2026-11-21T10:30:00Z", "a"),
+            // Session b overlaps a: 10:02 → 10:06 (4 min).
+            mk("2026-11-21T10:02:00Z", "b"),
+            mk("2026-11-21T10:06:00Z", "b"),
+        ];
+        let d = build(&records, &[], Some(7), date(2026, 11, 21), &tz);
+        assert_eq!(d.agent_seconds, 8 * 60);
+        assert_eq!(d.max_concurrency, 2);
+        assert_eq!(d.agents[0].seconds, 8 * 60);
+        assert_eq!(d.daily.last().unwrap().seconds, 8 * 60);
     }
 
     #[test]

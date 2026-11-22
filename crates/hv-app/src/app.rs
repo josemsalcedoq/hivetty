@@ -2394,12 +2394,24 @@ impl UsageData {
     /// Reads every supported agent's logs (Claude Code for now). Blocking: call off the UI
     /// thread.
     pub(crate) fn read() -> Self {
-        let (records, tasks) = hv_usage::claude::default_root()
-            .map(|root| hv_usage::claude::scan_activity(&root))
+        // Incremental: the cache remembers how far each log was read (docs/adr/0006).
+        let cache = hv_config::data_dir().map(|d| d.join("usage.cache"));
+        let mut store = cache
+            .as_deref()
+            .map(hv_usage::store::Store::load)
             .unwrap_or_default();
+        if let Some(root) = hv_usage::claude::default_root() {
+            let (records, tasks) = store.ingest_claude(&root);
+            if (records > 0 || tasks > 0)
+                && let Some(cache) = &cache
+                && let Err(err) = store.save(cache)
+            {
+                log::warn!("cannot save the usage cache: {err}");
+            }
+        }
         Self {
-            records,
-            tasks,
+            records: store.records(),
+            tasks: store.tasks(),
             read_at: Some(Instant::now()),
         }
     }

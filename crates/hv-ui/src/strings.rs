@@ -162,8 +162,10 @@ pub const FROM_CACHE: &str = "from cache";
 pub const PER_TURN: &str = "per turn";
 /// KPI subtitles.
 pub const TURNS: &str = "turns";
-/// Agent time is measured from the states hivetty observes; shown once that is recorded.
-pub const AGENT_TIME_SOON: &str = "measured by hivetty (coming soon)";
+/// "up to 3 at once".
+pub const UP_TO: &str = "up to";
+/// "up to 3 at once".
+pub const AT_ONCE: &str = "at once";
 /// Chart titles.
 pub const TOKENS_BY_DAY: &str = "TOKENS BY DAY";
 /// Chart titles.
