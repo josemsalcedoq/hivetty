@@ -37,6 +37,7 @@ OPTIONS:
     --find <PATTERN>     With --screenshot, search the scrollback (regex) and show the result
     --preedit <TEXT>     With --screenshot, draw TEXT as input-method composition at the cursor
     --split              With --screenshot, run the program in two panes side by side
+    --palette            With --screenshot --ui, show the command palette
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
     hook --agent <ID> --event <NAME>
@@ -64,6 +65,7 @@ enum Command {
         ui: bool,
         preedit: Option<String>,
         split: bool,
+        palette: bool,
     },
     Doctor,
     Usage {
@@ -83,6 +85,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut ui = false;
     let mut preedit = None;
     let mut split = false;
+    let mut palette = false;
     let mut record: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
@@ -130,6 +133,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 i += 1;
             }
             "--split" => split = true,
+            "--palette" => palette = true,
             "--preedit" => {
                 preedit = Some(value(i)?.clone());
                 i += 1;
@@ -160,6 +164,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             ui,
             preedit,
             split,
+            palette,
         },
         None => Command::Run(spec, record),
     })
@@ -220,6 +225,7 @@ fn main() -> ExitCode {
             ui,
             preedit,
             split,
+            palette,
         } => {
             let opts = headless::Capture {
                 cols,
@@ -231,6 +237,7 @@ fn main() -> ExitCode {
                 ui,
                 preedit,
                 split,
+                palette,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))

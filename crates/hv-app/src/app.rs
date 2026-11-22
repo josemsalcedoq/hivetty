@@ -261,6 +261,9 @@ struct App {
     bell_until: Option<Instant>,
     /// Sidebar shown (toggled with Ctrl+Shift+B / Cmd+B).
     sidebar_visible: bool,
+    /// An action chosen in the chrome (palette, tabs) during a frame, run afterwards where the
+    /// event loop is available.
+    pending_action: Option<Action>,
 }
 
 #[derive(Debug, Default)]
@@ -329,6 +332,7 @@ impl App {
             record: None,
             bell_until: None,
             sidebar_visible: true,
+            pending_action: None,
         }
     }
 
@@ -530,6 +534,25 @@ impl App {
             Action::FontBigger => zoom(ui, 1.0),
             Action::FontSmaller => zoom(ui, -1.0),
             Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
+            Action::CommandPalette => {
+                let items = crate::keymap::PALETTE_ACTIONS
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(id, name)| {
+                        let action = Action::parse(name)?;
+                        Some(hv_ui::PaletteItem {
+                            id,
+                            label: hv_ui::strings::action_label(name)?.to_owned(),
+                            hint: self
+                                .keymap
+                                .chord_for(&action)
+                                .map(crate::keymap::Chord::pretty)
+                                .unwrap_or_default(),
+                        })
+                    })
+                    .collect();
+                ui.chrome.open_palette(items);
+            }
             Action::SendText(text) => {
                 if let Some(pane) = ui.focused() {
                     pane.session.scroll_to_bottom();
@@ -1144,6 +1167,14 @@ impl App {
         if let Some(action) = tab_action {
             self.on_tab_action(action);
         }
+        if let Some(id) = out.palette_choice {
+            self.pending_action = crate::keymap::PALETTE_ACTIONS
+                .get(id)
+                .and_then(|name| Action::parse(name));
+            if let Some(ui) = &self.ui {
+                ui.window.request_redraw();
+            }
+        }
     }
 
     fn on_tab_action(&mut self, action: hv_ui::TabAction) {
@@ -1296,16 +1327,27 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        // egui sees pointer and window events; the keyboard belongs to the terminal.
+        // egui sees pointer and window events; the keyboard belongs to the terminal unless an
+        // egui text field (the command palette) is open.
+        let palette_open = self.ui.as_ref().is_some_and(|ui| ui.chrome.palette_open());
         if let Some(ui) = &mut self.ui
-            && !matches!(
-                event,
-                WindowEvent::KeyboardInput { .. }
-                    | WindowEvent::Ime(_)
-                    | WindowEvent::RedrawRequested
-            )
+            && !matches!(event, WindowEvent::RedrawRequested)
+            && (palette_open
+                || !matches!(
+                    event,
+                    WindowEvent::KeyboardInput { .. } | WindowEvent::Ime(_)
+                ))
         {
             let _ = ui.egui.on_window_event(&ui.window, &event);
+            if palette_open
+                && matches!(
+                    event,
+                    WindowEvent::KeyboardInput { .. } | WindowEvent::Ime(_)
+                )
+            {
+                ui.window.request_redraw();
+                return;
+            }
         }
         match event {
             WindowEvent::CloseRequested => {
@@ -1350,6 +1392,9 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(action) = self.pending_action.take() {
+            self.run_action(action, event_loop);
+        }
         let Some(ui) = &self.ui else {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;

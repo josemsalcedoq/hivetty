@@ -1,8 +1,11 @@
 //! Window chrome built with egui (ADR 0003): sidebar, and later tabs, attention inbox and the
 //! usage dashboard. The terminal grid itself is drawn by `hv-render` in the space egui leaves.
 
+mod palette;
 pub mod strings;
 mod theme;
+
+pub use palette::PaletteItem;
 
 use egui::{Color32, CornerRadius, Margin, RichText, Sense, Stroke, Vec2};
 
@@ -81,6 +84,8 @@ pub struct ChromeOutput {
     pub clicked_session: Option<usize>,
     /// A click in the tab bar.
     pub tab_action: Option<TabAction>,
+    /// The command chosen in the palette (its [`PaletteItem::id`]).
+    pub palette_choice: Option<usize>,
 }
 
 impl std::fmt::Debug for ChromeOutput {
@@ -97,6 +102,7 @@ impl std::fmt::Debug for ChromeOutput {
 #[derive(Debug, Default)]
 pub struct Chrome {
     ctx: egui::Context,
+    palette: Option<palette::Palette>,
 }
 
 /// Sidebar width in points (docs/ui-spec.md 1: 300 px default; narrower until tabs exist).
@@ -107,7 +113,7 @@ impl Chrome {
     pub fn new() -> Self {
         let ctx = egui::Context::default();
         theme::apply(&ctx);
-        Self { ctx }
+        Self { ctx, palette: None }
     }
 
     /// The egui context (for the winit integration).
@@ -119,7 +125,9 @@ impl Chrome {
     pub fn run(&mut self, input: egui::RawInput, model: &ChromeModel) -> ChromeOutput {
         let mut clicked_session = None;
         let mut tab_action = None;
+        let mut palette_choice = None;
         let mut central = egui::Rect::NOTHING;
+        let palette = &mut self.palette;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 egui::Panel::left("sidebar")
@@ -150,6 +158,16 @@ impl Chrome {
                     });
             }
             central = ui.available_rect_before_wrap();
+            if let Some(open) = palette.as_mut() {
+                match open.show(ui.ctx()) {
+                    palette::PaletteOutcome::Open => {}
+                    palette::PaletteOutcome::Dismissed => *palette = None,
+                    palette::PaletteOutcome::Chosen(id) => {
+                        palette_choice = Some(id);
+                        *palette = None;
+                    }
+                }
+            }
         });
         let ppp = full.pixels_per_point;
         let terminal_area = [
@@ -163,6 +181,7 @@ impl Chrome {
             terminal_area,
             clicked_session,
             tab_action,
+            palette_choice,
         }
     }
 
@@ -173,6 +192,16 @@ impl Chrome {
         pixels_per_point: f32,
     ) -> Vec<egui::ClippedPrimitive> {
         self.ctx.tessellate(shapes, pixels_per_point)
+    }
+
+    /// Opens the command palette with these entries.
+    pub fn open_palette(&mut self, items: Vec<PaletteItem>) {
+        self.palette = Some(palette::Palette::new(items));
+    }
+
+    /// Whether the command palette is open (it takes the keyboard).
+    pub fn palette_open(&self) -> bool {
+        self.palette.is_some()
     }
 
     /// Whether egui wants keyboard input (a text field has focus).
@@ -445,6 +474,52 @@ mod tests {
         assert_eq!(format_elapsed(21 * 60 + 5), "21m");
         assert_eq!(format_elapsed(3 * 3600), "3h");
         assert_eq!(format_elapsed(2 * 86_400 + 1), "2d");
+    }
+
+    #[test]
+    fn palette_filters_by_typing_and_runs_the_choice_on_enter() {
+        let mut chrome = Chrome::new();
+        let item = |id: usize, label: &str| PaletteItem {
+            id,
+            label: label.into(),
+            hint: String::new(),
+        };
+        chrome.open_palette(vec![
+            item(0, "New tab"),
+            item(1, "Split right"),
+            item(2, "Split down"),
+        ]);
+        let frame = |chrome: &mut Chrome, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut out = chrome.run(input, &ChromeModel::default());
+            out.full.textures_delta.clear();
+            out.palette_choice
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        assert_eq!(frame(&mut chrome, vec![]), None); // focuses the text field
+        assert_eq!(
+            frame(&mut chrome, vec![egui::Event::Text("spd".into())]),
+            None
+        );
+        assert_eq!(frame(&mut chrome, vec![key(egui::Key::Enter)]), Some(2));
+        assert!(!chrome.palette_open());
+
+        chrome.open_palette(vec![item(0, "New tab")]);
+        assert_eq!(frame(&mut chrome, vec![key(egui::Key::Escape)]), None);
+        assert!(!chrome.palette_open());
     }
 
     #[test]

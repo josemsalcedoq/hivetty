@@ -100,6 +100,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 - 🟡 F2-03: barra de pestañas (título, punto de estado, cerrar, clic central, `+`). Faltan reordenar arrastrando, renombrar e iconos.
 - 🟡 F2-04: punto con el estado más urgente de la pestaña. Faltan spinner, "no visto", progreso OSC 9;4 y campana.
 - 🟡 F2-06: `keymap.rs` con acciones con nombre, acordes en texto (`primary` = Cmd/Ctrl), los atajos de `keybindings.md` por SO, `[[keybindings]]` en `config.toml` (reasignar, `none`, `send_text`) y condiciones `when` (`os`, `search_open`, `terminal_focused`, `agent`, `!`). Recarga en caliente. Falta saber el agente del panel para `agent == …` (F4).
+- ✅ F2-07: paleta de comandos (`Ctrl+Shift+P` / `⇧⌘P`) con filtro difuso, flechas, Enter y Esc, y el atajo de cada acción. Mientras está abierta, el teclado y el IME van a egui (cubre el "IME en un campo de egui" de SP-3; falta probarlo a mano con japonés).
 - Cada panel recibe su `HIVETTY_SESSION_ID` y los hooks se enrutan a su panel. Los paneles nuevos heredan el cwd del panel con foco (adelanta F3-08 cuando la shell informa el cwd).
 - `hivetty --screenshot --ui --split` captura dos paneles con la barra de pestañas.
 

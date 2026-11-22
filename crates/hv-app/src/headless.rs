@@ -33,6 +33,8 @@ pub(crate) struct Capture {
     pub(crate) preedit: Option<String>,
     /// Run the program in two panes side by side (the second one focused).
     pub(crate) split: bool,
+    /// Show the command palette (with `ui`).
+    pub(crate) palette: bool,
 }
 
 impl Default for Capture {
@@ -48,6 +50,7 @@ impl Default for Capture {
             ui: false,
             preedit: None,
             split: false,
+            palette: false,
         }
     }
 }
@@ -198,6 +201,27 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
                 active: true,
             }],
         };
+        if opts.palette {
+            let items = crate::keymap::PALETTE_ACTIONS
+                .iter()
+                .enumerate()
+                .filter_map(|(id, name)| {
+                    let action = crate::keymap::Action::parse(name)?;
+                    Some(hv_ui::PaletteItem {
+                        id,
+                        label: hv_ui::strings::action_label(name)?.to_owned(),
+                        hint: crate::keymap::Keymap::defaults()
+                            .chord_for(&action)
+                            .map(crate::keymap::Chord::pretty)
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect();
+            chrome.open_palette(items);
+            // One frame to lay the palette out and focus it.
+            let warm = chrome.run(raw_input(width, height), &model);
+            pending_textures.append(warm.full.textures_delta);
+        }
         let out = chrome.run(raw_input(width, height), &model);
         let mut textures = std::mem::take(&mut pending_textures);
         textures.append(out.full.textures_delta);

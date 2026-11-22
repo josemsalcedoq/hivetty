@@ -27,6 +27,7 @@ pub(crate) enum Action {
     FontBigger,
     FontSmaller,
     FontReset,
+    CommandPalette,
     /// Write this text to the focused terminal (`action = { send_text = "…" }`).
     SendText(String),
     /// Explicitly unbound (`action = "none"` in the config).
@@ -60,6 +61,7 @@ impl Action {
             "font_bigger" => Self::FontBigger,
             "font_smaller" => Self::FontSmaller,
             "font_reset" => Self::FontReset,
+            "command_palette" => Self::CommandPalette,
             "none" => Self::None,
             other => {
                 let n: usize = other.strip_prefix("go_to_tab_")?.parse().ok()?;
@@ -95,6 +97,63 @@ impl fmt::Display for Chord {
             }
         }
         f.write_str(&self.key)
+    }
+}
+
+impl Chord {
+    /// How the chord is shown to people: "Ctrl+Shift+D", or "⇧⌘D" on macOS.
+    pub(crate) fn pretty(&self) -> String {
+        let key = match self.key.as_str() {
+            // Words, not arrows: the UI font has no arrow glyphs.
+            "left" => "Left".to_owned(),
+            "right" => "Right".to_owned(),
+            "up" => "Up".to_owned(),
+            "down" => "Down".to_owned(),
+            "enter" => if cfg!(target_os = "macos") {
+                "↩"
+            } else {
+                "Enter"
+            }
+            .to_owned(),
+            "pageup" => "PgUp".to_owned(),
+            "pagedown" => "PgDn".to_owned(),
+            k if k.chars().count() == 1 => k.to_uppercase(),
+            k => {
+                let mut chars = k.chars();
+                chars
+                    .next()
+                    .map(|c| c.to_uppercase().chain(chars).collect())
+                    .unwrap_or_default()
+            }
+        };
+        if cfg!(target_os = "macos") {
+            let mut out = String::new();
+            for (on, sym) in [
+                (self.ctrl, "⌃"),
+                (self.alt, "⌥"),
+                (self.shift, "⇧"),
+                (self.super_key, "⌘"),
+            ] {
+                if on {
+                    out.push_str(sym);
+                }
+            }
+            out + &key
+        } else {
+            let mut parts = Vec::new();
+            for (on, name) in [
+                (self.ctrl, "Ctrl"),
+                (self.shift, "Shift"),
+                (self.alt, "Alt"),
+                (self.super_key, "Win"),
+            ] {
+                if on {
+                    parts.push(name.to_owned());
+                }
+            }
+            parts.push(key);
+            parts.join("+")
+        }
     }
 }
 
@@ -227,6 +286,32 @@ struct Binding {
     when: Option<When>,
 }
 
+/// Actions listed in the command palette, by config name, in display order.
+pub(crate) const PALETTE_ACTIONS: &[&str] = &[
+    "new_tab",
+    "split_right",
+    "split_down",
+    "close_pane",
+    "toggle_zoom",
+    "next_tab",
+    "previous_tab",
+    "focus_left",
+    "focus_right",
+    "focus_up",
+    "focus_down",
+    "resize_left",
+    "resize_right",
+    "resize_up",
+    "resize_down",
+    "toggle_sidebar",
+    "find",
+    "copy",
+    "paste",
+    "font_bigger",
+    "font_smaller",
+    "font_reset",
+];
+
 /// Shortcuts in effect: the defaults with the user's overrides applied.
 #[derive(Debug, Clone)]
 pub(crate) struct Keymap {
@@ -311,6 +396,23 @@ impl Keymap {
         (self, errors)
     }
 
+    /// The first unconditional chord bound to `action`, for display ("Ctrl+Shift+D").
+    pub(crate) fn chord_for(&self, action: &Action) -> Option<&Chord> {
+        self.bindings
+            .iter()
+            .filter(|b| b.when.is_none() && b.action == *action)
+            .find(|b| self.lookup_unconditional(&b.chord) == Some(action))
+            .map(|b| &b.chord)
+    }
+
+    fn lookup_unconditional(&self, chord: &Chord) -> Option<&Action> {
+        self.bindings
+            .iter()
+            .rev()
+            .find(|b| b.when.is_none() && b.chord == *chord)
+            .map(|b| &b.action)
+    }
+
     /// The action bound to a key press in this context, if any. Later bindings (the user's)
     /// win over earlier ones (the defaults).
     pub(crate) fn lookup(&self, pressed: &Chord, ctx: &Context<'_>) -> Option<Action> {
@@ -346,6 +448,7 @@ const MAC: &[(&str, &str)] = &[
     ("cmd+=", "font_bigger"),
     ("cmd+-", "font_smaller"),
     ("cmd+0", "font_reset"),
+    ("shift+cmd+p", "command_palette"),
 ];
 
 const OTHERS: &[(&str, &str)] = &[
@@ -373,6 +476,7 @@ const OTHERS: &[(&str, &str)] = &[
     ("ctrl+=", "font_bigger"),
     ("ctrl+-", "font_smaller"),
     ("ctrl+0", "font_reset"),
+    ("ctrl+shift+p", "command_palette"),
 ];
 
 #[cfg(test)]

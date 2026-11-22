@@ -30,3 +30,37 @@ pub const DEFAULT_TITLE: &str = "Shell";
 pub const NEW_TAB: &str = "New tab";
 /// Accessible name of a tab's close button.
 pub const CLOSE_TAB: &str = "Close tab";
+/// Placeholder of the command palette's filter box.
+pub const PALETTE_HINT: &str = "Type a command…";
+/// Shown when no command matches.
+pub const PALETTE_EMPTY: &str = "No matching commands";
+
+/// Label of an action in the command palette, by its config name (docs/keybindings.md).
+pub fn action_label(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "new_tab" => "New tab",
+        "close_pane" => "Close pane",
+        "split_right" => "Split right",
+        "split_down" => "Split down",
+        "focus_left" => "Focus pane on the left",
+        "focus_right" => "Focus pane on the right",
+        "focus_up" => "Focus pane above",
+        "focus_down" => "Focus pane below",
+        "resize_left" => "Move divider left",
+        "resize_right" => "Move divider right",
+        "resize_up" => "Move divider up",
+        "resize_down" => "Move divider down",
+        "toggle_zoom" => "Maximize or restore pane",
+        "next_tab" => "Next tab",
+        "previous_tab" => "Previous tab",
+        "toggle_sidebar" => "Show or hide sidebar",
+        "find" => "Find in scrollback",
+        "copy" => "Copy",
+        "paste" => "Paste",
+        "font_bigger" => "Increase font size",
+        "font_smaller" => "Decrease font size",
+        "font_reset" => "Reset font size",
+        "command_palette" => "Command palette",
+        _ => return None,
+    })
+}
