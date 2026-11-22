@@ -7,7 +7,7 @@
 | Unitarias | `cargo nextest` | lógica pura: máquina de estados, detección de tecnología, keymaps, formateo de números, fórmulas de uso | CI en las 3 plataformas |
 | Snapshot de la rejilla | `insta` | alimentar bytes → instantánea textual de la rejilla (celdas, atributos, cursor) | CI |
 | Propiedades | `proptest` | invariantes de la rejilla: redimensionar y *reflow* no pierden texto, la selección siempre es válida | CI |
-| Dorados de render | renderer por software (`tiny-skia`) | pantalla de referencia → PNG; comparación con la imagen guardada | CI |
+| Dorados de render | captura sin cabeza (`--screenshot`), con GPU o con el adaptador por software (ADR 0007) | pantalla de referencia → PNG; comparación con la imagen guardada | CI |
 | CPU frente a GPU | renderer `wgpu` en CI (ver §3) | misma escena por los dos caminos; objetivo **0 píxeles distintos** (tolerancia máxima: 1 de diferencia por canal en ≤ 0.1% de píxeles) | CI |
 | Integración de PTY | por SO | lanzar la shell, escribir y leer, redimensionar, matar el árbol de procesos, ConPTY | CI en las 3 plataformas |
 | Integración de shell | zsh, bash, fish y pwsh instalados en CI | OSC 133/7 emitidos correctamente, inyección sin romper la configuración del usuario | CI |

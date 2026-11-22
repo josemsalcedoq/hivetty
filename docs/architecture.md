@@ -96,7 +96,7 @@ trait PaneHost {
 5. `egui-wgpu` pinta la UI en la **misma** `RenderPass` y el mismo `Device`.
 6. `present()`. Modo `Fifo` (vsync) por defecto. Sin cambios no hay frame (0% de CPU en reposo).
 
-Renderer por software: el mismo trait `Renderer` sobre `tiny-skia`, con el mismo atlas rasterizado por CPU. Sirve para los dorados y como respaldo.
+Renderer por software: el mismo renderer wgpu sobre el adaptador de reserva (WARP en Windows, llvmpipe en Linux), activado con `--safe` ([ADR 0007](adr/0007-software-rendering-wgpu-fallback.md)). No hay un segundo renderer con `tiny-skia`.
 
 ## 5. Modelo de datos (UI)
 
