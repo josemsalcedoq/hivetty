@@ -584,7 +584,7 @@ mod tests {
             EventProxy(tx),
         );
         let mut processor: Processor<StdSyncHandler> = Processor::new();
-        processor.advance(&mut term, b"]52;c;aGVsbG8=");
+        processor.advance(&mut term, b"\x1b]52;c;aGVsbG8=\x07");
         let stored = rx.try_iter().find_map(|e| match e {
             Event::ClipboardStore(_, text) => Some(text),
             _ => None,

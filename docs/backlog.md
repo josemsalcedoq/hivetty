@@ -7,7 +7,7 @@ Tamaño: **XS** ≤ 0.5 días · **S** ≈ 1 día · **M** ≈ 2–3 días · **
 
 ## SP — Spikes de riesgo (antes de F1, 2 semanas)
 
-**Estado (2026-11-21):** ✅ SP-1 ([nota](spikes/SP-1.md)), 🟡 SP-2 (falta Windows 10; [nota](spikes/SP-2.md)), 🟡 SP-3 (barra lateral de egui en la ventana real; AccessKit conectado; faltan IME en campos y la prueba con lectores de pantalla; [nota](spikes/SP-3.md)), ✅ SP-4 (hook → IPC en ~11 ms; falta WSL; [nota](spikes/SP-4.md)), ✅ SP-5 (coincidencia exacta con ccusage; [nota](spikes/SP-5.md)), ✅ SP-7 (cargo-packager: dmg, deb, AppImage y MSI sin firmar en CI; [nota](spikes/SP-7.md)). ✅ SP-6 (swash sin hinting y mezcla sRGB; [nota](spikes/SP-6.md)). Pendiente: SP-1b.
+**Estado (2026-11-21):** ✅ SP-1 ([nota](spikes/SP-1.md)), ✅ SP-1b (libghostty-vt 1.0 parsea ×2–2.4 más rápido que alacritty_terminal, pero no se cambia ahora: bindings 1.0 sin publicar, tipos `!Send`, Zig en CI; se revisa al empezar F7 o si sale un crate sobre la 1.x; [nota](spikes/SP-1b.md)), 🟡 SP-2 (falta Windows 10; [nota](spikes/SP-2.md)), 🟡 SP-3 (barra lateral de egui en la ventana real; AccessKit conectado; faltan IME en campos y la prueba con lectores de pantalla; [nota](spikes/SP-3.md)), ✅ SP-4 (hook → IPC en ~11 ms; falta WSL; [nota](spikes/SP-4.md)), ✅ SP-5 (coincidencia exacta con ccusage; [nota](spikes/SP-5.md)), ✅ SP-7 (cargo-packager: dmg, deb, AppImage y MSI sin firmar en CI; [nota](spikes/SP-7.md)). ✅ SP-6 (swash sin hinting y mezcla sRGB; [nota](spikes/SP-6.md)). **Spikes cerrados** salvo lo que depende de hardware (Windows 10 en SP-2) o de pruebas manuales (IME y lectores de pantalla en SP-3, WSL en SP-4).
 
 Cada spike es código desechable en la rama `spike/…` y termina con una nota en `docs/spikes/<id>.md`: qué se probó, resultado y decisión.
 

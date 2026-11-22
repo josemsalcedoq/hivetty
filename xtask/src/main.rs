@@ -2,6 +2,7 @@
 
 mod conpty;
 
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 const HELP: &str = "\
@@ -9,6 +10,7 @@ cargo xtask <command>
 
 COMMANDS:
     ci              Run the same checks as CI: fmt, clippy, tests, cargo-deny
+    check-sources   Fail on raw control bytes (ESC, NUL...) in .rs files
     golden-update   Regenerate golden render images            (phase F1)
     fixtures        Refresh agent log / hook fixtures           (phase F4-F5)
     conpty-fetch    Download, verify and install the bundled ConPTY next to the exe
@@ -21,6 +23,17 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("ci") => ci(),
+        Some("check-sources") => {
+            let offenders = control_bytes_in_sources(Path::new("."));
+            for (path, offset, byte) in &offenders {
+                println!("{}:{offset}: raw control byte {byte:#04x}", path.display());
+            }
+            if offenders.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
         Some("bench") => {
             let ok = Command::new("cargo")
                 .args([
@@ -93,6 +106,16 @@ fn ci() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+    // Raw control bytes in sources (an ESC or NUL pasted into a literal) compile but are
+    // invisible in review and make tools treat the file as binary: write them escaped.
+    let offenders = control_bytes_in_sources(Path::new("."));
+    if !offenders.is_empty() {
+        for (path, offset, byte) in &offenders {
+            println!("{}:{offset}: raw control byte {byte:#04x}", path.display());
+        }
+        println!("xtask ci: write control characters as escapes (\\x1b, \\0, \\r)");
+        return ExitCode::FAILURE;
+    }
     // Code behind cfg(unix) is invisible to clippy on Windows (and vice versa). Check the crates
     // without native build dependencies for the other OSes too, when their std is installed
     // (`rustup target add x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc`).
@@ -123,6 +146,36 @@ fn ci() -> ExitCode {
     }
     println!("xtask ci: all checks passed");
     ExitCode::SUCCESS
+}
+
+/// `(file, offset, byte)` for every control byte other than tab, LF and CR in the `.rs` files
+/// under `crates/` and `xtask/`.
+fn control_bytes_in_sources(root: &Path) -> Vec<(PathBuf, usize, u8)> {
+    fn walk(dir: &Path, out: &mut Vec<(PathBuf, usize, u8)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n != "target") {
+                    walk(&path, out);
+                }
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && let Ok(bytes) = std::fs::read(&path)
+            {
+                for (offset, &byte) in bytes.iter().enumerate() {
+                    if byte < 0x20 && !matches!(byte, b'\t' | b'\n' | b'\r') {
+                        out.push((path.clone(), offset, byte));
+                    }
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&root.join("crates"), &mut out);
+    walk(&root.join("xtask"), &mut out);
+    out
 }
 
 /// Other-OS targets checked by `xtask ci` when installed: `(std::env::consts::OS, triple)`.

@@ -49,6 +49,9 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+      - name: No raw control bytes in sources
+        run: cargo xtask check-sources
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
