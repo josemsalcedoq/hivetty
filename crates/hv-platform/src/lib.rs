@@ -21,6 +21,13 @@ pub fn attach_parent_console() {
     }
 }
 
+/// The effective user id of this process.
+#[cfg(unix)]
+pub fn effective_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -28,11 +35,15 @@ mod tests {
         super::attach_parent_console();
         super::attach_parent_console();
     }
-}
 
-/// The effective user id of this process.
-#[cfg(unix)]
-pub fn effective_uid() -> u32 {
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    unsafe { libc::geteuid() }
+    #[cfg(unix)]
+    #[test]
+    fn effective_uid_owns_new_files() {
+        use std::os::unix::fs::MetadataExt;
+        let file = std::env::temp_dir().join(format!("hv-uid-{}", std::process::id()));
+        std::fs::write(&file, b"").unwrap();
+        let owner = std::fs::metadata(&file).unwrap().uid();
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(owner, super::effective_uid());
+    }
 }

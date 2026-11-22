@@ -7,7 +7,7 @@ Tamaño: **XS** ≤ 0.5 días · **S** ≈ 1 día · **M** ≈ 2–3 días · **
 
 ## SP — Spikes de riesgo (antes de F1, 2 semanas)
 
-**Estado (2026-11-21):** ✅ SP-1 ([nota](spikes/SP-1.md)), 🟡 SP-2 (falta Windows 10; [nota](spikes/SP-2.md)), ✅ SP-5 (coincidencia exacta con ccusage; [nota](spikes/SP-5.md)), 🟡 SP-3 (barra lateral de egui en la ventana real; faltan IME en campos y AccessKit; [nota](spikes/SP-3.md)). ✅ SP-4 (hook → IPC en ~11 ms; falta WSL; [nota](spikes/SP-4.md)). Pendientes: SP-1b, SP-6 y SP-7.
+**Estado (2026-11-21):** ✅ SP-1 ([nota](spikes/SP-1.md)), 🟡 SP-2 (falta Windows 10; [nota](spikes/SP-2.md)), ✅ SP-5 (coincidencia exacta con ccusage; [nota](spikes/SP-5.md)), 🟡 SP-3 (barra lateral de egui en la ventana real; AccessKit conectado; faltan IME en campos y la prueba con lectores de pantalla; [nota](spikes/SP-3.md)). ✅ SP-4 (hook → IPC en ~11 ms; falta WSL; [nota](spikes/SP-4.md)). Pendientes: SP-1b, SP-6 y SP-7.
 
 Cada spike es código desechable en la rama `spike/…` y termina con una nota en `docs/spikes/<id>.md`: qué se probó, resultado y decisión.
 

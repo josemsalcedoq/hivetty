@@ -27,7 +27,7 @@ const DEFAULT_FONT_SIZE: f32 = 14.0;
 const APP_TITLE: &str = "hivetty";
 
 /// Events sent to the UI thread from other threads.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum AppEvent {
     /// The PTY reader produced output or an event.
     Wakeup,
@@ -35,6 +35,14 @@ pub(crate) enum AppEvent {
     ConfigChanged,
     /// An agent hook arrived over IPC (`hivetty hook`).
     Hook(hv_ipc::HookEvent),
+    /// A screen reader asked for the accessibility tree or an action (SP-3, F4-25).
+    AccessKit(egui_winit::accesskit_winit::Event),
+}
+
+impl From<egui_winit::accesskit_winit::Event> for AppEvent {
+    fn from(event: egui_winit::accesskit_winit::Event) -> Self {
+        Self::AccessKit(event)
+    }
 }
 
 /// Runs the terminal window until the shell exits or the window is closed.
@@ -247,7 +255,9 @@ impl App {
     fn create_ui(&mut self, event_loop: &ActiveEventLoop) -> Result<Ui> {
         let attrs = Window::default_attributes()
             .with_title(APP_TITLE)
-            .with_inner_size(LogicalSize::new(1000.0, 640.0));
+            .with_inner_size(LogicalSize::new(1000.0, 640.0))
+            // AccessKit must be attached before the window is first shown.
+            .with_visible(false);
         let window = Arc::new(
             event_loop
                 .create_window(attrs)
@@ -285,7 +295,7 @@ impl App {
             session.start_recording(path, grid)?;
         }
         let chrome = hv_ui::Chrome::new();
-        let egui = egui_winit::State::new(
+        let mut egui = egui_winit::State::new(
             chrome.context().clone(),
             egui::ViewportId::ROOT,
             &window,
@@ -293,6 +303,8 @@ impl App {
             None,
             None,
         );
+        egui.init_accesskit(event_loop, &window, self.proxy.clone());
+        window.set_visible(true);
         let mut ui = Ui {
             window,
             renderer,
@@ -766,6 +778,19 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::ConfigChanged => self.reload_config(),
+            AppEvent::AccessKit(event) => {
+                use egui_winit::accesskit_winit::WindowEvent as A11y;
+                if let Some(ui) = &mut self.ui {
+                    match event.window_event {
+                        A11y::InitialTreeRequested => ui.chrome.context().enable_accesskit(),
+                        A11y::ActionRequested(request) => {
+                            ui.egui.on_accesskit_action_request(request);
+                        }
+                        A11y::AccessibilityDeactivated => ui.chrome.context().disable_accesskit(),
+                    }
+                    ui.window.request_redraw();
+                }
+            }
             AppEvent::Hook(hook) => {
                 if let Some(ui) = &mut self.ui
                     && ui.info.on_hook(&hook)

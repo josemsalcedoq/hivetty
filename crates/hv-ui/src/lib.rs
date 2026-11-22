@@ -173,6 +173,10 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> bool {
     let height = 44.0;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
+    // What screen readers announce for the row (painted by hand, so egui cannot infer it).
+    let label = format!("{}, {}, {}", row.title, row.subtitle, row.elapsed);
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, row.focused, &label));
     let painter = ui.painter_at(rect);
     let bg = if row.focused {
         theme::SELECTED_BG
@@ -276,6 +280,47 @@ mod tests {
         assert_eq!(format_elapsed(21 * 60 + 5), "21m");
         assert_eq!(format_elapsed(3 * 3600), "3h");
         assert_eq!(format_elapsed(2 * 86_400 + 1), "2d");
+    }
+
+    #[test]
+    fn screen_readers_get_each_row_as_a_labelled_button() {
+        let mut chrome = Chrome::new();
+        chrome.context().enable_accesskit();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(800.0, 400.0),
+            )),
+            ..Default::default()
+        };
+        let model = ChromeModel {
+            sidebar_visible: true,
+            sessions: vec![SessionRow {
+                title: "Fix the login bug".into(),
+                subtitle: "Needs permission: Bash".into(),
+                project: "hivetty".into(),
+                elapsed: "1m".into(),
+                state: RowState::Waiting,
+                focused: true,
+            }],
+        };
+        let mut out = chrome.run(input, &model);
+        out.full.textures_delta.clear();
+        let update = out
+            .full
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree");
+        let button = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.role() == egui::Role::Button)
+            .expect("a button node");
+        assert_eq!(
+            button.label(),
+            Some("Fix the login bug, Needs permission: Bash, 1m")
+        );
     }
 
     #[test]

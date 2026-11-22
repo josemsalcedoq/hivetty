@@ -1,6 +1,6 @@
 # SP-3: egui y la rejilla propia en la misma pasada
 
-**Estado (2026-11-21):** 🟡 parcial. La parte central del ADR 0003 está validada; faltan IME dentro de un campo de egui y AccessKit.
+**Estado (2026-11-21):** 🟡 parcial. La parte central del ADR 0003 está validada; falta IME dentro de un campo de egui (no hay campos todavía) y la prueba manual con lectores de pantalla.
 
 ## Qué se probó
 - `hv-render` pinta el terminal (rectángulos + glyphon) y después egui (`egui-wgpu` 0.37) en **la misma render pass** (`RenderPass::forget_lifetime`). Una sola presentación por frame.
@@ -16,6 +16,6 @@
 
 ## Pendiente
 - IME en un campo de texto de egui (búsqueda de agentes, F2). Probarlo con el IME japonés de Windows y con el de macOS.
-- AccessKit: activar la feature `accesskit` de `egui-winit` y comprobar con Narrador / VoiceOver / Orca que se leen las filas de la barra.
+- AccessKit: ✅ conectado (feature `accesskit` de `egui-winit`, la ventana se crea oculta y se muestra tras crear el adaptador). Cada fila es un botón con etiqueta "título, estado, tiempo"; un test comprueba el árbol. Falta la prueba manual con Narrador, VoiceOver y Orca (checklist de `testing.md` §6).
 - Medir el coste por frame de egui con 50 sesiones en la barra (objetivo de docs/perf.md).
 - Fuentes de la interfaz: ahora son las de egui (excepción de licencia en `deny.toml`). Cambiar a Inter.
