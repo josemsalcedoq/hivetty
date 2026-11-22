@@ -41,6 +41,9 @@ winit = "0.30"
 product-name = "Hivetty"
 identifier = "dev.hivetty.Hivetty"
 description = "GPU-accelerated terminal with a sidebar for coding agents"
+long-description = """
+hivetty is a GPU-accelerated terminal for macOS, Linux and Windows with a sidebar \
+that tracks coding agents and a usage dashboard."""
 homepage = "https://github.com/josemsalcedoq/hivetty"
 publisher = "hivetty"
 authors = ["hivetty contributors"]

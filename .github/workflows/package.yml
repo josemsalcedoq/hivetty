@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
-    branches: [spike/sp-7-packaging] # TEMP: workflow_dispatch needs the file on main
 
 permissions:
   contents: read
