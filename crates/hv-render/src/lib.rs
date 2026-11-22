@@ -620,7 +620,13 @@ impl Renderer {
         let mut back = Vec::new();
         let mut over = Vec::new();
         self.rows.retain(|id, _| panes.iter().any(|p| p.id == *id));
+        let clear = focused.map_or(Rgb8::hex(0x0C0C0C), |p| p.snap.background);
         for pane in panes {
+            // The frame is cleared with the focused pane's background; others may differ.
+            if pane.snap.background != clear {
+                let [x, y, w, h] = pane.area;
+                back.push(Rect::new(x, y, w, h, pane.snap.background));
+            }
             let origin = self.origin_in(pane.area);
             let (b, o) = self.build_rects(pane.snap, origin);
             back.extend(b);

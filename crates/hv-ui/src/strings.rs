@@ -51,6 +51,7 @@ pub fn action_label(name: &str) -> Option<&'static str> {
         "new_tab" => "New tab",
         "new_window" => "New window",
         "move_tab_to_new_window" => "Move tab to new window",
+        "close_window" => "Close window",
         "close_pane" => "Close pane",
         "split_right" => "Split right",
         "split_down" => "Split down",

@@ -106,6 +106,11 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
             .and_then(crate::saved::SavedLayout::load);
     }
     app.keymap = keymap_from(&config);
+    app.shell_dir = hv_config::data_dir().and_then(|dir| {
+        hv_shell::install(&dir.join("shell"))
+            .map_err(|err| log::warn!("shell integration unavailable: {err}"))
+            .ok()
+    });
     app.config = config;
     app.config_path = config_path;
     app.record = record;
@@ -324,6 +329,8 @@ struct App {
     ui: Option<Ui>,
     /// The other windows (F2-05).
     parked: HashMap<WindowId, Ui>,
+    /// The window with keyboard focus (menu bar actions go there).
+    focused_window: Option<WindowId>,
     next_pane: PaneId,
     modifiers: ModifiersState,
     scroll_remainder: f32,
@@ -349,6 +356,8 @@ struct App {
     restore: Option<crate::saved::SavedLayout>,
     /// Where the layout is saved on close; `None` for `hivetty -e program`.
     layout_path: Option<std::path::PathBuf>,
+    /// Installed shell integration scripts (F3-01…F3-04), if available.
+    shell_dir: Option<std::path::PathBuf>,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -408,6 +417,7 @@ impl App {
             wake_pending: Arc::new(AtomicBool::new(false)),
             ui: None,
             parked: HashMap::new(),
+            focused_window: None,
             next_pane: 1,
             modifiers: ModifiersState::empty(),
             scroll_remainder: 0.0,
@@ -424,12 +434,17 @@ impl App {
             pending_action: None,
             restore: None,
             layout_path: None,
+            shell_dir: None,
             #[cfg(target_os = "macos")]
             menu: None,
         }
     }
 
-    fn create_ui(&mut self, event_loop: &ActiveEventLoop, adopt: Option<Adopted>) -> Result<Ui> {
+    fn create_ui(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        adopt: &mut Option<Adopted>,
+    ) -> Result<Ui> {
         let restore = self
             .restore
             .take()
@@ -499,7 +514,7 @@ impl App {
             local: None,
         };
         apply_font(&mut ui, &self.config.font);
-        if let Some((tab, panes)) = adopt {
+        if let Some((tab, panes)) = adopt.take() {
             ui.panes.extend(panes);
             ui.tabs.list.push(tab);
             ui.tabs.active = 0;
@@ -546,6 +561,21 @@ impl App {
         }
         spec.env
             .push((hv_ipc::ENV_SESSION.to_owned(), id.to_string()));
+        if self.config.shell.integration
+            && let Some(scripts) = &self.shell_dir
+        {
+            let (program, args) = match &spec.program {
+                Some(program) => (program.clone(), spec.args.clone()),
+                None => hv_pty::default_shell(),
+            };
+            if let Some(integration) =
+                hv_shell::integrate(&program, &args, scripts, |k| std::env::var(k).ok())
+            {
+                spec.program = Some(program);
+                spec.args = integration.args;
+                spec.env.extend(integration.env);
+            }
+        }
         let proxy = self.proxy.clone();
         let pending = Arc::clone(&self.wake_pending);
         let wake = move || {
@@ -613,10 +643,16 @@ impl App {
                 self.focus_changed();
             }
             Action::NewWindow => {
-                self.open_window(event_loop, None);
+                let _ = self.open_window(event_loop, None);
                 self.focus_changed();
             }
             Action::MoveTabToNewWindow => self.move_tab_to_new_window(event_loop),
+            Action::CloseWindow => {
+                if self.parked.is_empty() {
+                    self.save_layout();
+                }
+                self.close_window(event_loop);
+            }
             Action::ClosePane => {
                 if let Some(id) = ui.focused_id() {
                     self.close_pane(id, event_loop);
@@ -772,8 +808,14 @@ impl App {
     }
 
     /// Opens a window (adopting a tab moved from another window, if given) and makes it active.
-    fn open_window(&mut self, event_loop: &ActiveEventLoop, adopt: Option<Adopted>) {
-        match self.create_ui(event_loop, adopt) {
+    /// Returns the adopted tab back if the window could not be created.
+    fn open_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        adopt: Option<Adopted>,
+    ) -> Option<Adopted> {
+        let mut adopt = adopt;
+        match self.create_ui(event_loop, &mut adopt) {
             Ok(ui) => {
                 let outgoing = self.swap_local(Local::default());
                 if let Some(mut current) = self.ui.take() {
@@ -785,6 +827,7 @@ impl App {
             }
             Err(err) => log::error!("cannot open a window: {err:#}"),
         }
+        adopt
     }
 
     /// Closes the active window (its panes die with it). Exits after the last one.
@@ -822,7 +865,14 @@ impl App {
             pane.session.search_clear();
         }
         self.focus_changed();
-        self.open_window(event_loop, Some((tab, panes)));
+        if let Some((tab, panes)) = self.open_window(event_loop, Some((tab, panes)))
+            && let Some(ui) = &mut self.ui
+        {
+            // No new window: put the tab back where it was.
+            ui.panes.extend(panes);
+            ui.tabs.list.push(tab);
+            ui.tabs.active = ui.tabs.list.len() - 1;
+        }
         self.focus_changed();
     }
 
@@ -1088,8 +1138,8 @@ impl App {
 
     fn on_mouse_button(&mut self, state: ElementState, button: MouseButton) {
         let Some(ui) = &mut self.ui else { return };
-        if state == ElementState::Released {
-            self.mouse.dragging = None;
+        if state == ElementState::Released && self.mouse.dragging.take().is_some() {
+            return; // the end of a divider drag is not a click in a pane
         }
         if state == ElementState::Pressed {
             // Presses on the sidebar and tab bar belong to egui.
@@ -1298,8 +1348,12 @@ impl App {
             log::warn!("{err}");
             return; // keep the last good config
         }
-        if let Some(ui) = &mut self.ui {
-            apply_font(ui, &config.font);
+        for id in self.window_ids() {
+            if self.activate(id)
+                && let Some(ui) = &mut self.ui
+            {
+                apply_font(ui, &config.font);
+            }
         }
         self.keymap = keymap_from(&config);
         #[cfg(target_os = "macos")]
@@ -1417,7 +1471,9 @@ impl App {
                 && *row < snap.rows
             {
                 let cols = snap.cols;
-                for cell in &mut snap.cells[row * cols + start..row * cols + (*end).min(cols)] {
+                let end = (*end).min(cols);
+                let start = (*start).min(end);
+                for cell in &mut snap.cells[row * cols + start..row * cols + end] {
                     cell.underline = true;
                 }
             }
@@ -1478,14 +1534,14 @@ impl App {
                     .get(index)
                     .map(|t| t.root.panes())
                     .unwrap_or_default();
-                // Closing needs the event loop only to exit; the last pane exiting does that
-                // through the normal Exited path.
                 for id in panes {
                     if let Some(pane) = ui.panes.remove(&id) {
                         pane.session.kill();
                     }
                     if ui.tabs.remove_pane(id) {
-                        // Last tab: keep the window until the shell's exit event arrives.
+                        // That was the last tab: close the window once the event loop is
+                        // available (about_to_wait).
+                        self.pending_action = Some(Action::CloseWindow);
                         break;
                     }
                 }
@@ -1584,7 +1640,7 @@ impl ApplicationHandler<AppEvent> for App {
         if self.ui.is_some() {
             return;
         }
-        match self.create_ui(event_loop, None) {
+        match self.create_ui(event_loop, &mut None) {
             Ok(ui) => {
                 ui.window.request_redraw();
                 self.ui = Some(ui);
@@ -1609,6 +1665,9 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::ConfigChanged => self.reload_config(),
             #[cfg(target_os = "macos")]
             AppEvent::Menu(name) => {
+                if let Some(id) = self.focused_window {
+                    self.activate(id);
+                }
                 if let Some(action) = Action::parse(&name) {
                     self.run_action(action, event_loop);
                 }
@@ -1723,6 +1782,7 @@ impl ApplicationHandler<AppEvent> for App {
                     ui.window.request_redraw();
                 }
             }
+            WindowEvent::Focused(true) => self.focused_window = Some(id),
             WindowEvent::ModifiersChanged(m) => {
                 self.modifiers = m.state();
                 self.update_hover_link();
@@ -1748,6 +1808,17 @@ impl ApplicationHandler<AppEvent> for App {
             }
             if let Some(action) = self.pending_action.take() {
                 self.run_action(action, event_loop);
+            }
+            // Panes that are not drawn (background tabs, zoomed-out panes) still need their
+            // expired synchronized updates closed, or their deadline stays in the past.
+            if let Some(ui) = &self.ui {
+                let mut flushed = false;
+                for pane in ui.panes.values() {
+                    flushed |= pane.session.flush_expired_sync();
+                }
+                if flushed {
+                    ui.window.request_redraw();
+                }
             }
             if let Some(next) = self.window_deadline() {
                 deadline = Some(deadline.map_or(next, |d| d.min(next)));

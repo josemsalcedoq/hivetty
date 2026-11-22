@@ -205,8 +205,14 @@ impl PaneNode {
     /// (a share of the split, positive = towards the second child). Returns true if anything
     /// changed.
     pub(crate) fn resize(&mut self, target: PaneId, axis: Axis, delta: f32) -> bool {
+        self.resize_nearest(target, axis, delta).unwrap_or(false)
+    }
+
+    /// `Some(changed)` once the closest split along `axis` around `target` was found (even
+    /// if it is already at its limit), `None` if there is none in this subtree.
+    fn resize_nearest(&mut self, target: PaneId, axis: Axis, delta: f32) -> Option<bool> {
         match self {
-            Self::Leaf(_) => false,
+            Self::Leaf(_) => None,
             Self::Split {
                 axis: own,
                 ratio,
@@ -215,19 +221,19 @@ impl PaneNode {
             } => {
                 let in_a = a.contains(target);
                 if !in_a && !b.contains(target) {
-                    return false;
+                    return None;
                 }
                 let child = if in_a { a } else { b };
-                if child.resize(target, axis, delta) {
-                    return true;
+                if let Some(changed) = child.resize_nearest(target, axis, delta) {
+                    return Some(changed);
                 }
                 if *own != axis {
-                    return false;
+                    return None;
                 }
                 let new = (*ratio + delta).clamp(MIN_RATIO, 1.0 - MIN_RATIO);
                 let changed = (new - *ratio).abs() > f32::EPSILON;
                 *ratio = new;
-                changed
+                Some(changed)
             }
         }
     }
@@ -457,6 +463,10 @@ mod tests {
             panic!()
         };
         assert!((ratio - MIN_RATIO).abs() < 1e-6);
+        // At its limit the inner divider stays put, and the outer one is not moved instead.
+        let before = root.clone();
+        assert!(!root.resize(3, Axis::Vertical, -0.5));
+        assert_eq!(root, before);
         assert!(!PaneNode::Leaf(1).resize(1, Axis::Vertical, 0.1));
     }
 

@@ -77,6 +77,8 @@ pub(crate) struct TabBar {
     renaming: Option<(usize, String, bool)>,
     /// Tab being dragged.
     dragging: Option<usize>,
+    /// Tab count last frame.
+    last_len: usize,
 }
 
 impl TabBar {
@@ -95,12 +97,11 @@ impl TabBar {
         let menu_width = if menu.is_empty() { 0.0 } else { MENU_WIDTH };
         let available = (ui.available_width() - PLUS_WIDTH - menu_width).max(TAB_MIN_WIDTH);
         let width = (available / tabs.len().max(1) as f32).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH);
-        if self
-            .renaming
-            .as_ref()
-            .is_some_and(|(i, ..)| *i >= tabs.len())
-        {
+        // A tab closing or opening shifts indices: drop a rename or drag in progress.
+        if tabs.len() != self.last_len {
             self.renaming = None;
+            self.dragging = None;
+            self.last_len = tabs.len();
         }
         if tabs.iter().any(|t| t.state == RowState::Working) {
             ui.ctx()

@@ -27,6 +27,7 @@ hv-ipc = { version = "0.0.0", path = "../hv-ipc" }
 hv-platform = { version = "0.0.0", path = "../hv-platform" }
 hv-pty = { version = "0.0.0", path = "../hv-pty" }
 hv-render = { version = "0.0.0", path = "../hv-render" }
+hv-shell = { version = "0.0.0", path = "../hv-shell" }
 hv-term = { version = "0.0.0", path = "../hv-term" }
 hv-ui = { version = "0.0.0", path = "../hv-ui" }
 hv-usage = { version = "0.0.0", path = "../hv-usage" }

@@ -123,6 +123,10 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 ## F3 — Integración con la shell y chips
 
+**Estado (2026-11-22):**
+- ✅ F3-01…F3-04: scripts en `assets/shell/` incrustados en el binario y copiados al directorio de datos (por versión, escritura atómica). zsh por `ZDOTDIR` (restaura el del usuario y carga su `.zshenv`), bash con `--rcfile` que carga antes `/etc/profile` y `~/.bash_profile` o `~/.bashrc` (según sea de login), fish por `XDG_DATA_DIRS` + `vendor_conf.d`, y PowerShell 5.1/7 con `-NoExit -Command . 'hivetty.ps1'` que envuelve `prompt`. Emiten OSC 133 A/B/C/D (con código de salida) y OSC 7 (y OSC 9;9 en PowerShell). Nunca se tocan si la línea de comandos ejecuta un script o un comando. Opción `[shell] integration`. PowerShell probado aquí con el interceptor; zsh, bash y fish faltan por probar en macOS/Linux.
+- ✅ F3-05 y F3-08: el interceptor ya recibía OSC 7/133, y los paneles nuevos heredan el cwd del panel con foco.
+
 | ID | Tarea | Req | Depende | Tam. |
 |---|---|---|---|---|
 | F3-01 | Scripts de zsh (inyección por ZDOTDIR que respeta el ZDOTDIR del usuario) | C-01 | F1 | M |

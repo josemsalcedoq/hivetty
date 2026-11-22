@@ -73,13 +73,26 @@ impl Default for Font {
 }
 
 /// `[shell]`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Shell {
     /// Program to run; `None` uses the platform default (docs/platforms.md).
     pub program: Option<String>,
     /// Arguments for `program`.
     pub args: Vec<String>,
+    /// Load hivetty's shell integration (prompt marks, current directory) into zsh, bash,
+    /// fish and PowerShell without editing their startup files.
+    pub integration: bool,
+}
+
+impl Default for Shell {
+    fn default() -> Self {
+        Self {
+            program: None,
+            args: Vec::new(),
+            integration: true,
+        }
+    }
 }
 
 /// `[terminal]`
