@@ -31,6 +31,8 @@ pub(crate) struct SessionInfo {
     pub(crate) agent_id: Option<String>,
     /// Its display name.
     pub(crate) agent_name: Option<String>,
+    /// The last tool the agent used, worded for the hover card (S-15).
+    pub(crate) last_tool: Option<String>,
     /// The attention state last notified ("waiting", "done", "error"), so a state is announced
     /// once.
     pub(crate) notified: Option<&'static str>,
@@ -49,6 +51,7 @@ impl SessionInfo {
             command_started: None,
             agent_id: None,
             agent_name: None,
+            last_tool: None,
             notified: None,
         }
     }
@@ -153,7 +156,13 @@ impl SessionInfo {
             self.agent_id = Some("claude-code".to_owned());
             self.agent_name = Some("Claude Code".to_owned());
         }
-        self.agent.apply(Source::Hook, update, Instant::now())
+        let changed = self.agent.apply(Source::Hook, update, Instant::now());
+        if let Some(hv_agents::Subtitle::Activity(activity)) = self.agent.subtitle()
+            && *activity != hv_agents::Activity::Thinking
+        {
+            self.last_tool = self.agent.subtitle().map(subtitle_text);
+        }
+        changed
     }
 }
 
@@ -242,6 +251,7 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         focused: true,
         agent: info.agent_name.clone().unwrap_or_default(),
         unseen: info.unseen,
+        card: Vec::new(),
     }
 }
 

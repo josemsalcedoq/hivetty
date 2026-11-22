@@ -312,6 +312,7 @@ impl Ui {
         sidebar_visible: bool,
         keymap: &Keymap,
         agents: &[hv_ui::AgentChoice],
+        usage: Option<&UsageData>,
     ) -> hv_ui::ChromeModel {
         let focused = self.focused_id();
         let mut sessions = Vec::new();
@@ -332,6 +333,7 @@ impl Ui {
                     .or_else(|| pane.session.cwd());
                 let mut row = crate::model::session_row(&pane.info, project_dir.as_deref());
                 row.focused = Some(id) == focused;
+                row.card = session_card(pane, usage);
                 most_urgent = more_urgent(most_urgent, row.state);
                 sessions.push(row);
                 self.row_panes.push(id);
@@ -965,27 +967,32 @@ impl App {
         }
     }
 
+    /// Reads the usage logs again in the background if they are older than a minute.
+    fn refresh_usage(&mut self) {
+        let stale = self
+            .usage
+            .data
+            .as_ref()
+            .and_then(|d| d.read_at)
+            .is_none_or(|at| at.elapsed() > USAGE_REFRESH);
+        if stale && !self.usage.loading {
+            self.usage.loading = true;
+            let proxy = self.proxy.clone();
+            let _ = std::thread::Builder::new()
+                .name("hv-usage-read".into())
+                .spawn(move || {
+                    let data = UsageData::read();
+                    let _ = proxy.send_event(AppEvent::UsageLoaded(Arc::new(data)));
+                });
+        }
+    }
+
     /// Opens or closes the usage dashboard; reading the logs again in the background if they
     /// are older than a minute.
     fn toggle_usage(&mut self) {
         self.usage.open = !self.usage.open;
         if self.usage.open {
-            let stale = self
-                .usage
-                .data
-                .as_ref()
-                .and_then(|d| d.read_at)
-                .is_none_or(|at| at.elapsed() > USAGE_REFRESH);
-            if stale && !self.usage.loading {
-                self.usage.loading = true;
-                let proxy = self.proxy.clone();
-                let _ = std::thread::Builder::new()
-                    .name("hv-usage-read".into())
-                    .spawn(move || {
-                        let data = UsageData::read();
-                        let _ = proxy.send_event(AppEvent::UsageLoaded(Arc::new(data)));
-                    });
-            }
+            self.refresh_usage();
         }
         for ui in self.ui.iter().chain(self.parked.values()) {
             ui.window.request_redraw();
@@ -2059,6 +2066,7 @@ impl App {
             egui::CursorIcon::Text
         };
         let usage = self.usage_view();
+        let usage_data = self.usage.data.clone();
         let archived: Vec<hv_ui::ArchivedRow> = self
             .archive
             .iter()
@@ -2086,8 +2094,11 @@ impl App {
             self.sidebar_visible,
             &self.keymap,
             &self.agent_choices,
-            usage,
-            archived,
+            ChromeExtra {
+                usage,
+                usage_data: usage_data.as_deref(),
+                archived,
+            },
             cursor,
         );
         // Clicks in the chrome.
@@ -2203,6 +2214,9 @@ impl App {
             if let Some(ui) = &self.ui {
                 ui.window.request_redraw();
             }
+        }
+        if out.card_shown {
+            self.refresh_usage();
         }
         if let Some((row, choice)) = out.session_menu {
             self.on_session_menu(row, choice);
@@ -2362,19 +2376,27 @@ impl App {
 
 /// Runs the chrome for this frame, lays the terminals out in the space it leaves and returns
 /// what to paint plus what the user clicked.
+/// App-wide data the chrome shows besides the window's own panes.
+struct ChromeExtra<'a> {
+    /// The usage dashboard, when open.
+    usage: Option<hv_ui::UsageView>,
+    /// Usage numbers for the hover cards.
+    usage_data: Option<&'a UsageData>,
+    archived: Vec<hv_ui::ArchivedRow>,
+}
+
 fn run_chrome(
     ui: &mut Ui,
     sidebar_visible: bool,
     keymap: &Keymap,
     agents: &[hv_ui::AgentChoice],
-    usage: Option<hv_ui::UsageView>,
-    archived: Vec<hv_ui::ArchivedRow>,
+    extra: ChromeExtra<'_>,
     cursor: egui::CursorIcon,
 ) -> (hv_render::UiFrame, hv_ui::ChromeOutput) {
     let input = ui.egui.take_egui_input(&ui.window);
-    let mut model = ui.chrome_model(sidebar_visible, keymap, agents);
-    model.usage = usage;
-    model.archived = archived;
+    let mut model = ui.chrome_model(sidebar_visible, keymap, agents, extra.usage_data);
+    model.usage = extra.usage;
+    model.archived = extra.archived;
     model.confirm = ui
         .confirm_close
         .map(|_| hv_ui::strings::CONFIRM_CLOSE.to_owned());
@@ -2799,6 +2821,8 @@ pub(crate) struct UsageData {
     tasks: Vec<hv_usage::Task>,
     /// The user's price table, read with the logs (U-60).
     pricing: hv_usage::pricing::Pricing,
+    /// Totals by agent session id, for the hover card (S-15).
+    sessions: HashMap<String, SessionTotals>,
     read_at: Option<Instant>,
 }
 
@@ -2821,10 +2845,14 @@ impl UsageData {
                 log::warn!("cannot save the usage cache: {err}");
             }
         }
+        let records = store.records();
+        let pricing = load_pricing();
+        let sessions = session_totals(&records, &pricing);
         Self {
-            records: store.records(),
+            records,
             tasks: store.tasks(),
-            pricing: load_pricing(),
+            pricing,
+            sessions,
             read_at: Some(Instant::now()),
         }
     }
@@ -2904,6 +2932,93 @@ impl Default for UsageState {
             view: None,
             filter: None,
         }
+    }
+}
+
+/// Usage of one agent session.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct SessionTotals {
+    /// The model of its newest turn.
+    model: String,
+    newest: String,
+    input: u64,
+    output: u64,
+    /// USD, when every turn had a price.
+    cost: Option<f64>,
+}
+
+/// Sums the records of each agent session.
+fn session_totals(
+    records: &[hv_usage::UsageRecord],
+    pricing: &hv_usage::pricing::Pricing,
+) -> HashMap<String, SessionTotals> {
+    let mut out: HashMap<String, SessionTotals> = HashMap::new();
+    for r in records {
+        let Some(id) = &r.session_id else { continue };
+        let totals = out.entry(id.clone()).or_insert_with(|| SessionTotals {
+            cost: (!pricing.is_empty()).then_some(0.0),
+            ..SessionTotals::default()
+        });
+        totals.input += r.total_input();
+        totals.output += r.output_tokens;
+        // RFC 3339 timestamps in UTC sort as text.
+        if r.timestamp >= totals.newest {
+            totals.newest.clone_from(&r.timestamp);
+            totals.model.clone_from(&r.model);
+        }
+        totals.cost = totals.cost.zip(pricing.cost(r)).map(|(a, b)| a + b);
+    }
+    out
+}
+
+/// The hover card of a pane (S-15): only the lines that are known.
+fn session_card(pane: &Pane, usage: Option<&UsageData>) -> Vec<(String, String)> {
+    use hv_ui::strings as s;
+    let mut card = Vec::new();
+    if let Some(agent) = &pane.info.agent_name {
+        card.push((s::CARD_AGENT.to_owned(), agent.clone()));
+    }
+    let totals = pane
+        .info
+        .agent
+        .agent_session()
+        .and_then(|id| usage?.sessions.get(id));
+    if let Some(t) = totals.filter(|t| !t.model.is_empty()) {
+        card.push((s::CARD_MODEL.to_owned(), t.model.clone()));
+    }
+    let project = pane.chips.values().next_back();
+    if let Some(branch) = project.and_then(|p| p.branch.clone()) {
+        card.push((s::CARD_BRANCH.to_owned(), branch));
+    }
+    if let Some(dir) = pane.session.cwd() {
+        card.push((s::CARD_FOLDER.to_owned(), tilde(&dir)));
+    }
+    if let Some(t) = totals {
+        card.push((
+            s::CARD_TOKENS.to_owned(),
+            s::card_tokens(&hv_usage::compact(t.input), &hv_usage::compact(t.output)),
+        ));
+        if let Some(usd) = t.cost {
+            card.push((s::CARD_COST.to_owned(), s::api_equivalent(usd)));
+        }
+    }
+    let started = pane.info.agent.since().unwrap_or(pane.info.started);
+    card.push((
+        s::CARD_STARTED.to_owned(),
+        s::ago(&hv_ui::format_elapsed(started.elapsed().as_secs())),
+    ));
+    if let Some(tool) = &pane.info.last_tool {
+        card.push((s::CARD_LAST_TOOL.to_owned(), tool.clone()));
+    }
+    card
+}
+
+/// A path with the home directory shown as `~`.
+fn tilde(path: &std::path::Path) -> String {
+    match home_dir().and_then(|home| path.strip_prefix(home).ok().map(std::path::Path::to_owned)) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+        None => path.display().to_string(),
     }
 }
 
@@ -3302,6 +3417,48 @@ fn translate_key(event: &KeyEvent, mods: Mods) -> Option<TermKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_totals_sum_tokens_and_keep_the_newest_model() {
+        let rec = |session: &str, ts: &str, model: &str, input: u64| hv_usage::UsageRecord {
+            agent: "claude-code",
+            provider: "anthropic",
+            model: model.into(),
+            timestamp: ts.into(),
+            session_id: Some(session.into()),
+            project: None,
+            input_tokens: input,
+            output_tokens: 10,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        };
+        let records = [
+            rec("a", "2026-11-20T10:00:00Z", "model-old", 100),
+            rec("a", "2026-11-20T11:00:00Z", "model-new", 50),
+            rec("b", "2026-11-20T09:00:00Z", "other", 1),
+        ];
+        let none = hv_usage::pricing::Pricing::default();
+        let totals = session_totals(&records, &none);
+        let a = &totals["a"];
+        assert_eq!(
+            (a.input, a.output, a.model.as_str()),
+            (150, 20, "model-new")
+        );
+        assert_eq!(a.cost, None, "no price table, no cost");
+        let priced = hv_usage::pricing::Pricing::parse(
+            "[models.model]
+input = 1.0
+output = 1.0
+",
+        )
+        .unwrap();
+        assert!(session_totals(&records, &priced)["a"].cost.is_some());
+        assert_eq!(
+            session_totals(&records, &priced)["b"].cost,
+            None,
+            "unpriced model"
+        );
+    }
 
     #[test]
     fn bursts_of_notifications_are_merged() {

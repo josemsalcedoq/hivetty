@@ -134,7 +134,9 @@ impl Sidebar {
                             .color(theme::TEXT_SECONDARY()),
                     );
                     for (index, row) in visible.iter().filter(|(_, s)| s.project == project) {
-                        match session_row(ui, row) {
+                        let (click, card) = session_row(ui, row);
+                        out.card_shown |= card;
+                        match click {
                             RowClick::Open => clicked = Some(*index),
                             RowClick::Peek => peek = Some(*index),
                             RowClick::Menu(choice) => out.menu = Some((*index, choice)),
@@ -203,6 +205,7 @@ pub(crate) struct SidebarOutput {
     pub(crate) new_session: bool,
     pub(crate) peek: Option<usize>,
     pub(crate) menu: Option<(usize, SessionMenu)>,
+    pub(crate) card_shown: bool,
     pub(crate) archive_restore: Option<usize>,
     pub(crate) archive_delete: Option<usize>,
 }
@@ -217,7 +220,7 @@ enum RowClick {
 
 /// One two-line row: dot, title, elapsed time / state or activity. Waiting rows get a Peek
 /// button; a right click peeks at any row.
-fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
+fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> (RowClick, bool) {
     let height = 44.0;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
@@ -309,6 +312,24 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
     if matches!(click, RowClick::None) && response.clicked() {
         click = RowClick::Open;
     }
+    // Hover card (S-15).
+    let card_shown = !row.card.is_empty() && response.hovered();
+    let response = if row.card.is_empty() {
+        response
+    } else {
+        response.on_hover_ui(|ui| {
+            egui::Grid::new("session-card")
+                .num_columns(2)
+                .spacing([12.0, 4.0])
+                .show(ui, |ui| {
+                    for (label, value) in &row.card {
+                        ui.label(RichText::new(label).size(12.0).color(theme::TEXT_MUTED()));
+                        ui.label(RichText::new(value).size(12.0));
+                        ui.end_row();
+                    }
+                });
+        })
+    };
     // Right click: the session menu (S-13).
     response.context_menu(|ui| {
         for (choice, label) in [
@@ -325,5 +346,5 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
             }
         }
     });
-    click
+    (click, card_shown)
 }

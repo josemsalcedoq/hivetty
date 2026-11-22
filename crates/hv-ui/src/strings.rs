@@ -309,3 +309,27 @@ pub fn api_equivalent(usd: f64) -> String {
 }
 /// When only some models have a price.
 pub const PARTIAL: &str = "some models unpriced";
+/// Hover card of a session (S-15).
+pub const CARD_AGENT: &str = "Agent";
+/// Hover card.
+pub const CARD_MODEL: &str = "Model";
+/// Hover card.
+pub const CARD_BRANCH: &str = "Branch";
+/// Hover card.
+pub const CARD_FOLDER: &str = "Folder";
+/// Hover card.
+pub const CARD_TOKENS: &str = "Tokens";
+/// Hover card.
+pub const CARD_COST: &str = "Cost";
+/// Hover card.
+pub const CARD_STARTED: &str = "Started";
+/// Hover card.
+pub const CARD_LAST_TOOL: &str = "Last tool";
+/// Hover card: token totals of the session.
+pub fn card_tokens(input: &str, output: &str) -> String {
+    format!("{input} in · {output} out")
+}
+/// Hover card: how long ago the session started.
+pub fn ago(elapsed: &str) -> String {
+    format!("{elapsed} ago")
+}

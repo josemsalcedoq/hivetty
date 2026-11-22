@@ -37,6 +37,8 @@ pub struct SessionRow {
     pub agent: String,
     /// Finished or needs the user and has not been looked at yet.
     pub unseen: bool,
+    /// Lines of the hover card (S-15): `(label, value)`.
+    pub card: Vec<(String, String)>,
 }
 
 /// An entry of the session context menu (S-13).
@@ -127,6 +129,8 @@ pub struct ChromeOutput {
     pub peek_action: Option<PeekAction>,
     /// A session menu entry chosen: `(row index, entry)`.
     pub session_menu: Option<(usize, SessionMenu)>,
+    /// A hover card is showing (the app refreshes the usage numbers if they are old).
+    pub card_shown: bool,
     /// Restore or delete an archived session (index in `archived`).
     pub archive_restore: Option<usize>,
     pub archive_delete: Option<usize>,
@@ -198,6 +202,7 @@ impl Chrome {
         let mut peek_request = None;
         let mut peek_action = None;
         let mut session_menu = None;
+        let mut card_shown = false;
         let mut archive_restore = None;
         let mut archive_delete = None;
         let mut confirmed = None;
@@ -230,6 +235,7 @@ impl Chrome {
                         new_session_clicked = out.new_session;
                         peek_request = out.peek;
                         session_menu = out.menu;
+                        card_shown = out.card_shown;
                         archive_restore = out.archive_restore;
                         archive_delete = out.archive_delete;
                         // The dock sits under the list (which leaves room for it).
@@ -302,6 +308,7 @@ impl Chrome {
             peek_request,
             peek_action,
             session_menu,
+            card_shown,
             archive_restore,
             archive_delete,
             confirmed,
@@ -580,6 +587,7 @@ mod tests {
                 focused: true,
                 agent: String::new(),
                 unseen: false,
+                card: Vec::new(),
             }],
         };
         let mut out = chrome.run(input, &model);
@@ -636,6 +644,7 @@ mod tests {
                 focused: true,
                 agent: String::new(),
                 unseen: false,
+                card: Vec::new(),
             }],
         };
         let mut out = chrome.run(input.clone(), &model);
