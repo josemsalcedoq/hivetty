@@ -400,3 +400,15 @@ pub const WELCOME_SKIP: &str = "Skip";
 pub fn config_problem(detail: &str) -> String {
     format!("config.toml: {detail}")
 }
+/// Session menu: only for sessions hivetty opened in a worktree (F4-22).
+pub const MENU_REMOVE_WORKTREE: &str = "Remove worktree…";
+/// Confirmation before removing a worktree.
+pub fn confirm_remove_worktree(dir: &str) -> String {
+    format!(
+        "Close this session and remove the worktree {dir}? git refuses if it has changes that are not committed."
+    )
+}
+/// Confirmation button.
+pub const REMOVE: &str = "Remove";
+/// Notification when git refused.
+pub const WORKTREE_NOT_REMOVED: &str = "The worktree was not removed";

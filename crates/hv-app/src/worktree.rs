@@ -74,6 +74,33 @@ pub(crate) fn create(root: &Path, branch: &str, dir: &Path) -> Result<(), String
     }
 }
 
+/// Runs `git worktree remove <dir>` in `root` (no `--force`: git refuses when the worktree
+/// has uncommitted or untracked changes). Retries for a few seconds while the closed shell
+/// still holds the folder (Windows). Blocking: call off the UI thread.
+pub(crate) fn remove(root: &Path, dir: &Path) -> Result<(), String> {
+    let git = hv_pty::resolve_program("git");
+    let mut last = String::new();
+    for _ in 0..10 {
+        let output = Command::new(&git)
+            .arg("-C")
+            .arg(root)
+            .args(["worktree", "remove", "--"])
+            .arg(dir)
+            .output()
+            .map_err(|e| format!("cannot run git: {e}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        last = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        // Changes in the worktree: retrying will not help.
+        if last.contains("modified or untracked") || last.contains("is dirty") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    Err(last)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +160,13 @@ mod tests {
             "branch exists"
         );
         assert!(create(&repo, "--bad", &base.join("x")).is_err());
+        // A worktree with changes is kept; a clean one is removed.
+        std::fs::write(dir.join("new.txt"), "x").unwrap();
+        assert!(remove(&repo, &dir).is_err());
+        assert!(dir.exists());
+        std::fs::remove_file(dir.join("new.txt")).unwrap();
+        remove(&repo, &dir).unwrap();
+        assert!(!dir.exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 

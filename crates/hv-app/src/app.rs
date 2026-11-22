@@ -46,7 +46,10 @@ pub(crate) enum AppEvent {
     /// A screen reader asked for the accessibility tree or an action (SP-3, F4-25).
     AccessKit(egui_winit::accesskit_winit::Event),
     /// A worktree for a new session was created (or failed) in the background (F4-22).
-    WorktreeReady(hv_ui::NewSession, Result<std::path::PathBuf, String>),
+    WorktreeReady(
+        hv_ui::NewSession,
+        Result<(std::path::PathBuf, std::path::PathBuf), String>,
+    ),
     /// This is the first run: show the wizard (F6-03).
     Welcome(hv_ui::WelcomeInfo),
     /// Usage logs were read in the background (F5).
@@ -233,7 +236,7 @@ struct Ui {
     /// Whether hivetty draws the title bar (F1-02).
     title_bar: TitleBarMode,
     /// A pane waiting for the user to confirm closing it.
-    confirm_close: Option<PaneId>,
+    confirm_close: Option<(PaneId, Confirm)>,
     /// A pane being renamed.
     renaming: Option<PaneId>,
     /// Space egui left for the terminals last frame, in physical pixels.
@@ -491,6 +494,8 @@ struct App {
     config_notice: Option<String>,
     /// The count last shown on the app icon (F4-19).
     badge: usize,
+    /// The worktree of the session being started (F4-22).
+    next_worktree: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -581,6 +586,7 @@ impl App {
             plan_limits: PlanLimits::default(),
             config_notice: None,
             badge: 0,
+            next_worktree: None,
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -1080,7 +1086,10 @@ impl App {
                     log::warn!("cannot open {}: {err}", dir.display());
                 }
             }
-            hv_ui::SessionMenu::Close => ui.confirm_close = Some(id),
+            hv_ui::SessionMenu::Close => ui.confirm_close = Some((id, Confirm::Close)),
+            hv_ui::SessionMenu::RemoveWorktree => {
+                ui.confirm_close = Some((id, Confirm::RemoveWorktree));
+            }
         }
         if let Some(ui) = &self.ui {
             ui.window.request_redraw();
@@ -1231,9 +1240,8 @@ impl App {
                         None => Err(format!("{} is not in a git repository", folder.display())),
                         Some(root) => match crate::worktree::worktree_dir(&root, &branch) {
                             None => Err("cannot place the worktree".to_owned()),
-                            Some(dir) => {
-                                crate::worktree::create(&root, &branch, &dir).map(|()| dir)
-                            }
+                            Some(dir) => crate::worktree::create(&root, &branch, &dir)
+                                .map(|()| (root.clone(), dir)),
                         },
                     };
                     let _ = proxy.send_event(AppEvent::WorktreeReady(request, result));
@@ -1262,6 +1270,7 @@ impl App {
                     pane.info.agent_id = Some(profile.id.clone());
                     pane.info.agent_name = Some(profile.name.clone());
                 }
+                pane.info.worktree = self.next_worktree.clone();
                 ui.panes.insert(id, pane);
                 if request.split
                     && let Some(tab) = ui.tabs.active_mut()
@@ -2353,8 +2362,22 @@ impl App {
         }
         if let Some(answer) = out.confirmed
             && let Some(ui) = &mut self.ui
-            && let Some(id) = ui.confirm_close.take()
+            && let Some((id, kind)) = ui.confirm_close.take()
         {
+            if answer
+                && kind == Confirm::RemoveWorktree
+                && let Some((root, dir)) = ui.panes.get(&id).and_then(|p| p.info.worktree.clone())
+            {
+                // After the pane closes (its shell holds the folder), in the background.
+                let _ = std::thread::Builder::new()
+                    .name("hv-worktree".into())
+                    .spawn(move || {
+                        if let Err(err) = crate::worktree::remove(&root, &dir) {
+                            log::warn!("worktree: {err}");
+                            hv_platform::notify(hv_ui::strings::WORKTREE_NOT_REMOVED, &err);
+                        }
+                    });
+            }
             if answer {
                 self.pending_action = Some(Action::ClosePaneById(id));
             }
@@ -2531,9 +2554,22 @@ fn run_chrome(
     model.archived = extra.archived;
     model.plan_limits = extra.plan_limits;
     model.notice = extra.notice;
-    model.confirm = ui
-        .confirm_close
-        .map(|_| hv_ui::strings::CONFIRM_CLOSE.to_owned());
+    model.confirm = ui.confirm_close.map(|(id, kind)| match kind {
+        Confirm::Close => (
+            hv_ui::strings::CONFIRM_CLOSE.to_owned(),
+            hv_ui::strings::CLOSE,
+        ),
+        Confirm::RemoveWorktree => (
+            hv_ui::strings::confirm_remove_worktree(
+                &ui.panes
+                    .get(&id)
+                    .and_then(|p| p.info.worktree.as_ref())
+                    .map(|(_, dir)| dir.display().to_string())
+                    .unwrap_or_default(),
+            ),
+            hv_ui::strings::REMOVE,
+        ),
+    });
     model.rename = ui.renaming.and_then(|id| ui.panes.get(&id)).map(|p| {
         p.info
             .custom_title
@@ -2720,10 +2756,12 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             AppEvent::WorktreeReady(mut request, result) => match result {
-                Ok(dir) => {
+                Ok((root, dir)) => {
                     request.folder = dir.to_string_lossy().into_owned();
                     request.worktree = None;
+                    self.next_worktree = Some((root, dir));
                     self.start_agent_session(&request);
+                    self.next_worktree = None;
                 }
                 Err(err) => {
                     log::warn!("worktree: {err}");
@@ -3477,6 +3515,13 @@ fn resume_command(
         line.push('\r');
     }
     Some(line)
+}
+
+/// What a confirmation dialog asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Confirm {
+    Close,
+    RemoveWorktree,
 }
 
 /// Who draws the title bar (F1-02).

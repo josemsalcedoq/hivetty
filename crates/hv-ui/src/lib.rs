@@ -39,6 +39,8 @@ pub struct SessionRow {
     pub agent: String,
     /// Finished or needs the user and has not been looked at yet.
     pub unseen: bool,
+    /// hivetty opened it in a git worktree it created (the menu offers to remove it).
+    pub worktree: bool,
     /// Lines of the hover card (S-15): `(label, value)`.
     pub card: Vec<(String, String)>,
 }
@@ -52,6 +54,7 @@ pub enum SessionMenu {
     Archive,
     CopyId,
     ShowFolder,
+    RemoveWorktree,
     Close,
 }
 
@@ -112,8 +115,9 @@ pub struct ChromeModel {
     pub archived: Vec<ArchivedRow>,
     /// Plan limits from the agent's statusline, already worded (U-65).
     pub plan_limits: Vec<String>,
-    /// A question to confirm, if one is pending (shown as a small dialog).
-    pub confirm: Option<String>,
+    /// A question to confirm, if one is pending (shown as a small dialog), and the label of
+    /// its button.
+    pub confirm: Option<(String, &'static str)>,
     /// A session being renamed: its current title (opens the rename dialog).
     pub rename: Option<String>,
     /// A problem to tell the user about (a bad config), shown over the terminal until closed.
@@ -309,8 +313,8 @@ impl Chrome {
             if let Some(view) = &model.usage {
                 usage_action = usage::show(ui.ctx(), central, view, &model.plan_limits);
             }
-            if let Some(question) = &model.confirm {
-                confirmed = confirm_dialog(ui.ctx(), question);
+            if let Some((question, button)) = &model.confirm {
+                confirmed = confirm_dialog(ui.ctx(), question, button);
             }
             if let Some(text) = &model.notice {
                 notice_closed = notice_bar(ui.ctx(), central, text);
@@ -524,7 +528,7 @@ fn rename_dialog(
 }
 
 /// A small yes/no dialog. Enter confirms, Esc cancels.
-fn confirm_dialog(ctx: &egui::Context, question: &str) -> Option<bool> {
+fn confirm_dialog(ctx: &egui::Context, question: &str, button: &str) -> Option<bool> {
     let (enter, escape) = ctx.input(|i| {
         (
             i.key_pressed(egui::Key::Enter),
@@ -558,7 +562,7 @@ fn confirm_dialog(ctx: &egui::Context, question: &str) -> Option<bool> {
                     ui.label(question);
                     ui.add_space(10.0);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(strings::CLOSE).clicked() {
+                        if ui.button(button).clicked() {
                             answer = Some(true);
                         }
                         if ui.button(strings::CANCEL).clicked() {
@@ -742,6 +746,7 @@ mod tests {
                 focused: true,
                 agent: String::new(),
                 unseen: false,
+                worktree: false,
                 card: Vec::new(),
             }],
         };
@@ -802,6 +807,7 @@ mod tests {
                 focused: true,
                 agent: String::new(),
                 unseen: false,
+                worktree: false,
                 card: Vec::new(),
             }],
         };

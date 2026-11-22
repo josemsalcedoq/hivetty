@@ -14,6 +14,8 @@ pub(crate) struct SessionInfo {
     pub(crate) title: Option<String>,
     /// A title the user gave the session; wins over the program's (S-13).
     pub(crate) custom_title: Option<String>,
+    /// The repository and the git worktree hivetty created for this session (F4-22).
+    pub(crate) worktree: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// When the session started.
     pub(crate) started: Instant,
     /// Whether the program has exited.
@@ -49,6 +51,7 @@ impl SessionInfo {
         Self {
             title: None,
             custom_title: None,
+            worktree: None,
             started: Instant::now(),
             exited: false,
             agent: Tracker::default(),
@@ -296,6 +299,7 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         focused: true,
         agent: info.agent_name.clone().unwrap_or_default(),
         unseen: info.unseen,
+        worktree: info.worktree.is_some(),
         card: Vec::new(),
     }
 }

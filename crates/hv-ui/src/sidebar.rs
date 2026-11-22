@@ -402,8 +402,12 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> (RowClick, bool) {
             (SessionMenu::Archive, strings::MENU_ARCHIVE),
             (SessionMenu::CopyId, strings::MENU_COPY_ID),
             (SessionMenu::ShowFolder, strings::MENU_SHOW_FOLDER),
+            (SessionMenu::RemoveWorktree, strings::MENU_REMOVE_WORKTREE),
             (SessionMenu::Close, strings::MENU_CLOSE),
         ] {
+            if choice == SessionMenu::RemoveWorktree && !row.worktree {
+                continue;
+            }
             if ui.button(label).clicked() {
                 click = RowClick::Menu(choice);
                 ui.close();
