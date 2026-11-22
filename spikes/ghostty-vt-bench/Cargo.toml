@@ -3,6 +3,7 @@ name = "ghostty-vt-bench"
 version = "0.0.0"
 edition = "2024"
 publish = false
+default-run = "ghostty-vt-bench"
 license = "MIT OR Apache-2.0"
 
 # Standalone, throwaway spike (SP-1b). Not part of the hivetty workspace.
