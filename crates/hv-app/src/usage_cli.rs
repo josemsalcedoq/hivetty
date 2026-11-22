@@ -48,7 +48,7 @@ impl UsageArgs {
 }
 
 /// One day of the report.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Row {
     date: String,
     input: u64,
@@ -57,6 +57,8 @@ struct Row {
     cache_write: u64,
     turns: u64,
     tasks: u64,
+    /// Estimated USD of the turns with a price in `pricing.toml` (U-60); `None` without one.
+    cost: Option<f64>,
 }
 
 pub(crate) fn run(args: &UsageArgs) -> String {
@@ -66,7 +68,7 @@ pub(crate) fn run(args: &UsageArgs) -> String {
         return "No usage found. hivetty reads Claude Code's transcripts (~/.claude/projects).\n"
             .to_owned();
     }
-    report(records, tasks, args, today())
+    report(records, tasks, args, today(), data.pricing())
 }
 
 fn today() -> jiff::civil::Date {
@@ -87,6 +89,7 @@ fn report(
     tasks: &[hv_usage::Task],
     args: &UsageArgs,
     today: jiff::civil::Date,
+    pricing: &hv_usage::pricing::Pricing,
 ) -> String {
     let first = args.days.map(|d| {
         today
@@ -128,6 +131,15 @@ fn report(
         }
     }
     let daily = hv_usage::daily(&records);
+    let priced = !pricing.is_empty();
+    let mut costs: std::collections::BTreeMap<jiff::civil::Date, f64> = Default::default();
+    if priced {
+        for r in &records {
+            if let (Some(day), Some(usd)) = (r.local_day(), pricing.cost(r)) {
+                *costs.entry(day).or_default() += usd;
+            }
+        }
+    }
     let mut days: std::collections::BTreeSet<jiff::civil::Date> = daily.keys().copied().collect();
     days.extend(task_days.keys().copied());
     let rows: Vec<Row> = days
@@ -142,6 +154,7 @@ fn report(
                 cache_write: t.cache_write,
                 turns: t.turns,
                 tasks: task_days.get(&day).copied().unwrap_or(0),
+                cost: priced.then(|| costs.get(&day).copied().unwrap_or(0.0)),
             }
         })
         .collect();
@@ -153,13 +166,19 @@ fn report(
 }
 
 fn csv(rows: &[Row]) -> String {
-    let mut out = String::from("date,input,output,cache_read,cache_write,turns,tasks\n");
+    let priced = rows.iter().any(|r| r.cost.is_some());
+    let mut out = String::from("date,input,output,cache_read,cache_write,turns,tasks");
+    out.push_str(if priced { ",cost_usd\n" } else { "\n" });
     for r in rows {
-        let _ = writeln!(
+        let _ = write!(
             out,
             "{},{},{},{},{},{},{}",
             r.date, r.input, r.output, r.cache_read, r.cache_write, r.turns, r.tasks
         );
+        let _ = match r.cost {
+            Some(usd) => writeln!(out, ",{usd:.4}"),
+            None => writeln!(out),
+        };
     }
     out
 }
@@ -176,6 +195,7 @@ fn json(rows: &[Row]) -> String {
                 "cacheWrite": r.cache_write,
                 "turns": r.turns,
                 "tasks": r.tasks,
+                "costUsd": r.cost,
             })
         })
         .collect();
@@ -197,6 +217,7 @@ fn table(rows: &[Row]) -> String {
         cache_write: 0,
         turns: 0,
         tasks: 0,
+        cost: None,
     };
     for r in rows {
         let _ = writeln!(
@@ -210,6 +231,9 @@ fn table(rows: &[Row]) -> String {
         total.cache_write += r.cache_write;
         total.turns += r.turns;
         total.tasks += r.tasks;
+        if let Some(usd) = r.cost {
+            total.cost = Some(total.cost.unwrap_or(0.0) + usd);
+        }
     }
     let _ = writeln!(
         out,
@@ -235,6 +259,9 @@ fn table(rows: &[Row]) -> String {
         hv_usage::compact(total.output),
         total.tasks
     );
+    if let Some(usd) = total.cost {
+        let _ = writeln!(out, "{}", hv_ui::strings::api_equivalent(usd));
+    }
     out
 }
 
@@ -293,9 +320,20 @@ mod tests {
             project: Some("HIVETTY".into()),
             days: Some(7),
         };
-        let out = report(&records, &tasks, &args, date(2026, 11, 22));
+        let none = hv_usage::pricing::Pricing::default();
+        let out = report(&records, &tasks, &args, date(2026, 11, 22), &none);
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 2, "{out}");
         assert!(lines[1].ends_with(",10,5,0,0,1,1"), "{out}");
+        // With prices, a cost column (10 input + 5 output tokens at $1M per million each).
+        let pricing =
+            hv_usage::pricing::Pricing::parse("[models.\"\"]\ninput = 1e6\noutput = 1e6\n")
+                .unwrap();
+        let out = report(&records, &tasks, &args, date(2026, 11, 22), &pricing);
+        assert!(out.starts_with("date,input,output,cache_read,cache_write,turns,tasks,cost_usd"));
+        assert!(
+            out.lines().nth(1).unwrap().ends_with(",1,1,15.0000"),
+            "{out}"
+        );
     }
 }

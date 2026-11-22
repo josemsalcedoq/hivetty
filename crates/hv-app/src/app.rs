@@ -2973,6 +2973,11 @@ impl UsageData {
         (&self.records, &self.tasks)
     }
 
+    /// The user's price table read with the logs.
+    pub(crate) fn pricing(&self) -> &hv_usage::pricing::Pricing {
+        &self.pricing
+    }
+
     /// The dashboard for `range`, ending today in local time, optionally for one agent.
     pub(crate) fn dashboard(
         &self,
