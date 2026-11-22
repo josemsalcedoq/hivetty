@@ -73,6 +73,14 @@ hivetty reads `config.toml` from:
 - macOS: `~/Library/Application Support/hivetty/config.toml`
 - Linux: `~/.config/hivetty/config.toml`
 
+Editors that validate TOML against a JSON schema (Taplo, VS Code's Even Better TOML) can check the file as you type. Add this first line:
+
+```toml
+#:schema https://raw.githubusercontent.com/josemsalcedoq/hivetty/main/docs/config.schema.json
+```
+
+`hivetty config schema` prints the same schema for the version you have. A mistake in the file shows in a bar over the terminal, and hivetty keeps the last settings that worked.
+
 Changes apply as soon as you save. Errors are logged, and the last good configuration stays in use. Every key is optional. This example shows each key with its default value:
 
 ```toml

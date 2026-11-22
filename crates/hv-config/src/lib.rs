@@ -13,8 +13,17 @@ use serde::Deserialize;
 
 pub mod theme_import;
 
+/// The JSON schema of `config.toml` (F6-02), for editors that validate TOML against one
+/// (Taplo / Even Better TOML: `#:schema <url>` at the top of the file).
+pub fn schema_json() -> String {
+    let schema = schemars::schema_for!(Config);
+    serde_json::to_string_pretty(&schema).unwrap_or_default()
+        + "
+"
+}
+
 /// The whole configuration.
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Default, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Terminal font.
@@ -36,7 +45,7 @@ pub struct Config {
 }
 
 /// One `[[keybindings]]` entry.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KeyBinding {
     /// Chord, e.g. `"primary+shift+t"` (primary = Cmd on macOS, Ctrl elsewhere).
@@ -49,7 +58,7 @@ pub struct KeyBinding {
 }
 
 /// The action of a key binding: a named action or text to send to the program.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum BindingAction {
     /// `action = "split_right"` (or `"none"` to unbind).
@@ -62,7 +71,7 @@ pub enum BindingAction {
 }
 
 /// `[font]`
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Font {
     /// Font family; `None` picks the first installed monospace font from a built-in list.
@@ -81,7 +90,7 @@ impl Default for Font {
 }
 
 /// `[shell]`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Shell {
     /// Program to run; `None` uses the platform default (docs/platforms.md).
@@ -108,7 +117,7 @@ impl Default for Shell {
 }
 
 /// `[terminal]`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Terminal {
     /// Lines of scrollback history.
@@ -124,7 +133,7 @@ impl Default for Terminal {
 }
 
 /// `[window]`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowConfig {
     /// Reopen the window with the size and position it had.
@@ -147,7 +156,7 @@ impl Default for WindowConfig {
 }
 
 /// `[theme]`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Theme {
     /// `"system"` follows the OS light/dark setting; `"hivetty-dark"` or `"hivetty-light"`
@@ -170,7 +179,7 @@ impl Default for Theme {
 }
 
 /// `[theme.colors]`: `#rrggbb` strings.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeColors {
     pub foreground: String,
@@ -279,7 +288,7 @@ impl Theme {
 }
 
 /// `[agents]`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Agents {
     /// What to do with agents that were running when the layout was saved: `"ask"` types the
@@ -296,7 +305,7 @@ impl Default for Agents {
 }
 
 /// `[notifications]`
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Notifications {
     /// Send desktop notifications at all.
@@ -314,7 +323,7 @@ pub struct Notifications {
 }
 
 /// `[notifications.forward]`: where notifications are also sent. Off by default.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Forward {
     /// "ntfy", "telegram" or "webhook"; empty = off.
@@ -482,6 +491,16 @@ pub fn safe_config() -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_published_schema_is_up_to_date() {
+        let published = include_str!("../../../docs/config.schema.json");
+        assert_eq!(
+            published.replace("\r\n", "\n"),
+            schema_json(),
+            "run `hivetty config schema > docs/config.schema.json`"
+        );
+    }
 
     #[test]
     fn custom_colors_are_checked_and_decide_light_or_dark() {

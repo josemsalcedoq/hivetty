@@ -68,6 +68,7 @@ OPTIONS:
     agents uninstall-statusline [--dry-run]
                          Remove it again
     statusline           The statusline command itself (reads Claude Code's JSON on stdin)
+    config schema        Print the JSON schema of config.toml (for editor validation)
     theme import <FILE>  Convert an iTerm2 (.itermcolors) or Alacritty (.toml) theme and print
                          the [theme.colors] block to paste into config.toml
     hook --agent <ID> --event <NAME>
@@ -106,6 +107,8 @@ enum Command {
     Agents(agents_cli::AgentsCommand),
     /// `theme import <file>`: print `[theme.colors]` converted from another terminal's theme.
     ThemeImport(PathBuf),
+    /// `config schema`: print the JSON schema of config.toml.
+    ConfigSchema,
     Version,
     Help,
 }
@@ -140,6 +143,12 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             }
             "usage" => {
                 return usage_cli::UsageArgs::parse(&args[i + 1..]).map(Command::Usage);
+            }
+            "config" => {
+                return match args.get(i + 1).map(String::as_str) {
+                    Some("schema") => Ok(Command::ConfigSchema),
+                    _ => Err("usage: hivetty config schema".into()),
+                };
             }
             "theme" => {
                 return match (args.get(i + 1).map(String::as_str), args.get(i + 2)) {
@@ -327,6 +336,10 @@ fn main() -> ExitCode {
         Command::Run(spec, record) => app::run(spec, record),
         Command::Agents(command) => agents_cli::run(&command),
         Command::ThemeImport(file) => theme_import(&file),
+        Command::ConfigSchema => {
+            print!("{}", hv_config::schema_json());
+            Ok(())
+        }
         Command::Usage(args) => {
             print!("{}", usage_cli::run(&args));
             Ok(())

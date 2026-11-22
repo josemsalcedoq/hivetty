@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "description": "The whole configuration.",
+  "type": "object",
+  "properties": {
+    "font": {
+      "description": "Terminal font.",
+      "$ref": "#/$defs/Font"
+    },
+    "shell": {
+      "description": "Shell started in new terminals.",
+      "$ref": "#/$defs/Shell"
+    },
+    "terminal": {
+      "description": "Terminal behaviour.",
+      "$ref": "#/$defs/Terminal"
+    },
+    "window": {
+      "description": "Window behaviour.",
+      "$ref": "#/$defs/WindowConfig"
+    },
+    "notifications": {
+      "description": "Desktop notifications.",
+      "$ref": "#/$defs/Notifications"
+    },
+    "agents": {
+      "description": "Agent behaviour.",
+      "$ref": "#/$defs/Agents"
+    },
+    "theme": {
+      "description": "Colors.",
+      "$ref": "#/$defs/Theme"
+    },
+    "keybindings": {
+      "description": "Shortcut overrides, applied on top of the defaults (docs/keybindings.md).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/KeyBinding"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Font": {
+      "description": "`[font]`",
+      "type": "object",
+      "properties": {
+        "family": {
+          "description": "Font family; `None` picks the first installed monospace font from a built-in list.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "size": {
+          "description": "Size in points (before DPI scaling).",
+          "type": "number",
+          "format": "float",
+          "default": 14.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Shell": {
+      "description": "`[shell]`",
+      "type": "object",
+      "properties": {
+        "program": {
+          "description": "Program to run; `None` uses the platform default (docs/platforms.md).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "args": {
+          "description": "Arguments for `program`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "integration": {
+          "description": "Load hivetty's shell integration (prompt marks, current directory) into zsh, bash,\nfish and PowerShell without editing their startup files.",
+          "type": "boolean",
+          "default": true
+        },
+        "chips": {
+          "description": "Show project chips (technology, git branch, versions) above the prompt. Needs the\nintegration; the shell then leaves a blank line above each prompt for them.",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "Terminal": {
+      "description": "`[terminal]`",
+      "type": "object",
+      "properties": {
+        "scrollback_lines": {
+          "description": "Lines of scrollback history.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 10000
+        }
+      },
+      "additionalProperties": false
+    },
+    "WindowConfig": {
+      "description": "`[window]`",
+      "type": "object",
+      "properties": {
+        "remember_geometry": {
+          "description": "Reopen the window with the size and position it had.",
+          "type": "boolean",
+          "default": true
+        },
+        "restore_layout": {
+          "description": "Reopen the tabs, splits and directories of the last session.",
+          "type": "boolean",
+          "default": true
+        },
+        "decorations": {
+          "description": "Title bar: `\"auto\"` (hivetty's own on Windows, transparent on macOS, the system's on\nLinux), `\"full\"` (always the system's) or `\"none\"` (always hivetty's).",
+          "type": "string",
+          "default": "auto"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Notifications": {
+      "description": "`[notifications]`",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Send desktop notifications at all.",
+          "type": "boolean",
+          "default": true
+        },
+        "only_when_unfocused": {
+          "description": "Only when the user is not looking at the pane (window unfocused or another pane).",
+          "type": "boolean",
+          "default": true
+        },
+        "long_command_seconds": {
+          "description": "Notify when a shell command that ran at least this long finishes; 0 disables it.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 30
+        },
+        "on": {
+          "description": "Agent states that notify: any of \"waiting\", \"done\", \"error\".",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "waiting",
+            "done",
+            "error"
+          ]
+        },
+        "group_window_seconds": {
+          "description": "More than three notifications in this many seconds are merged into one.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 10
+        },
+        "forward": {
+          "description": "Also send them to the phone (F4-33).",
+          "$ref": "#/$defs/Forward"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Forward": {
+      "description": "`[notifications.forward]`: where notifications are also sent. Off by default.",
+      "type": "object",
+      "properties": {
+        "service": {
+          "description": "\"ntfy\", \"telegram\" or \"webhook\"; empty = off.",
+          "type": "string",
+          "default": ""
+        },
+        "url": {
+          "description": "ntfy topic URL, Telegram `https://api.telegram.org/bot<token>/sendMessage`, or the\nwebhook URL.",
+          "type": "string",
+          "default": ""
+        },
+        "chat_id": {
+          "description": "Telegram chat id.",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "Agents": {
+      "description": "`[agents]`",
+      "type": "object",
+      "properties": {
+        "restore_on_launch": {
+          "description": "What to do with agents that were running when the layout was saved: `\"ask\"` types the\nresume command and waits for Enter, `\"always\"` runs it, `\"never\"` leaves a plain shell.",
+          "type": "string",
+          "default": "ask"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Theme": {
+      "description": "`[theme]`",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "`\"system\"` follows the OS light/dark setting; `\"hivetty-dark\"` or `\"hivetty-light\"`\nforce one.",
+          "type": "string",
+          "default": "system"
+        },
+        "high_contrast": {
+          "description": "White on black with saturated colors, for low vision (wins over `colors`).",
+          "type": "boolean",
+          "default": false
+        },
+        "colors": {
+          "description": "A custom terminal palette (`hivetty theme import` writes one from iTerm2 or Alacritty).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThemeColors"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ThemeColors": {
+      "description": "`[theme.colors]`: `#rrggbb` strings.",
+      "type": "object",
+      "properties": {
+        "foreground": {
+          "type": "string"
+        },
+        "background": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selection": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ansi": {
+          "description": "The 16 ANSI colors: black, red, green, yellow, blue, magenta, cyan, white, then the\nbright ones.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "foreground",
+        "background",
+        "ansi"
+      ]
+    },
+    "KeyBinding": {
+      "description": "One `[[keybindings]]` entry.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "Chord, e.g. `\"primary+shift+t\"` (primary = Cmd on macOS, Ctrl elsewhere).",
+          "type": "string"
+        },
+        "action": {
+          "description": "What it does.",
+          "$ref": "#/$defs/BindingAction"
+        },
+        "when": {
+          "description": "Optional condition, e.g. `\"os == 'windows'\"` or `\"search_open\"`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "action"
+      ]
+    },
+    "BindingAction": {
+      "description": "The action of a key binding: a named action or text to send to the program.",
+      "anyOf": [
+        {
+          "description": "`action = \"split_right\"` (or `\"none\"` to unbind).",
+          "type": "string"
+        },
+        {
+          "description": "`action = { send_text = \"\\u001b\\r\" }` (ESC + CR).",
+          "type": "object",
+          "properties": {
+            "send_text": {
+              "description": "Bytes to write to the focused terminal.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "send_text"
+          ]
+        }
+      ]
+    }
+  }
+}
