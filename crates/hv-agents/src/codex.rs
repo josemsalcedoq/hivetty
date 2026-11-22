@@ -96,6 +96,7 @@ fn parse(text: &str) -> Result<DocumentMut, String> {
 /// Adds hivetty's hooks to Codex's `config.toml`, keeping everything else (and its comments)
 /// as it is. Entries written before with another binary path are updated.
 pub fn plan_install(text: &str, exe: &Path) -> Result<Plan, String> {
+    crate::install::check_exe(exe)?;
     let mut doc = parse(text)?;
     let hooks = doc
         .entry("hooks")

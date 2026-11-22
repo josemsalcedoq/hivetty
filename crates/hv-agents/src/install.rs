@@ -105,10 +105,31 @@ fn quote_exe(exe: &Path) -> String {
     format!("'{exe}'")
 }
 
-/// The hivetty binary for PowerShell: single quotes, where a quote is doubled.
+/// The hivetty binary for PowerShell: in single quotes, where every character PowerShell
+/// takes as a single quote is doubled. That includes the typographic ones (U+2018 to U+201B):
+/// a folder named `’;calc;&’` would otherwise close the string and run code.
 fn quote_exe_powershell(exe: &Path) -> String {
-    let exe = exe.to_string_lossy().replace('\\', "/").replace('\'', "''");
-    format!("'{exe}'")
+    let mut out = String::from("'");
+    for c in exe.to_string_lossy().replace('\\', "/").chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
+}
+
+/// Refuses binary paths with control characters (a newline would end the hook command in any
+/// shell): hooks are not installed from such a place.
+pub(crate) fn check_exe(exe: &Path) -> Result<(), String> {
+    if exe.to_string_lossy().chars().any(char::is_control) {
+        return Err(format!(
+            "the hivetty binary is in a folder whose name has control characters ({}); move it first",
+            exe.display()
+        ));
+    }
+    Ok(())
 }
 
 /// The PowerShell form of `target`'s hook command (`& 'program' args`), whatever the
@@ -156,6 +177,7 @@ pub fn plan_uninstall(text: &str) -> Result<Plan, String> {
 /// Adds the missing hivetty hooks for `target`. Entries hivetty added before with another
 /// binary path are updated; everything else is left as it is.
 pub fn plan_install_for(target: HookTarget, text: &str, exe: &Path) -> Result<Plan, String> {
+    check_exe(exe)?;
     let mut root = parse(text)?;
     let hooks = root
         .entry("hooks")
@@ -395,6 +417,16 @@ mod tests {
             ),
             "& 'C:/Program Files/it''s/hivetty.exe' hook --agent gemini-cli --event AfterAgent"
         );
+        // Typographic quotes are quotes to PowerShell: doubled too.
+        assert_eq!(
+            GEMINI.command_for(
+                Path::new("C:/Downloads/\u{2019};calc;&\u{2019}/hivetty.exe"),
+                "Stop",
+                true
+            ),
+            "& 'C:/Downloads/\u{2019}\u{2019};calc;&\u{2019}\u{2019}/hivetty.exe' hook --agent gemini-cli --event Stop"
+        );
+        assert!(plan_install_for(GEMINI, "{}", Path::new("/tmp/a\nb/hivetty")).is_err());
         // Claude Code uses Git Bash on Windows too.
         assert!(CLAUDE.command_for(exe, "Stop", true).starts_with('\''));
         // Claude Code's entries are not Gemini's, and the other way round.
