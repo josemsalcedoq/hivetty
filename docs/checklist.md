@@ -64,7 +64,18 @@ Probar en las shells que tengas: zsh, bash, fish; en Windows PowerShell 7, **Pow
 
 ## 5. Agentes en la barra lateral
 
-Con Claude Code (hooks instalados), Codex y Gemini CLI:
+Instala los hooks de cada agente (cada comando muestra los cambios y pide confirmación):
+
+```sh
+hivetty agents install-hooks                     # Claude Code
+hivetty agents install-hooks --agent gemini-cli  # Gemini CLI
+hivetty agents install-hooks --agent codex       # Codex (al abrirlo, te pide confiar en ellos)
+```
+
+- [ ] Tras instalarlos, cada agente sigue funcionando con normalidad (sin errores de hooks), también fuera de hivetty.
+- [ ] Tu propia configuración de cada agente sigue intacta (en `~/.codex/config.toml`, tus comentarios también) y hay un `.hivetty-bak` al lado.
+
+Con los tres agentes:
 
 - [ ] Arrancar cada agente en un panel: la fila muestra su nombre y su estado (*Working*, *Needs permission*, *Done*…). En Claude Code, además, lo que está haciendo ("Editing src/main.rs").
 - [ ] Un permiso pendiente en otro panel: anillo ámbar alrededor de ese panel, notificación del sistema, y `Ctrl+Shift+J` / `⌘J` te lleva a él.
