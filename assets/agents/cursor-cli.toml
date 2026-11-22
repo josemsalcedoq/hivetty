@@ -1,0 +1,11 @@
+# Cursor CLI.
+id = "cursor-cli"
+name = "Cursor CLI"
+provider = "cursor"
+command = "cursor-agent"
+process_names = ["cursor-agent"]
+verified = true
+
+[state]
+osc7501 = false
+title_from_osc = true

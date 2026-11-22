@@ -1,0 +1,11 @@
+# Grok CLI. The command name is not verified yet: check before relying on detection.
+id = "grok-cli"
+name = "Grok CLI"
+provider = "xai"
+command = "grok"
+process_names = ["grok"]
+verified = false
+
+[state]
+osc7501 = false
+title_from_osc = true

@@ -45,6 +45,8 @@ pub(crate) enum AppEvent {
     Hook(hv_ipc::HookEvent),
     /// A screen reader asked for the accessibility tree or an action (SP-3, F4-25).
     AccessKit(egui_winit::accesskit_winit::Event),
+    /// The agent detected in a pane's process tree changed (F4-03).
+    Agent { pane: PaneId, agent: Option<String> },
     /// Project chips computed for the prompt at `line` of `pane` (F3-09…F3-12).
     Chips {
         pane: PaneId,
@@ -128,6 +130,21 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
             }
         })
         .map_err(|err| log::warn!("prompt chips disabled: {err}"))
+        .ok()
+    };
+    app.profiles = hv_agents::profile::builtin();
+    app.agent_watch = {
+        let proxy = std::sync::Mutex::new(app.proxy.clone());
+        hv_agents::watch::ProcessWatcher::start(
+            app.profiles.clone(),
+            Duration::from_secs(1),
+            move |pane, agent| {
+                if let Ok(proxy) = proxy.lock() {
+                    let _ = proxy.send_event(AppEvent::Agent { pane, agent });
+                }
+            },
+        )
+        .map_err(|err| log::warn!("agent detection disabled: {err}"))
         .ok()
     };
     app.config = config;
@@ -381,6 +398,10 @@ struct App {
     shell_dir: Option<std::path::PathBuf>,
     /// Reads project files for the prompt chips off the UI thread.
     chip_service: Option<hv_shell::ChipService<(PaneId, usize)>>,
+    /// Agent profiles (F4-01).
+    profiles: Vec<hv_agents::profile::Profile>,
+    /// Watches pane process trees for agents started by hand (F4-03).
+    agent_watch: Option<hv_agents::watch::ProcessWatcher>,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -459,6 +480,8 @@ impl App {
             layout_path: None,
             shell_dir: None,
             chip_service: None,
+            profiles: Vec::new(),
+            agent_watch: None,
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -805,6 +828,21 @@ impl App {
         }
     }
 
+    /// Tells the process watcher which shells to look under (all panes of all windows).
+    fn sync_watched_panes(&self) {
+        let Some(watch) = &self.agent_watch else {
+            return;
+        };
+        let panes = self
+            .ui
+            .iter()
+            .chain(self.parked.values())
+            .flat_map(|ui| ui.panes.iter())
+            .filter_map(|(id, p)| p.session.pid().map(|pid| (*id, pid)))
+            .collect();
+        watch.set_panes(panes);
+    }
+
     /// Makes `id` the active window, swapping the per-window state. False if unknown.
     fn activate(&mut self, id: WindowId) -> bool {
         if self.ui.as_ref().is_some_and(|ui| ui.window.id() == id) {
@@ -966,9 +1004,14 @@ impl App {
         if event.state != ElementState::Pressed || self.ime_composing || self.ui.is_none() {
             return;
         }
+        let agent = self
+            .ui
+            .as_ref()
+            .and_then(Ui::focused)
+            .and_then(|p| p.info.agent_id.clone());
         let ctx = crate::keymap::Context {
             search_open: self.search.is_some(),
-            agent: None,
+            agent: agent.as_deref(),
         };
         if let Some(chord) = pressed_chord(event, self.modifiers)
             && let Some(action) = self.keymap.lookup(&chord, &ctx)
@@ -1818,6 +1861,31 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                 }
             }
+            AppEvent::Agent { pane, agent } => {
+                let owner = self
+                    .parked
+                    .iter()
+                    .find(|(_, ui)| ui.panes.contains_key(&pane))
+                    .map(|(w, _)| *w);
+                if let Some(window) = owner {
+                    self.activate(window);
+                }
+                let name = agent
+                    .as_deref()
+                    .and_then(|id| hv_agents::profile::find(&self.profiles, id))
+                    .map(|p| p.name.clone());
+                if let Some(ui) = &mut self.ui
+                    && let Some(p) = ui.panes.get_mut(&pane)
+                {
+                    if agent.is_none() && p.info.agent_id.is_some() {
+                        // The agent exited: back to a plain shell.
+                        p.info.agent = hv_agents::Tracker::default();
+                    }
+                    p.info.agent_id = agent;
+                    p.info.agent_name = name;
+                    ui.window.request_redraw();
+                }
+            }
             AppEvent::Chips { pane, line, info } => {
                 let owner = self
                     .parked
@@ -1926,6 +1994,7 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.sync_watched_panes();
         let mut deadline: Option<Instant> = None;
         for id in self.window_ids() {
             if !self.activate(id) {

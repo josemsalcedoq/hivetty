@@ -1,0 +1,12 @@
+# GitHub Copilot CLI.
+id = "copilot-cli"
+name = "Copilot CLI"
+provider = "github"
+command = "copilot"
+process_names = ["copilot"]
+node_args = ["@github/copilot"]
+verified = true
+
+[state]
+osc7501 = false
+title_from_osc = true

@@ -1,0 +1,11 @@
+# Antigravity (Google). Whether it has a terminal CLI, and its name, is not verified yet.
+id = "antigravity"
+name = "Antigravity"
+provider = "google"
+command = "antigravity"
+process_names = ["antigravity"]
+verified = false
+
+[state]
+osc7501 = false
+title_from_osc = true

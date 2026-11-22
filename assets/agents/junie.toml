@@ -1,0 +1,11 @@
+# Junie (JetBrains). The CLI command name is not verified yet.
+id = "junie"
+name = "Junie"
+provider = "jetbrains"
+command = "junie"
+process_names = ["junie"]
+verified = false
+
+[state]
+osc7501 = false
+title_from_osc = true

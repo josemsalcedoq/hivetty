@@ -1,0 +1,12 @@
+# opencode.
+id = "opencode"
+name = "opencode"
+provider = "other"
+command = "opencode"
+process_names = ["opencode"]
+node_args = ["opencode-ai"]
+verified = true
+
+[state]
+osc7501 = false
+title_from_osc = true

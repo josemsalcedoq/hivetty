@@ -1,0 +1,12 @@
+# Aider. Runs under Python; matched by its script name.
+id = "aider"
+name = "Aider"
+provider = "other"
+command = "aider"
+process_names = ["aider"]
+python_args = ["aider"]
+verified = true
+
+[state]
+osc7501 = false
+title_from_osc = false

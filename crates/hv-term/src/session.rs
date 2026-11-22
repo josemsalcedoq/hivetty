@@ -375,6 +375,11 @@ impl Session {
         snap
     }
 
+    /// Process id of the program started in the PTY (the shell), if known.
+    pub fn pid(&self) -> Option<u32> {
+        lock(&self.pty).pid()
+    }
+
     /// Scrollback line of the newest shell prompt (OSC 133;A), if the shell reports them.
     pub fn last_prompt_line(&self) -> Option<usize> {
         lock(&self.state).marks.last_prompt()

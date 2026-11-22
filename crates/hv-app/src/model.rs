@@ -27,6 +27,10 @@ pub(crate) struct SessionInfo {
     pub(crate) progress: Option<(u8, u8)>,
     /// When the running shell command started (OSC 133;C).
     pub(crate) command_started: Option<Instant>,
+    /// Agent running in the pane (profile id), from the process tree or its hooks.
+    pub(crate) agent_id: Option<String>,
+    /// Its display name.
+    pub(crate) agent_name: Option<String>,
 }
 
 impl SessionInfo {
@@ -40,6 +44,8 @@ impl SessionInfo {
             bell: false,
             progress: None,
             command_started: None,
+            agent_id: None,
+            agent_name: None,
         }
     }
 
@@ -108,9 +114,13 @@ impl SessionInfo {
     /// `HIVETTY_SESSION_ID`). Returns true if the sidebar changed.
     pub(crate) fn on_hook(&mut self, hook: &hv_ipc::HookEvent) -> bool {
         let update = match hook.agent.as_str() {
-            "claude" => hv_agents::claude::from_hook(&hook.event, &hook.payload),
+            "claude" | "claude-code" => hv_agents::claude::from_hook(&hook.event, &hook.payload),
             _ => return false,
         };
+        if self.agent_id.is_none() {
+            self.agent_id = Some("claude-code".to_owned());
+            self.agent_name = Some("Claude Code".to_owned());
+        }
         self.agent.apply(Source::Hook, update, Instant::now())
     }
 }
@@ -136,6 +146,7 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         .title
         .clone()
         .filter(|t| !t.trim().is_empty())
+        .or_else(|| info.agent_name.clone())
         .unwrap_or_else(|| strings::DEFAULT_TITLE.to_owned());
     let (state, label) = if info.exited {
         (RowState::Done, strings::STATE_EXITED)

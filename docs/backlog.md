@@ -151,6 +151,13 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 ## F4 — Barra lateral de agentes
 
+**Estado (2026-11-22):**
+- ✅ F4-01: los 11 perfiles en `assets/agents/*.toml` (incrustados). Grok CLI, Junie y Antigravity llevan `verified = false`: falta confirmar el nombre de su comando.
+- ✅ F4-02: `hivetty agents list` busca cada comando en el PATH (con PATHEXT en Windows).
+- ✅ F4-03: un hilo con `sysinfo` mira cada segundo los procesos bajo la shell de cada panel (nombre del ejecutable, o `node`/`python` con argumentos que lo identifican). El panel sabe qué agente corre, la fila lo usa de título por defecto y el keymap admite `when = "agent == 'claude-code'"`.
+- ✅ F4-04/05/06/08/10/26 (parciales de SP-4): estados, prioridad de fuentes, IPC, `hivetty hook`, OSC 7501, notificaciones OSC 9/777 y subtítulos desde los hooks.
+- ✅ F4-07 (Claude Code): `hivetty agents install-hooks|uninstall-hooks [--dry-run]` enseña los cambios y pide `y`; copia `settings.json.hivetty-bak`, escritura atómica, conserva el orden de las claves y las entradas del usuario, actualiza la ruta si el binario se movió y desinstala solo lo suyo. Falta el shim estable de Windows (F6) y el resto de agentes.
+
 | ID | Tarea | Req | Depende | Tam. |
 |---|---|---|---|---|
 | F4-01 | `hv-agents`: perfiles TOML y perfiles incluidos (los 11 agentes) | A-01 | F2 | M |

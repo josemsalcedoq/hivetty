@@ -4,6 +4,9 @@
 //! (2.2) and the interpreters for Claude Code hooks and OSC 7501.
 
 pub mod claude;
+pub mod install;
+pub mod profile;
+pub mod watch;
 
 use std::time::{Duration, Instant};
 

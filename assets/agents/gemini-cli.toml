@@ -1,0 +1,12 @@
+# Gemini CLI (Google).
+id = "gemini-cli"
+name = "Gemini CLI"
+provider = "google"
+command = "gemini"
+process_names = ["gemini"]
+node_args = ["@google/gemini-cli", "gemini-cli"]
+verified = true
+
+[state]
+osc7501 = false
+title_from_osc = true

@@ -1,0 +1,12 @@
+# Amp (Sourcegraph).
+id = "amp"
+name = "Amp"
+provider = "sourcegraph"
+command = "amp"
+process_names = ["amp"]
+node_args = ["@sourcegraph/amp"]
+verified = true
+
+[state]
+osc7501 = false
+title_from_osc = true

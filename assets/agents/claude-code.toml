@@ -1,0 +1,21 @@
+# Claude Code (Anthropic). Hooks and OSC 7501 verified against 2.1.330 (docs/spikes/SP-4.md).
+id = "claude-code"
+name = "Claude Code"
+provider = "anthropic"
+command = "claude"
+process_names = ["claude"]
+# Older installs run under node: match node only when its arguments mention claude.
+node_args = ["claude-code", "@anthropic-ai/claude-code"]
+verified = true
+
+[state]
+osc7501 = true
+hooks = "claude-settings"
+title_from_osc = true
+
+[resume]
+command = "claude --resume {session_id}"
+
+[usage]
+format = "claude-jsonl"
+paths = ["~/.claude/projects/**/*.jsonl"]

@@ -1,0 +1,19 @@
+# Codex CLI (OpenAI).
+id = "codex"
+name = "Codex"
+provider = "openai"
+command = "codex"
+process_names = ["codex"]
+node_args = ["@openai/codex"]
+verified = true
+
+[state]
+osc7501 = false
+title_from_osc = false
+
+[resume]
+command = "codex resume {session_id}"
+
+[usage]
+format = "codex-jsonl"
+paths = ["~/.codex/sessions/**/*.jsonl"]

@@ -3,6 +3,7 @@
 // Release builds on Windows are GUI apps (no console window). Debug builds keep the console for logs.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agents_cli;
 mod app;
 mod headless;
 mod hook;
@@ -43,6 +44,11 @@ OPTIONS:
     --palette            With --screenshot --ui, show the command palette
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
+    agents [list]        List the coding agents hivetty knows and which are installed
+    agents install-hooks [--dry-run]
+                         Add hivetty's hooks to Claude Code's settings (shows the changes first)
+    agents uninstall-hooks [--dry-run]
+                         Remove them again
     hook --agent <ID> --event <NAME>
                          Forward an agent hook (stdin) to the running hivetty; always exits 0
     -V, --version        Print version
@@ -74,6 +80,7 @@ enum Command {
     Usage {
         json: bool,
     },
+    Agents(agents_cli::AgentsCommand),
     Version,
     Help,
 }
@@ -100,6 +107,9 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             "-h" | "--help" => return Ok(Command::Help),
             "-V" | "--version" => return Ok(Command::Version),
             "--doctor" => return Ok(Command::Doctor),
+            "agents" => {
+                return agents_cli::AgentsCommand::parse(&args[i + 1..]).map(Command::Agents);
+            }
             "usage" => {
                 return Ok(Command::Usage {
                     json: args[i + 1..].iter().any(|a| a == "--json"),
@@ -212,6 +222,7 @@ fn main() -> ExitCode {
             Ok(())
         }
         Command::Run(spec, record) => app::run(spec, record),
+        Command::Agents(command) => agents_cli::run(&command),
         Command::Usage { json } => {
             print!("{}", usage_report(json));
             Ok(())
