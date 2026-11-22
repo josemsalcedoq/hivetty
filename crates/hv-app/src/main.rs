@@ -12,6 +12,7 @@ mod keymap;
 mod menu_mac;
 mod model;
 mod saved;
+mod usage_cli;
 mod workspace;
 
 use std::path::PathBuf;
@@ -44,7 +45,8 @@ OPTIONS:
     --palette            With --screenshot --ui, show the command palette
     --usage              With --screenshot --ui, show the usage dashboard (this machine's logs)
     --doctor             Print diagnostic information about this system
-    usage [--json]       Print Claude Code token usage per day from local transcripts
+    usage [--json|--csv] [--project NAME] [--days N]
+                         Print token usage per day from the agents' local logs
     agents [list]        List the coding agents hivetty knows and which are installed
     agents install-hooks [--dry-run]
                          Add hivetty's hooks to Claude Code's settings (shows the changes first)
@@ -79,9 +81,7 @@ enum Command {
         usage: bool,
     },
     Doctor,
-    Usage {
-        json: bool,
-    },
+    Usage(usage_cli::UsageArgs),
     Agents(agents_cli::AgentsCommand),
     Version,
     Help,
@@ -114,9 +114,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 return agents_cli::AgentsCommand::parse(&args[i + 1..]).map(Command::Agents);
             }
             "usage" => {
-                return Ok(Command::Usage {
-                    json: args[i + 1..].iter().any(|a| a == "--json"),
-                });
+                return usage_cli::UsageArgs::parse(&args[i + 1..]).map(Command::Usage);
             }
             "-e" | "--command" => {
                 let program = value(i)?.clone();
@@ -228,8 +226,8 @@ fn main() -> ExitCode {
         }
         Command::Run(spec, record) => app::run(spec, record),
         Command::Agents(command) => agents_cli::run(&command),
-        Command::Usage { json } => {
-            print!("{}", usage_report(json));
+        Command::Usage(args) => {
+            print!("{}", usage_cli::run(&args));
             Ok(())
         }
         Command::Screenshot {
@@ -272,68 +270,6 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-/// `hivetty usage`: Claude Code token usage per day, read from the local transcripts.
-fn usage_report(json: bool) -> String {
-    use std::fmt::Write as _;
-    let Some(root) = hv_usage::claude::default_root() else {
-        return "No Claude Code transcripts found (~/.claude/projects).
-"
-        .to_owned();
-    };
-    let records = hv_usage::claude::scan(&root);
-    let daily = hv_usage::daily(&records);
-    let mut out = String::new();
-    if json {
-        out.push_str("{\"daily\":[");
-        for (i, (day, t)) in daily.iter().enumerate() {
-            let sep = if i == 0 { "" } else { "," };
-            let _ = write!(
-                out,
-                "{sep}{{\"date\":\"{day}\",\"input\":{},\"output\":{},\"cacheRead\":{},\"cacheWrite\":{},\"turns\":{}}}",
-                t.input, t.output, t.cache_read, t.cache_write, t.turns
-            );
-        }
-        out.push_str(
-            "]}
-",
-        );
-        return out;
-    }
-    let _ = writeln!(
-        out,
-        "{:<12}{:>12}{:>12}{:>14}{:>14}{:>8}",
-        "Date", "Input", "Output", "Cache read", "Cache write", "Turns"
-    );
-    let mut total = hv_usage::Totals::default();
-    for (day, t) in &daily {
-        let _ = writeln!(
-            out,
-            "{:<12}{:>12}{:>12}{:>14}{:>14}{:>8}",
-            day.to_string(),
-            t.input,
-            t.output,
-            t.cache_read,
-            t.cache_write,
-            t.turns
-        );
-        total.input += t.input;
-        total.output += t.output;
-        total.cache_read += t.cache_read;
-        total.cache_write += t.cache_write;
-        total.turns += t.turns;
-    }
-    let _ = writeln!(
-        out,
-        "
-Total input {} ({:.0}% from cache), output {}, {} turns",
-        hv_usage::compact(total.total_input()),
-        total.cache_share() * 100.0,
-        hv_usage::compact(total.output),
-        total.turns
-    );
-    out
 }
 
 /// Builds the `--doctor` report. GPU, hook and ConPTY checks are added in later phases.

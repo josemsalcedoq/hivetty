@@ -190,5 +190,9 @@ pub const LESS: &str = "less";
 pub const MORE: &str = "more";
 /// "most active Sat 10 h".
 pub const MOST_ACTIVE: &str = "most active";
+/// Hint next to the agents table.
+pub const CLICK_TO_FILTER: &str = "click one to see only its usage";
+/// Tooltip of the filter chip.
+pub const SHOW_ALL_AGENTS: &str = "Show all agents";
 /// "10 more" rows.
 pub const MORE_ROWS: &str = "more";

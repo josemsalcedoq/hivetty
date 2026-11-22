@@ -918,7 +918,13 @@ impl App {
             return None;
         }
         Some(match (&self.usage.view, self.usage.loading) {
-            (Some(view), _) => hv_ui::UsageView::Ready(self.usage.range, Arc::clone(view)),
+            (Some(view), _) => {
+                let filter = self.usage.filter.as_deref().map(|id| {
+                    hv_agents::profile::find(&self.profiles, id)
+                        .map_or_else(|| id.to_owned(), |p| p.name.clone())
+                });
+                hv_ui::UsageView::Ready(self.usage.range, Arc::clone(view), filter)
+            }
             (None, _) => hv_ui::UsageView::Loading(self.usage.range),
         })
     }
@@ -1916,7 +1922,17 @@ impl App {
             Some(hv_ui::UsageAction::Range(range)) => {
                 self.usage.range = range;
                 if let Some(data) = &self.usage.data {
-                    self.usage.view = Some(Arc::new(data.dashboard(range)));
+                    self.usage.view = Some(Arc::new(
+                        data.dashboard(range, self.usage.filter.as_deref()),
+                    ));
+                }
+            }
+            Some(hv_ui::UsageAction::FilterAgent(agent)) => {
+                self.usage.filter = agent;
+                if let Some(data) = &self.usage.data {
+                    self.usage.view = Some(Arc::new(
+                        data.dashboard(self.usage.range, self.usage.filter.as_deref()),
+                    ));
                 }
             }
             None => {}
@@ -2160,7 +2176,9 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::UsageLoaded(data) => {
                 self.usage.loading = false;
-                self.usage.view = Some(Arc::new(data.dashboard(self.usage.range)));
+                self.usage.view = Some(Arc::new(
+                    data.dashboard(self.usage.range, self.usage.filter.as_deref()),
+                ));
                 self.usage.data = Some(data);
                 for ui in self.ui.iter().chain(self.parked.values()) {
                     ui.window.request_redraw();
@@ -2416,12 +2434,39 @@ impl UsageData {
         }
     }
 
-    /// The dashboard for `range`, ending today in local time.
-    pub(crate) fn dashboard(&self, range: hv_ui::UsageRange) -> hv_usage::dashboard::Dashboard {
+    /// The records and tasks read.
+    pub(crate) fn parts(&self) -> (&[hv_usage::UsageRecord], &[hv_usage::Task]) {
+        (&self.records, &self.tasks)
+    }
+
+    /// The dashboard for `range`, ending today in local time, optionally for one agent.
+    pub(crate) fn dashboard(
+        &self,
+        range: hv_ui::UsageRange,
+        agent: Option<&str>,
+    ) -> hv_usage::dashboard::Dashboard {
         let tz = jiff::tz::TimeZone::system();
         let today = jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date();
-        let mut dash =
-            hv_usage::dashboard::build(&self.records, &self.tasks, range.days(), today, &tz);
+        let mut dash = match agent {
+            None => {
+                hv_usage::dashboard::build(&self.records, &self.tasks, range.days(), today, &tz)
+            }
+            Some(id) => {
+                let records: Vec<_> = self
+                    .records
+                    .iter()
+                    .filter(|r| r.agent == id)
+                    .cloned()
+                    .collect();
+                let tasks: Vec<_> = self
+                    .tasks
+                    .iter()
+                    .filter(|t| t.agent == id)
+                    .cloned()
+                    .collect();
+                hv_usage::dashboard::build(&records, &tasks, range.days(), today, &tz)
+            }
+        };
         // Agent ids to display names ("claude-code" -> "Claude Code").
         let profiles = hv_agents::profile::builtin();
         for row in &mut dash.agents {
@@ -2441,6 +2486,8 @@ struct UsageState {
     data: Option<Arc<UsageData>>,
     loading: bool,
     view: Option<Arc<hv_usage::dashboard::Dashboard>>,
+    /// Agent id the panel is filtered to (U-51).
+    filter: Option<String>,
 }
 
 impl Default for UsageState {
@@ -2451,6 +2498,7 @@ impl Default for UsageState {
             data: None,
             loading: false,
             view: None,
+            filter: None,
         }
     }
 }

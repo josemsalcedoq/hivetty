@@ -33,6 +33,9 @@ pub struct ModelRow {
 /// A row of the agents table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRow {
+    /// Agent id (`claude-code`), for filtering.
+    pub id: String,
+    /// Display name (the app replaces the id with the profile's name).
     pub agent: String,
     pub input: u64,
     pub output: u64,
@@ -217,6 +220,7 @@ pub fn build(
         let agent = agents
             .entry(r.agent.to_owned())
             .or_insert_with(|| AgentRow {
+                id: r.agent.to_owned(),
                 agent: r.agent.to_owned(),
                 input: 0,
                 output: 0,
@@ -290,6 +294,7 @@ pub fn build(
         agents
             .entry(t.agent.to_owned())
             .or_insert_with(|| AgentRow {
+                id: t.agent.to_owned(),
                 agent: t.agent.to_owned(),
                 input: 0,
                 output: 0,
@@ -357,6 +362,7 @@ pub fn build(
         agents
             .entry(agent.clone())
             .or_insert_with(|| AgentRow {
+                id: agent.clone(),
                 agent: agent.clone(),
                 input: 0,
                 output: 0,

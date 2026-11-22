@@ -208,7 +208,9 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 - ✅ F5-07…F5-12: panel "Agent usage" (`Ctrl+Alt+U` / `⌥⌘U`, paleta y menú) sobre los paneles: tarjetas KPI con delta y sparkline, tokens por día (input arriba y output abajo con su escala, tooltip, eje primer día / centro / today, "N of M days with agents · X/day"), mapa de calor con leyenda y "most active", modelos (barra por proveedor, 6 filas y "N more") y agentes; selector 7/30/90/All y `esc`; estados de carga y vacío; números compactos y con miles. Probado con los datos reales de este equipo (`--screenshot --ui --usage`).
 - ✅ F5-01/F5-04 (con cambio de diseño, [ADR 0006](adr/0006-usage-cache-not-sqlite.md)): caché incremental en `usage.cache` (`postcard`) con el byte leído de cada log; solo se leen las líneas nuevas completas. 110 MB de logs → 650 KB de caché.
 - ✅ AGENT TIME (U-13) desde los logs según ADR 0005: tramos de cada sesión con huecos de menos de 5 min, concurrencia máxima ("up to N at once"), tiempo por día (sparkline) y por agente (columna de la tabla). Los intervalos observados en vivo (F4-23) lo afinarán.
-- ⏳ Pendiente: otros agentes (F5-03), coste (F5-13), exportar y filtrar por proyecto (F5-14), filtro al pulsar un agente (U-51), límites del plan (F5-19), OTLP (F5-15).
+- ✅ U-51: pulsar un agente filtra todo el panel; un chip "Claude Code ×" lo quita.
+- ✅ F5-14: `hivetty usage [--json|--csv] [--project NAME] [--days N]` (tabla con totales, CSV o JSON; las tareas se filtran por las sesiones del proyecto). Usa la misma caché incremental.
+- ⏳ Pendiente: otros agentes (F5-03), coste (F5-13/F5-17: los precios no se inventan; irán en `pricing.toml` editable o desde LiteLLM con caché), límites del plan (F5-19), OTLP (F5-15), WSL (F5-05).
 
 | ID | Tarea | Req | Depende | Tam. |
 |---|---|---|---|---|

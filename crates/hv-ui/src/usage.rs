@@ -41,14 +41,16 @@ impl UsageRange {
 pub enum UsageView {
     /// Logs are being read.
     Loading(UsageRange),
-    /// Ready.
-    Ready(UsageRange, std::sync::Arc<Dashboard>),
+    /// Ready; the last field is the agent the panel is filtered to (display name).
+    Ready(UsageRange, std::sync::Arc<Dashboard>, Option<String>),
 }
 
 /// What the user did in the dashboard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UsageAction {
     Range(UsageRange),
+    /// Show only this agent (id), or everything again with `None` (U-51).
+    FilterAgent(Option<String>),
     Close,
 }
 
@@ -69,7 +71,7 @@ pub(crate) fn show(ctx: &egui::Context, area: Rect, view: &UsageView) -> Option<
         return Some(UsageAction::Close);
     }
     let range = match view {
-        UsageView::Loading(r) | UsageView::Ready(r, _) => *r,
+        UsageView::Loading(r) | UsageView::Ready(r, ..) => *r,
     };
     egui::Area::new(egui::Id::unique("usage-dashboard"))
         .order(egui::Order::Middle)
@@ -97,13 +99,19 @@ pub(crate) fn show(ctx: &egui::Context, area: Rect, view: &UsageView) -> Option<
                                             .color(theme::TEXT_MUTED),
                                     );
                                 }
-                                UsageView::Ready(_, dash) if dash.input == 0 && dash.tasks == 0 => {
+                                UsageView::Ready(_, dash, _)
+                                    if dash.input == 0 && dash.tasks == 0 =>
+                                {
                                     ui.label(
                                         RichText::new(strings::USAGE_EMPTY)
                                             .color(theme::TEXT_SECONDARY),
                                     );
                                 }
-                                UsageView::Ready(_, dash) => body(ui, dash),
+                                UsageView::Ready(_, dash, _) => {
+                                    if let Some(a) = body(ui, dash) {
+                                        action = Some(a);
+                                    }
+                                }
                             }
                         });
                 });
@@ -116,13 +124,27 @@ fn header(ui: &mut egui::Ui, view: &UsageView, range: UsageRange) -> Option<Usag
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(RichText::new(strings::USAGE_TITLE).size(20.0).strong());
-            if let UsageView::Ready(_, dash) = view {
+            if let UsageView::Ready(_, dash, filter) = view {
                 let first = dash.first_day.strftime("%b %-d").to_string();
-                ui.label(
-                    RichText::new(format!("{first} – {}", strings::TODAY))
-                        .size(13.0)
-                        .color(theme::TEXT_MUTED),
-                );
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("{first} – {}", strings::TODAY))
+                            .size(13.0)
+                            .color(theme::TEXT_MUTED),
+                    );
+                    if let Some(agent) = filter {
+                        let chip =
+                            egui::Button::new(RichText::new(format!("{agent}  ×")).size(12.0))
+                                .corner_radius(CornerRadius::same(10));
+                        if ui
+                            .add(chip)
+                            .on_hover_text(strings::SHOW_ALL_AGENTS)
+                            .clicked()
+                        {
+                            action = Some(UsageAction::FilterAgent(None));
+                        }
+                    }
+                });
             }
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -158,7 +180,8 @@ fn header(ui: &mut egui::Ui, view: &UsageView, range: UsageRange) -> Option<Usag
     action
 }
 
-fn body(ui: &mut egui::Ui, d: &Dashboard) {
+fn body(ui: &mut egui::Ui, d: &Dashboard) -> Option<UsageAction> {
+    let mut action = None;
     let width = ui.available_width();
     let narrow = width < 900.0;
     let gap = 12.0;
@@ -235,9 +258,13 @@ fn body(ui: &mut egui::Ui, d: &Dashboard) {
     ui.add_space(gap);
     // Row 3: models + agents.
     let half = if narrow { width } else { (width - gap) / 2.0 };
-    let row3 = |ui: &mut egui::Ui| {
+    let mut row3 = |ui: &mut egui::Ui| {
         card(ui, half, 0.0, |ui| models(ui, d));
-        card(ui, half, 0.0, |ui| agents(ui, d));
+        card(ui, half, 0.0, |ui| {
+            if let Some(id) = agents(ui, d) {
+                action = Some(UsageAction::FilterAgent(Some(id)));
+            }
+        });
     };
     if narrow {
         ui.vertical(|ui| {
@@ -250,6 +277,7 @@ fn body(ui: &mut egui::Ui, d: &Dashboard) {
             row3(ui);
         });
     }
+    action
 }
 
 fn card(ui: &mut egui::Ui, width: f32, min_height: f32, content: impl FnOnce(&mut egui::Ui)) {
@@ -582,11 +610,21 @@ fn models(ui: &mut egui::Ui, d: &Dashboard) {
     }
 }
 
-fn agents(ui: &mut egui::Ui, d: &Dashboard) {
-    section_label(ui, &format!("{} · {}", strings::AGENTS, d.agents.len()));
+/// The agents table; returns the id of a clicked row (U-51).
+fn agents(ui: &mut egui::Ui, d: &Dashboard) -> Option<String> {
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        section_label(ui, &format!("{} · {}", strings::AGENTS, d.agents.len()));
+        ui.label(
+            RichText::new(strings::CLICK_TO_FILTER)
+                .size(11.0)
+                .color(theme::TEXT_MUTED),
+        );
+    });
     ui.add_space(6.0);
     let max = d.agents.first().map_or(1, |a| a.input.max(1));
     for a in &d.agents {
+        let top = ui.cursor().top();
         table_row(
             ui,
             theme::TEXT_SECONDARY,
@@ -596,7 +634,27 @@ fn agents(ui: &mut egui::Ui, d: &Dashboard) {
             a.output,
             Some(duration_text(a.seconds)),
         );
+        let row = Rect::from_min_max(
+            pos2(ui.min_rect().left(), top),
+            pos2(ui.min_rect().right(), ui.cursor().top()),
+        );
+        let response = ui.interact(
+            row,
+            ui.scope_id().with(("agent-row", &a.id)),
+            Sense::click(),
+        );
+        if response.hovered() {
+            ui.painter().rect_filled(
+                row,
+                CornerRadius::same(4),
+                theme::HOVER_BG.gamma_multiply(0.5),
+            );
+        }
+        if response.clicked() {
+            clicked = Some(a.id.clone());
+        }
     }
+    clicked
 }
 
 /// Name, proportional bar (at least one point wide), input, output and optionally tasks.

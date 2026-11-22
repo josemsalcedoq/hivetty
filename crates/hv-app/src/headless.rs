@@ -227,7 +227,8 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             let data = crate::app::UsageData::read();
             hv_ui::UsageView::Ready(
                 hv_ui::UsageRange::Month,
-                std::sync::Arc::new(data.dashboard(hv_ui::UsageRange::Month)),
+                std::sync::Arc::new(data.dashboard(hv_ui::UsageRange::Month, None)),
+                None,
             )
         });
         let model = hv_ui::ChromeModel {
