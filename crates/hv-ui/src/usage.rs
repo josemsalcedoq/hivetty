@@ -81,7 +81,7 @@ pub(crate) fn show(ctx: &egui::Context, area: Rect, view: &UsageView) -> Option<
             ui.set_min_size(area.size());
             ui.set_max_size(area.size());
             ui.painter()
-                .rect_filled(area, CornerRadius::ZERO, theme::WINDOW_BG);
+                .rect_filled(area, CornerRadius::ZERO, theme::WINDOW_BG());
             egui::Frame::new()
                 .inner_margin(Margin::same(20))
                 .show(ui, |ui| {
@@ -96,7 +96,7 @@ pub(crate) fn show(ctx: &egui::Context, area: Rect, view: &UsageView) -> Option<
                                 UsageView::Loading(_) => {
                                     ui.label(
                                         RichText::new(strings::USAGE_LOADING)
-                                            .color(theme::TEXT_MUTED),
+                                            .color(theme::TEXT_MUTED()),
                                     );
                                 }
                                 UsageView::Ready(_, dash, _)
@@ -104,7 +104,7 @@ pub(crate) fn show(ctx: &egui::Context, area: Rect, view: &UsageView) -> Option<
                                 {
                                     ui.label(
                                         RichText::new(strings::USAGE_EMPTY)
-                                            .color(theme::TEXT_SECONDARY),
+                                            .color(theme::TEXT_SECONDARY()),
                                     );
                                 }
                                 UsageView::Ready(_, dash, _) => {
@@ -130,7 +130,7 @@ fn header(ui: &mut egui::Ui, view: &UsageView, range: UsageRange) -> Option<Usag
                     ui.label(
                         RichText::new(format!("{first} – {}", strings::TODAY))
                             .size(13.0)
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::TEXT_MUTED()),
                     );
                     if let Some(agent) = filter {
                         let chip =
@@ -160,13 +160,13 @@ fn header(ui: &mut egui::Ui, view: &UsageView, range: UsageRange) -> Option<Usag
             ] {
                 let selected = r == range;
                 let text = RichText::new(r.label()).size(12.0).color(if selected {
-                    theme::TEXT_PRIMARY
+                    theme::TEXT_PRIMARY()
                 } else {
-                    theme::TEXT_SECONDARY
+                    theme::TEXT_SECONDARY()
                 });
                 let button = egui::Button::new(text)
                     .fill(if selected {
-                        theme::SELECTED_BG
+                        theme::SELECTED_BG()
                     } else {
                         Color32::TRANSPARENT
                     })
@@ -282,8 +282,8 @@ fn body(ui: &mut egui::Ui, d: &Dashboard) -> Option<UsageAction> {
 
 fn card(ui: &mut egui::Ui, width: f32, min_height: f32, content: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
-        .fill(theme::ELEVATED_BG)
-        .stroke(Stroke::new(1.0, theme::BORDER))
+        .fill(theme::ELEVATED_BG())
+        .stroke(Stroke::new(1.0, theme::BORDER()))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::same(14))
         .show(ui, |ui| {
@@ -294,7 +294,7 @@ fn card(ui: &mut egui::Ui, width: f32, min_height: f32, content: impl FnOnce(&mu
 }
 
 fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).size(12.0).color(theme::TEXT_MUTED));
+    ui.label(RichText::new(text).size(12.0).color(theme::TEXT_MUTED()));
 }
 
 fn kpi(ui: &mut egui::Ui, label: &str, value: &str, sub: &str, delta: Option<f64>, spark: &[u64]) {
@@ -304,9 +304,9 @@ fn kpi(ui: &mut egui::Ui, label: &str, value: &str, sub: &str, delta: Option<f64
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let text = delta_text(delta);
                 let color = if delta >= 0.0 {
-                    theme::STATE_DONE
+                    theme::STATE_DONE()
                 } else {
-                    theme::STATE_ERROR
+                    theme::STATE_ERROR()
                 };
                 egui::Frame::new()
                     .fill(color.gamma_multiply(0.15))
@@ -318,8 +318,8 @@ fn kpi(ui: &mut egui::Ui, label: &str, value: &str, sub: &str, delta: Option<f64
             });
         }
     });
-    ui.label(RichText::new(value).size(32.0).color(theme::TEXT_PRIMARY));
-    ui.label(RichText::new(sub).size(13.0).color(theme::TEXT_SECONDARY));
+    ui.label(RichText::new(value).size(32.0).color(theme::TEXT_PRIMARY()));
+    ui.label(RichText::new(sub).size(13.0).color(theme::TEXT_SECONDARY()));
     sparkline(ui, spark);
 }
 
@@ -381,7 +381,7 @@ fn sparkline(ui: &mut egui::Ui, values: &[u64]) {
         .collect();
     ui.painter().add(egui::Shape::line(
         points,
-        Stroke::new(1.5, theme::TEXT_SECONDARY),
+        Stroke::new(1.5, theme::TEXT_SECONDARY()),
     ));
 }
 
@@ -393,7 +393,7 @@ fn tokens_by_day(ui: &mut egui::Ui, d: &Dashboard) {
     ui.label(
         RichText::new(format!("{} {}", compact(max_in), strings::INPUT))
             .size(11.0)
-            .color(theme::TEXT_MUTED),
+            .color(theme::TEXT_MUTED()),
     );
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 130.0), Sense::hover());
@@ -424,7 +424,7 @@ fn tokens_by_day(ui: &mut egui::Ui, d: &Dashboard) {
     }
     painter.line_segment(
         [pos2(rect.left(), mid), pos2(rect.right(), mid)],
-        Stroke::new(1.0, theme::BORDER),
+        Stroke::new(1.0, theme::BORDER()),
     );
     // Tooltip with the exact values of the day under the pointer (U-23).
     if let Some(pos) = response.hover_pos() {
@@ -444,7 +444,7 @@ fn tokens_by_day(ui: &mut egui::Ui, d: &Dashboard) {
     ui.label(
         RichText::new(format!("{} {}", compact(max_out), strings::OUTPUT))
             .size(11.0)
-            .color(theme::TEXT_MUTED),
+            .color(theme::TEXT_MUTED()),
     );
     // X axis: first day, middle day, today (U-21).
     ui.horizontal(|ui| {
@@ -454,15 +454,15 @@ fn tokens_by_day(ui: &mut egui::Ui, d: &Dashboard) {
             .get(d.daily.len() / 2)
             .map(|x| x.date.strftime("%b %-d").to_string())
             .unwrap_or_default();
-        ui.label(RichText::new(first).size(11.0).color(theme::TEXT_MUTED));
+        ui.label(RichText::new(first).size(11.0).color(theme::TEXT_MUTED()));
         let w = ui.available_width();
         ui.add_space(w / 2.0 - 40.0);
-        ui.label(RichText::new(middle).size(11.0).color(theme::TEXT_MUTED));
+        ui.label(RichText::new(middle).size(11.0).color(theme::TEXT_MUTED()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 RichText::new(strings::TODAY)
                     .size(11.0)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
         });
     });
@@ -477,7 +477,7 @@ fn tokens_by_day(ui: &mut egui::Ui, d: &Dashboard) {
             strings::DAY
         ))
         .size(12.0)
-        .color(theme::TEXT_SECONDARY),
+        .color(theme::TEXT_SECONDARY()),
     );
 }
 
@@ -498,7 +498,7 @@ fn heatmap(ui: &mut egui::Ui, d: &Dashboard) {
             egui::Align2::LEFT_CENTER,
             name,
             egui::FontId::proportional(10.0),
-            theme::TEXT_MUTED,
+            theme::TEXT_MUTED(),
         );
         for h in 0..24 {
             let x = rect.left() + label_w + cell * h as f32;
@@ -514,7 +514,7 @@ fn heatmap(ui: &mut egui::Ui, d: &Dashboard) {
         ui.label(
             RichText::new(strings::LESS)
                 .size(11.0)
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         for color in HEAT {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
@@ -523,7 +523,7 @@ fn heatmap(ui: &mut egui::Ui, d: &Dashboard) {
         ui.label(
             RichText::new(strings::MORE)
                 .size(11.0)
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
     });
     if let Some((day, hour)) = d.most_active {
@@ -531,7 +531,7 @@ fn heatmap(ui: &mut egui::Ui, d: &Dashboard) {
         ui.label(
             RichText::new(format!("{} {name} {hour} h", strings::MOST_ACTIVE))
                 .size(12.0)
-                .color(theme::TEXT_SECONDARY),
+                .color(theme::TEXT_SECONDARY()),
         );
     }
 }
@@ -569,7 +569,7 @@ fn models(ui: &mut egui::Ui, d: &Dashboard) {
             ui.label(
                 RichText::new(format!("{provider} {:.0}%", share * 100.0))
                     .size(11.0)
-                    .color(theme::TEXT_SECONDARY),
+                    .color(theme::TEXT_SECONDARY()),
             );
         }
     });
@@ -591,7 +591,7 @@ fn models(ui: &mut egui::Ui, d: &Dashboard) {
         egui::CollapsingHeader::new(
             RichText::new(format!("{} {}", d.models.len() - shown, strings::MORE_ROWS))
                 .size(12.0)
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         )
         .id_salt("more-models")
         .show(ui, |ui| {
@@ -618,7 +618,7 @@ fn agents(ui: &mut egui::Ui, d: &Dashboard) -> Option<String> {
         ui.label(
             RichText::new(strings::CLICK_TO_FILTER)
                 .size(11.0)
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
     });
     ui.add_space(6.0);
@@ -627,7 +627,7 @@ fn agents(ui: &mut egui::Ui, d: &Dashboard) -> Option<String> {
         let top = ui.cursor().top();
         table_row(
             ui,
-            theme::TEXT_SECONDARY,
+            theme::TEXT_SECONDARY(),
             &a.agent,
             a.input,
             max,
@@ -647,7 +647,7 @@ fn agents(ui: &mut egui::Ui, d: &Dashboard) -> Option<String> {
             ui.painter().rect_filled(
                 row,
                 CornerRadius::same(4),
-                theme::HOVER_BG.gamma_multiply(0.5),
+                theme::HOVER_BG().gamma_multiply(0.5),
             );
         }
         if response.clicked() {
@@ -678,7 +678,7 @@ fn table_row(
             egui::Align2::LEFT_CENTER,
             shown,
             font,
-            theme::TEXT_PRIMARY,
+            theme::TEXT_PRIMARY(),
         );
         let numbers = if extra.is_some() { 180.0 } else { 120.0 };
         let bar_w = (ui.available_width() - numbers).max(20.0);
@@ -694,7 +694,11 @@ fn table_row(
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if let Some(text) = &extra {
-                ui.label(RichText::new(text).size(12.0).color(theme::TEXT_SECONDARY));
+                ui.label(
+                    RichText::new(text)
+                        .size(12.0)
+                        .color(theme::TEXT_SECONDARY()),
+                );
             }
             ui.label(
                 RichText::new(compact(output))
@@ -704,7 +708,7 @@ fn table_row(
             ui.label(
                 RichText::new(compact(input))
                     .size(12.0)
-                    .color(theme::TEXT_SECONDARY),
+                    .color(theme::TEXT_SECONDARY()),
             );
         });
     });

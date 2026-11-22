@@ -17,24 +17,61 @@ fn rgb8(c: Rgb) -> Rgb8 {
     }
 }
 
-/// Default colors (dark theme). Replaced by the theme system in phase F6.
+/// Default colors, dark or light (F6-01). Programs can still override them (OSC 4/10/11).
 pub(crate) mod palette {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::Rgb8;
 
-    pub(crate) const FOREGROUND: Rgb8 = Rgb8::hex(0xE6E6E6);
-    pub(crate) const BACKGROUND: Rgb8 = Rgb8::hex(0x0A0A0B);
-    pub(crate) const CURSOR: Rgb8 = Rgb8::hex(0xE6E6E6);
-    pub(crate) const SELECTION: Rgb8 = Rgb8::hex(0x264F78);
+    static LIGHT: AtomicBool = AtomicBool::new(false);
+
+    /// Switches every terminal to the light or dark palette.
+    pub fn set_light(on: bool) {
+        LIGHT.store(on, Ordering::Relaxed);
+    }
+
+    fn light() -> bool {
+        LIGHT.load(Ordering::Relaxed)
+    }
+
+    fn pick(dark: u32, light_hex: u32) -> Rgb8 {
+        Rgb8::hex(if light() { light_hex } else { dark })
+    }
+
+    pub(crate) fn foreground() -> Rgb8 {
+        pick(0xE6E6E6, 0x1F2328)
+    }
+
+    pub(crate) fn background() -> Rgb8 {
+        pick(0x0A0A0B, 0xFFFFFF)
+    }
+
+    pub(crate) fn cursor() -> Rgb8 {
+        pick(0xE6E6E6, 0x1F2328)
+    }
+
+    pub(crate) fn selection() -> Rgb8 {
+        pick(0x264F78, 0xB6D7FF)
+    }
 
     const ANSI: [u32; 16] = [
         0x1A1A1D, 0xF85149, 0x3FB950, 0xD29922, 0x4EA1FF, 0xBC8CFF, 0x39C5CF, 0xC9C9CC, //
         0x6B6B73, 0xFF7B72, 0x56D364, 0xE3B341, 0x79C0FF, 0xD2A8FF, 0x56D4DD, 0xFFFFFF,
     ];
 
+    /// The 16 colors on a white background: darker, for contrast.
+    const ANSI_LIGHT: [u32; 16] = [
+        0x24292F, 0xCF222E, 0x116329, 0x9A6700, 0x0969DA, 0x8250DF, 0x1B7C83, 0x6E7781, //
+        0x57606A, 0xA40E26, 0x1A7F37, 0x633C01, 0x218BFF, 0xA475F9, 0x3192AA, 0x8C959F,
+    ];
+
     /// xterm 256-color palette with our 16 ANSI colors.
     pub(crate) fn indexed(i: u8) -> Rgb8 {
         match i {
-            0..=15 => Rgb8::hex(ANSI[usize::from(i)]),
+            0..=15 => {
+                let table = if light() { &ANSI_LIGHT } else { &ANSI };
+                Rgb8::hex(table[usize::from(i)])
+            }
             16..=231 => {
                 let i = i - 16;
                 let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
@@ -65,10 +102,10 @@ fn resolve_named(named: NamedColor, colors: &Colors) -> Rgb8 {
         return rgb8(rgb);
     }
     match named {
-        NamedColor::Foreground | NamedColor::BrightForeground => palette::FOREGROUND,
-        NamedColor::Background => palette::BACKGROUND,
-        NamedColor::Cursor => palette::CURSOR,
-        NamedColor::DimForeground => palette::FOREGROUND.dim(),
+        NamedColor::Foreground | NamedColor::BrightForeground => palette::foreground(),
+        NamedColor::Background => palette::background(),
+        NamedColor::Cursor => palette::cursor(),
+        NamedColor::DimForeground => palette::foreground().dim(),
         NamedColor::DimBlack
         | NamedColor::DimRed
         | NamedColor::DimGreen
@@ -141,7 +178,7 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
             u16::try_from(index + 1).unwrap_or(0)
         });
         if selected {
-            bg = palette::SELECTION;
+            bg = palette::selection();
         }
         cells[row * cols + col] = SnapCell {
             ch: cell.c,

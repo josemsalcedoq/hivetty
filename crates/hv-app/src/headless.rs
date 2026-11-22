@@ -37,6 +37,8 @@ pub(crate) struct Capture {
     pub(crate) palette: bool,
     /// Show the usage dashboard with this machine's real data (with `ui`).
     pub(crate) usage: bool,
+    /// Use the light theme.
+    pub(crate) light: bool,
 }
 
 impl Default for Capture {
@@ -54,6 +56,7 @@ impl Default for Capture {
             split: false,
             palette: false,
             usage: false,
+            light: false,
         }
     }
 }
@@ -93,6 +96,11 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
     let (width, height) = (panes_w + sidebar, grid_h + tab_bar);
     renderer.resize(width, height);
     let mut chrome = opts.ui.then(hv_ui::Chrome::new);
+    hv_term::set_light(opts.light);
+    hv_render::set_light(opts.light);
+    if let Some(chrome) = &chrome {
+        chrome.set_light(opts.light);
+    }
     // Texture updates (the font atlas) accumulate until the first frame is painted.
     let mut pending_textures = egui::TexturesDelta::default();
     let mut area = [0.0, 0.0, width as f32, height as f32];

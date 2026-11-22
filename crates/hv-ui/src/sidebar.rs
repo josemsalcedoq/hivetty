@@ -61,7 +61,7 @@ impl Sidebar {
             ui.label(
                 RichText::new(strings::SESSIONS)
                     .size(12.0)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let button = egui::Button::new(RichText::new(strings::NEW_SESSION).size(12.0))
@@ -85,16 +85,16 @@ impl Sidebar {
                 let text = format!("{} {count}", filter.label());
                 let selected = self.filter == filter;
                 let chip = egui::Button::new(RichText::new(text).size(11.0).color(if selected {
-                    theme::TEXT_PRIMARY
+                    theme::TEXT_PRIMARY()
                 } else {
-                    theme::TEXT_SECONDARY
+                    theme::TEXT_SECONDARY()
                 }))
                 .fill(if selected {
-                    theme::SELECTED_BG
+                    theme::SELECTED_BG()
                 } else {
                     Color32::TRANSPARENT
                 })
-                .stroke(Stroke::new(1.0, theme::BORDER))
+                .stroke(Stroke::new(1.0, theme::BORDER()))
                 .corner_radius(CornerRadius::same(10));
                 if ui.add(chip).clicked() {
                     self.filter = filter;
@@ -129,7 +129,7 @@ impl Sidebar {
                     ui.label(
                         RichText::new(format!("{project}  ·  {count}"))
                             .size(12.0)
-                            .color(theme::TEXT_SECONDARY),
+                            .color(theme::TEXT_SECONDARY()),
                     );
                     for (index, row) in visible.iter().filter(|(_, s)| s.project == project) {
                         match session_row(ui, row) {
@@ -140,9 +140,9 @@ impl Sidebar {
                     }
                 }
                 if sessions.is_empty() {
-                    ui.label(RichText::new(strings::NO_SESSIONS).color(theme::TEXT_MUTED));
+                    ui.label(RichText::new(strings::NO_SESSIONS).color(theme::TEXT_MUTED()));
                 } else if visible.is_empty() {
-                    ui.label(RichText::new(strings::NO_MATCHES).color(theme::TEXT_MUTED));
+                    ui.label(RichText::new(strings::NO_MATCHES).color(theme::TEXT_MUTED()));
                 }
             });
         (clicked, new_session, peek)
@@ -174,9 +174,9 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
         .widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, row.focused, &label));
     let painter = ui.painter_at(rect);
     let bg = if row.focused {
-        theme::SELECTED_BG
+        theme::SELECTED_BG()
     } else if response.hovered() {
-        theme::HOVER_BG
+        theme::HOVER_BG()
     } else {
         Color32::TRANSPARENT
     };
@@ -192,7 +192,7 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
         painter.circle_filled(
             egui::pos2(rect.right() - 6.0, rect.top() + 6.0),
             3.0,
-            theme::ACCENT,
+            theme::ACCENT(),
         );
     }
 
@@ -205,7 +205,7 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
         egui::Align2::RIGHT_TOP,
         &row.elapsed,
         small.clone(),
-        theme::TEXT_MUTED,
+        theme::TEXT_MUTED(),
     );
     let title_width = (time.left() - text_left - 8.0).max(20.0);
     let title = elide(ui, &row.title, &font, title_width);
@@ -214,13 +214,13 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
         egui::Align2::LEFT_TOP,
         title,
         font,
-        theme::TEXT_PRIMARY,
+        theme::TEXT_PRIMARY(),
     );
     let subtitle_color = match row.state {
-        RowState::Done => theme::STATE_DONE,
-        RowState::Waiting => theme::STATE_WAITING,
-        RowState::Error => theme::STATE_ERROR,
-        _ => theme::TEXT_SECONDARY,
+        RowState::Done => theme::STATE_DONE(),
+        RowState::Waiting => theme::STATE_WAITING(),
+        RowState::Error => theme::STATE_ERROR(),
+        _ => theme::TEXT_SECONDARY(),
     };
     let subtitle = elide(ui, &row.subtitle, &small, right - text_left);
     painter.text(
@@ -241,13 +241,13 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
             ui.scope_id().with(("peek", &row.title, rect.top() as i32)),
             Sense::click(),
         );
-        painter.rect_filled(button_rect, CornerRadius::same(4), theme::BORDER);
+        painter.rect_filled(button_rect, CornerRadius::same(4), theme::BORDER());
         painter.text(
             button_rect.center(),
             egui::Align2::CENTER_CENTER,
             strings::PEEK,
             egui::FontId::proportional(10.0),
-            theme::TEXT_PRIMARY,
+            theme::TEXT_PRIMARY(),
         );
         if peek.clicked() {
             click = RowClick::Peek;

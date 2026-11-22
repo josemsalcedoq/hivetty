@@ -27,6 +27,8 @@ pub struct Config {
     pub notifications: Notifications,
     /// Agent behaviour.
     pub agents: Agents,
+    /// Colors.
+    pub theme: Theme,
     /// Shortcut overrides, applied on top of the defaults (docs/keybindings.md).
     pub keybindings: Vec<KeyBinding>,
 }
@@ -134,6 +136,34 @@ impl Default for WindowConfig {
         Self {
             remember_geometry: true,
             restore_layout: true,
+        }
+    }
+}
+
+/// `[theme]`
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Theme {
+    /// `"system"` follows the OS light/dark setting; `"hivetty-dark"` or `"hivetty-light"`
+    /// force one.
+    pub name: String,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            name: "system".to_owned(),
+        }
+    }
+}
+
+impl Theme {
+    /// Whether to use the light variant, given what the OS prefers (`None` = unknown).
+    pub fn is_light(&self, system_light: Option<bool>) -> bool {
+        match self.name.as_str() {
+            "hivetty-light" | "light" => true,
+            "hivetty-dark" | "dark" => false,
+            _ => system_light.unwrap_or(false),
         }
     }
 }

@@ -129,14 +129,14 @@ impl TabBar {
             });
             let painter = ui.painter_at(rect);
             if response.hovered() {
-                painter.rect_filled(rect, CornerRadius::same(6), theme::HOVER_BG);
+                painter.rect_filled(rect, CornerRadius::same(6), theme::HOVER_BG());
             }
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "+",
                 egui::FontId::proportional(16.0),
-                theme::TEXT_SECONDARY,
+                theme::TEXT_SECONDARY(),
             );
             if response.on_hover_text(strings::NEW_TAB).clicked() {
                 action = Some(TabAction::New);
@@ -183,9 +183,9 @@ impl TabBar {
         let painter = ui.painter_at(rect);
         let dragged = self.dragging == Some(index);
         let bg = if tab.active || dragged {
-            theme::SELECTED_BG
+            theme::SELECTED_BG()
         } else if response.hovered() {
-            theme::HOVER_BG
+            theme::HOVER_BG()
         } else {
             Color32::TRANSPARENT
         };
@@ -194,7 +194,7 @@ impl TabBar {
             painter.rect_stroke(
                 rect,
                 CornerRadius::same(6),
-                Stroke::new(1.0, theme::BORDER),
+                Stroke::new(1.0, theme::BORDER()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -224,7 +224,7 @@ impl TabBar {
                 egui::Align2::RIGHT_CENTER,
                 "🔔",
                 egui::FontId::proportional(11.0),
-                theme::STATE_WAITING,
+                theme::STATE_WAITING(),
             );
             text_right -= 16.0;
         }
@@ -232,7 +232,7 @@ impl TabBar {
             painter.circle_filled(
                 egui::pos2(text_right - 3.0, rect.center().y),
                 3.0,
-                theme::ACCENT,
+                theme::ACCENT(),
             );
             text_right -= 10.0;
         }
@@ -269,9 +269,9 @@ impl TabBar {
             let font = egui::FontId::proportional(13.0);
             let title = elide(ui, &tab.title, &font, text_right - text_left);
             let color = if tab.active {
-                theme::TEXT_PRIMARY
+                theme::TEXT_PRIMARY()
             } else {
-                theme::TEXT_SECONDARY
+                theme::TEXT_SECONDARY()
             };
             painter.text(
                 egui::pos2(text_left, rect.center().y),
@@ -289,9 +289,9 @@ impl TabBar {
                 Vec2::new((rect.width() - 12.0) * progress.clamp(0.0, 1.0), 2.0),
             );
             let color = if tab.progress_error {
-                theme::STATE_ERROR
+                theme::STATE_ERROR()
             } else {
-                theme::ACCENT
+                theme::ACCENT()
             };
             painter.rect_filled(bar, CornerRadius::same(1), color);
         }
@@ -306,14 +306,14 @@ impl TabBar {
                 egui::WidgetInfo::labeled(egui::Role::Button, true, strings::CLOSE_TAB)
             });
             if close.hovered() {
-                painter.rect_filled(close_rect, CornerRadius::same(4), theme::BORDER);
+                painter.rect_filled(close_rect, CornerRadius::same(4), theme::BORDER());
             }
             painter.text(
                 close_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "×",
                 egui::FontId::proportional(14.0),
-                theme::TEXT_MUTED,
+                theme::TEXT_MUTED(),
             );
             if close.clicked() {
                 action = Some(TabAction::Close(index));
@@ -342,7 +342,7 @@ fn hamburger(ui: &mut egui::Ui, sections: &[Vec<PaletteItem>]) -> Option<usize> 
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, strings::MENU));
     let painter = ui.painter_at(rect);
     if response.hovered() {
-        painter.rect_filled(rect, CornerRadius::same(6), theme::HOVER_BG);
+        painter.rect_filled(rect, CornerRadius::same(6), theme::HOVER_BG());
     }
     // Three lines: the UI font has no ☰ glyph.
     for dy in [-4.0, 0.0, 4.0] {
@@ -352,7 +352,7 @@ fn hamburger(ui: &mut egui::Ui, sections: &[Vec<PaletteItem>]) -> Option<usize> 
                 egui::pos2(rect.center().x - 6.0, y),
                 egui::pos2(rect.center().x + 6.0, y),
             ],
-            Stroke::new(1.5, theme::TEXT_SECONDARY),
+            Stroke::new(1.5, theme::TEXT_SECONDARY()),
         );
     }
     let response = response.on_hover_text(strings::MENU);

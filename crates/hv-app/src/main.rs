@@ -44,6 +44,7 @@ OPTIONS:
     --split              With --screenshot, run the program in two panes side by side
     --palette            With --screenshot --ui, show the command palette
     --usage              With --screenshot --ui, show the usage dashboard (this machine's logs)
+    --light              With --screenshot, use the light theme
     --doctor             Print diagnostic information about this system
     usage [--json|--csv] [--project NAME] [--days N]
                          Print token usage per day from the agents' local logs
@@ -79,6 +80,7 @@ enum Command {
         split: bool,
         palette: bool,
         usage: bool,
+        light: bool,
     },
     Doctor,
     Usage(usage_cli::UsageArgs),
@@ -99,6 +101,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut split = false;
     let mut palette = false;
     let mut usage_flag = false;
+    let mut light = false;
     let mut record: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
@@ -149,6 +152,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             "--split" => split = true,
             "--palette" => palette = true,
             "--usage" => usage_flag = true,
+            "--light" => light = true,
             "--preedit" => {
                 preedit = Some(value(i)?.clone());
                 i += 1;
@@ -181,6 +185,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             split,
             palette,
             usage: usage_flag,
+            light,
         },
         None => Command::Run(spec, record),
     })
@@ -244,6 +249,7 @@ fn main() -> ExitCode {
             split,
             palette,
             usage,
+            light,
         } => {
             let opts = headless::Capture {
                 cols,
@@ -257,6 +263,7 @@ fn main() -> ExitCode {
                 split,
                 palette,
                 usage,
+                light,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))

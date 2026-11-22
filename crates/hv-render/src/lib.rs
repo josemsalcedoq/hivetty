@@ -4,6 +4,8 @@
 //! monospace advance so glyphs stay on the cell grid. Phase F1 replaces it with our own glyph
 //! atlas, built-in box drawing and damage tracking (docs/architecture.md section 4).
 
+#![allow(non_snake_case)]
+
 mod boxdraw;
 mod rects;
 
@@ -37,8 +39,12 @@ const PREFERRED_FONTS: &[&str] = &[
 const JUMP_LABEL: &str = "↓ Jump to bottom";
 
 /// Pill background (`bg.elevated` in docs/ui-spec.md) and border.
-const PILL_BG: Rgb8 = Rgb8::hex(0x18181B);
-const PILL_BORDER: Rgb8 = Rgb8::hex(0x3A3A40);
+fn PILL_BG() -> Rgb8 {
+    Rgb8::hex(if is_light() { 0xF6F6F7 } else { 0x18181B })
+}
+fn PILL_BORDER() -> Rgb8 {
+    Rgb8::hex(if is_light() { 0xD0D0D6 } else { 0x3A3A40 })
+}
 
 /// Padding around the grid, in logical pixels.
 const PADDING: f32 = 8.0;
@@ -95,16 +101,35 @@ pub struct Chip {
 }
 
 /// Chip background.
-const CHIP_BG: Rgb8 = Rgb8::hex(0x1C1C20);
+fn CHIP_BG() -> Rgb8 {
+    Rgb8::hex(if is_light() { 0xEFEFF2 } else { 0x1C1C20 })
+}
 /// Chip text.
-const CHIP_TEXT: Rgb8 = Rgb8::hex(0x9A9AA2);
+fn CHIP_TEXT() -> Rgb8 {
+    Rgb8::hex(if is_light() { 0x52525B } else { 0x9A9AA2 })
+}
 
 /// Prompt mark colors: command succeeded, failed, still running or unknown.
 const MARK_OK: Rgb8 = Rgb8::hex(0x3FB950);
 const MARK_FAILED: Rgb8 = Rgb8::hex(0xF85149);
-const MARK_PENDING: Rgb8 = Rgb8::hex(0x6B6B73);
+fn MARK_PENDING() -> Rgb8 {
+    Rgb8::hex(if is_light() { 0x8C959F } else { 0x6B6B73 })
+}
+static LIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Switches the renderer's own colors (pills, dividers, chips) to the light or dark theme.
+pub fn set_light(on: bool) {
+    LIGHT.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn is_light() -> bool {
+    LIGHT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Color of the lines between panes.
-const DIVIDER: Rgb8 = Rgb8::hex(0x26262B);
+fn DIVIDER() -> Rgb8 {
+    Rgb8::hex(if is_light() { 0xDADADF } else { 0x26262B })
+}
 /// How much unfocused panes are dimmed (0 = not at all).
 const UNFOCUSED_DIM: f32 = 0.15;
 
@@ -676,7 +701,11 @@ impl Renderer {
                     y,
                     w,
                     h,
-                    Rgb8::hex(0x000000),
+                    if is_light() {
+                        Rgb8::hex(0xFFFFFF)
+                    } else {
+                        Rgb8::hex(0x000000)
+                    },
                     UNFOCUSED_DIM,
                 ));
             }
@@ -690,7 +719,7 @@ impl Renderer {
             }
         }
         for &[x, y, w, h] in dividers {
-            over.push(Rect::new(x, y, w, h, DIVIDER));
+            over.push(Rect::new(x, y, w, h, DIVIDER()));
         }
         let (pill, search, preedit) = match focused {
             Some(pane) => (
@@ -780,7 +809,7 @@ impl Renderer {
                 top: *y,
                 scale: 1.0,
                 bounds,
-                default_color: to_text_color(CHIP_TEXT),
+                default_color: to_text_color(CHIP_TEXT()),
                 custom_glyphs: &[],
             })
         });
@@ -995,7 +1024,7 @@ impl Renderer {
                 if x + w > right {
                     break;
                 }
-                over.push(Rect::new(x, y + 1.0, w, ch - 2.0, CHIP_BG));
+                over.push(Rect::new(x, y + 1.0, w, ch - 2.0, CHIP_BG()));
                 over.push(Rect::new(
                     x + inner,
                     y + ((ch - dot) / 2.0).round(),
@@ -1052,9 +1081,9 @@ impl Renderer {
             y - border,
             w + border * 2.0,
             h + border * 2.0,
-            PILL_BORDER,
+            PILL_BORDER(),
         ));
-        over.push(Rect::new(x, y, w, h, PILL_BG));
+        over.push(Rect::new(x, y, w, h, PILL_BG()));
         Some((x + cw, y + ((h - ch) / 2.0).round()))
     }
 
@@ -1080,9 +1109,9 @@ impl Renderer {
             y - border,
             w + border * 2.0,
             h + border * 2.0,
-            PILL_BORDER,
+            PILL_BORDER(),
         ));
-        over.push(Rect::new(x, y, w, h, PILL_BG));
+        over.push(Rect::new(x, y, w, h, PILL_BG()));
         self.pill_rect = Some([x, y, w, h]);
         Some((x + cw, y + ((h - ch) / 2.0).round()))
     }
@@ -1151,7 +1180,7 @@ impl Renderer {
             let color = match mark.exit_code {
                 Some(0) => MARK_OK,
                 Some(_) => MARK_FAILED,
-                None => MARK_PENDING,
+                None => MARK_PENDING(),
             };
             let y = oy + mark.row as f32 * ch;
             over.push(Rect::new(

@@ -97,8 +97,8 @@ impl Palette {
             ))
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(theme::ELEVATED_BG)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::ELEVATED_BG())
+                    .stroke(Stroke::new(1.0, theme::BORDER()))
                     .corner_radius(CornerRadius::same(10))
                     .inner_margin(Margin::same(8))
                     .show(ui, |ui| {
@@ -119,7 +119,7 @@ impl Palette {
                         ui.separator();
                         if matches.is_empty() {
                             ui.label(
-                                RichText::new(strings::PALETTE_EMPTY).color(theme::TEXT_MUTED),
+                                RichText::new(strings::PALETTE_EMPTY).color(theme::TEXT_MUTED()),
                             );
                         }
                         egui::ScrollArea::vertical()
@@ -148,9 +148,9 @@ fn palette_row(ui: &mut egui::Ui, item: &PaletteItem, selected: bool) -> bool {
     }
     let painter = ui.painter_at(rect);
     let bg = if selected {
-        theme::SELECTED_BG
+        theme::SELECTED_BG()
     } else if response.hovered() {
-        theme::HOVER_BG
+        theme::HOVER_BG()
     } else {
         Color32::TRANSPARENT
     };
@@ -160,14 +160,14 @@ fn palette_row(ui: &mut egui::Ui, item: &PaletteItem, selected: bool) -> bool {
         egui::Align2::LEFT_CENTER,
         &item.label,
         egui::FontId::proportional(14.0),
-        theme::TEXT_PRIMARY,
+        theme::TEXT_PRIMARY(),
     );
     painter.text(
         egui::pos2(rect.right() - 10.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         &item.hint,
         egui::FontId::proportional(12.0),
-        theme::TEXT_MUTED,
+        theme::TEXT_MUTED(),
     );
     response.clicked()
 }

@@ -597,6 +597,12 @@ impl App {
             None,
         );
         egui.init_accesskit(event_loop, &window, self.proxy.clone());
+        // F6-01: light or dark, following the OS unless the config forces one.
+        let light = self
+            .config
+            .theme
+            .is_light(window.theme().map(|t| t == winit::window::Theme::Light));
+        apply_theme(&chrome, light);
         #[cfg(target_os = "macos")]
         if self.menu.is_none() {
             self.menu = crate::menu_mac::install(&self.keymap, self.proxy.clone());
@@ -911,6 +917,14 @@ impl App {
             Ok(Err(err)) => log::warn!("cannot save the layout: {err}"),
             Err(_) => log::warn!("cannot save the layout"),
             Ok(Ok(())) => {}
+        }
+    }
+
+    /// Switches every window to the light or dark theme.
+    fn set_theme(&mut self, light: bool) {
+        for ui in self.ui.iter().chain(self.parked.values()) {
+            apply_theme(&ui.chrome, light);
+            ui.window.request_redraw();
         }
     }
 
@@ -1714,6 +1728,13 @@ impl App {
             }
         }
         self.keymap = keymap_from(&config);
+        let system_light = self
+            .ui
+            .as_ref()
+            .and_then(|ui| ui.window.theme())
+            .map(|t| t == winit::window::Theme::Light);
+        let light = config.theme.is_light(system_light);
+        self.set_theme(light);
         #[cfg(target_os = "macos")]
         {
             // Shortcuts shown in the menu bar follow the keymap.
@@ -2375,6 +2396,13 @@ impl ApplicationHandler<AppEvent> for App {
                     ui.window.request_redraw();
                 }
             }
+            WindowEvent::ThemeChanged(theme) => {
+                let light = self
+                    .config
+                    .theme
+                    .is_light(Some(theme == winit::window::Theme::Light));
+                self.set_theme(light);
+            }
             WindowEvent::Focused(true) => self.focused_window = Some(id),
             WindowEvent::Focused(false) => {
                 if self.focused_window == Some(id) {
@@ -2726,6 +2754,14 @@ fn resume_command(
         line.push('\r');
     }
     Some(line)
+}
+
+/// Applies the light or dark theme to the terminals, the renderer and the chrome. The terminal
+/// palette is global, so every pane follows.
+fn apply_theme(chrome: &hv_ui::Chrome, light: bool) {
+    hv_term::set_light(light);
+    hv_render::set_light(light);
+    chrome.set_light(light);
 }
 
 /// The user's home directory.

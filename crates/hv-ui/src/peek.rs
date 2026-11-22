@@ -57,8 +57,8 @@ impl Peek {
             ))
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(theme::ELEVATED_BG)
-                    .stroke(Stroke::new(1.0, theme::STATE_WAITING))
+                    .fill(theme::ELEVATED_BG())
+                    .stroke(Stroke::new(1.0, theme::STATE_WAITING()))
                     .corner_radius(CornerRadius::same(10))
                     .inner_margin(Margin::same(14))
                     .show(ui, |ui| {
@@ -67,11 +67,11 @@ impl Peek {
                         ui.label(
                             RichText::new(&view.subtitle)
                                 .size(12.0)
-                                .color(theme::STATE_WAITING),
+                                .color(theme::STATE_WAITING()),
                         );
                         ui.add_space(8.0);
                         egui::Frame::new()
-                            .fill(theme::WINDOW_BG)
+                            .fill(theme::WINDOW_BG())
                             .corner_radius(CornerRadius::same(6))
                             .inner_margin(Margin::same(8))
                             .show(ui, |ui| {
@@ -81,7 +81,7 @@ impl Peek {
                                         RichText::new(line)
                                             .monospace()
                                             .size(12.0)
-                                            .color(theme::TEXT_PRIMARY),
+                                            .color(theme::TEXT_PRIMARY()),
                                     );
                                 }
                             });

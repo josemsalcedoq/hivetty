@@ -82,8 +82,8 @@ impl Dialog {
             ))
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(theme::ELEVATED_BG)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::ELEVATED_BG())
+                    .stroke(Stroke::new(1.0, theme::BORDER()))
                     .corner_radius(CornerRadius::same(10))
                     .inner_margin(Margin::same(14))
                     .show(ui, |ui| {
@@ -153,7 +153,7 @@ impl Dialog {
                             });
                         if let Some(error) = &self.error {
                             ui.add_space(4.0);
-                            ui.label(RichText::new(error).color(theme::STATE_ERROR));
+                            ui.label(RichText::new(error).color(theme::STATE_ERROR()));
                         }
                         ui.add_space(10.0);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

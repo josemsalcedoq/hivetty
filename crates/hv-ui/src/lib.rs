@@ -175,9 +175,9 @@ impl Chrome {
                     .resizable(false)
                     .frame(
                         egui::Frame::new()
-                            .fill(theme::SIDEBAR_BG)
+                            .fill(theme::SIDEBAR_BG())
                             .inner_margin(Margin::symmetric(10, 12))
-                            .stroke(Stroke::new(1.0, theme::BORDER)),
+                            .stroke(Stroke::new(1.0, theme::BORDER())),
                     )
                     .show(ui, |ui| {
                         let out = sidebar_state.show(ui, &model.sessions, &model.new_session_hint);
@@ -195,9 +195,9 @@ impl Chrome {
                     .resizable(false)
                     .frame(
                         egui::Frame::new()
-                            .fill(theme::SIDEBAR_BG)
+                            .fill(theme::SIDEBAR_BG())
                             .inner_margin(Margin::symmetric(6, 0))
-                            .stroke(Stroke::new(1.0, theme::BORDER)),
+                            .stroke(Stroke::new(1.0, theme::BORDER())),
                     )
                     .show(ui, |ui| {
                         tab_action = tab_bar.show(ui, &model.tabs, &model.menu);
@@ -287,6 +287,11 @@ impl Chrome {
             || self.ctx.egui_wants_keyboard_input()
     }
 
+    /// Switches the chrome to the light or dark theme (F6-01).
+    pub fn set_light(&self, on: bool) {
+        theme::set_light(&self.ctx, on);
+    }
+
     /// Whether egui wants keyboard input (a text field has focus).
     pub fn wants_keyboard(&self) -> bool {
         self.ctx.egui_wants_keyboard_input()
@@ -295,11 +300,11 @@ impl Chrome {
 
 fn state_color(state: RowState) -> Color32 {
     match state {
-        RowState::Working => theme::STATE_WORKING,
-        RowState::Waiting => theme::STATE_WAITING,
-        RowState::Done => theme::STATE_DONE,
-        RowState::Error => theme::STATE_ERROR,
-        RowState::Idle => theme::TEXT_MUTED,
+        RowState::Working => theme::STATE_WORKING(),
+        RowState::Waiting => theme::STATE_WAITING(),
+        RowState::Done => theme::STATE_DONE(),
+        RowState::Error => theme::STATE_ERROR(),
+        RowState::Idle => theme::TEXT_MUTED(),
     }
 }
 
