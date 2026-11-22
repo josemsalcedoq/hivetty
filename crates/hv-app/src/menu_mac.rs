@@ -61,6 +61,7 @@ fn build(keymap: &Keymap) -> muda::Result<Menu> {
         true,
         &[
             &item("new_tab"),
+            &item("new_window"),
             &item("split_right"),
             &item("split_down"),
             &PredefinedMenuItem::separator(),
@@ -100,6 +101,7 @@ fn build(keymap: &Keymap) -> muda::Result<Menu> {
             &PredefinedMenuItem::separator(),
             &item("next_tab"),
             &item("previous_tab"),
+            &item("move_tab_to_new_window"),
         ],
     )?;
     Menu::with_items(&[&app, &shell, &edit, &view, &window])

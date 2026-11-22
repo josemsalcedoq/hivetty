@@ -10,6 +10,8 @@ use crate::workspace::Direction;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Action {
     NewTab,
+    NewWindow,
+    MoveTabToNewWindow,
     ClosePane,
     SplitRight,
     SplitDown,
@@ -40,6 +42,8 @@ impl Action {
         use Direction::{Down, Left, Right, Up};
         let action = match name {
             "new_tab" => Self::NewTab,
+            "new_window" => Self::NewWindow,
+            "move_tab_to_new_window" => Self::MoveTabToNewWindow,
             "close_pane" => Self::ClosePane,
             "split_right" => Self::SplitRight,
             "split_down" => Self::SplitDown,
@@ -289,6 +293,8 @@ struct Binding {
 /// Actions listed in the command palette, by config name, in display order.
 pub(crate) const PALETTE_ACTIONS: &[&str] = &[
     "new_tab",
+    "new_window",
+    "move_tab_to_new_window",
     "split_right",
     "split_down",
     "close_pane",
@@ -315,7 +321,14 @@ pub(crate) const PALETTE_ACTIONS: &[&str] = &[
 
 /// Sections of the menu (the ☰ menu, and the menu bar on macOS), by action name.
 pub(crate) const MENU_SECTIONS: &[&[&str]] = &[
-    &["new_tab", "split_right", "split_down", "close_pane"],
+    &[
+        "new_tab",
+        "new_window",
+        "split_right",
+        "split_down",
+        "close_pane",
+    ],
+    &["move_tab_to_new_window"],
     &["find", "copy", "paste"],
     &[
         "toggle_sidebar",
@@ -457,6 +470,7 @@ impl Keymap {
 
 const MAC: &[(&str, &str)] = &[
     ("cmd+t", "new_tab"),
+    ("cmd+n", "new_window"),
     ("cmd+w", "close_pane"),
     ("cmd+d", "split_right"),
     ("shift+cmd+d", "split_down"),
@@ -483,6 +497,7 @@ const MAC: &[(&str, &str)] = &[
 
 const OTHERS: &[(&str, &str)] = &[
     ("ctrl+shift+t", "new_tab"),
+    ("ctrl+shift+n", "new_window"),
     ("ctrl+shift+w", "close_pane"),
     ("ctrl+shift+d", "split_right"),
     ("ctrl+shift+e", "split_down"),

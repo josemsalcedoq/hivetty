@@ -149,6 +149,36 @@ struct Ui {
     row_panes: Vec<PaneId>,
     /// When egui asked to be painted again (animations such as the tab spinner).
     repaint_at: Option<Instant>,
+    /// This window's input state while another window is the active one.
+    local: Option<Local>,
+}
+
+/// Input and UI state that belongs to one window. The active window's copy lives in the `App`
+/// fields; the others keep theirs in [`Ui::local`] (see [`App::activate`]).
+struct Local {
+    modifiers: ModifiersState,
+    scroll_remainder: f32,
+    mouse: MouseState,
+    ime_composing: bool,
+    search: Option<SearchUi>,
+    bell_until: Option<Instant>,
+    sidebar_visible: bool,
+    pending_action: Option<Action>,
+}
+
+impl Default for Local {
+    fn default() -> Self {
+        Self {
+            modifiers: ModifiersState::empty(),
+            scroll_remainder: 0.0,
+            mouse: MouseState::default(),
+            ime_composing: false,
+            search: None,
+            bell_until: None,
+            sidebar_visible: true,
+            pending_action: None,
+        }
+    }
 }
 
 impl Ui {
@@ -290,7 +320,10 @@ struct App {
     spec: SpawnSpec,
     proxy: EventLoopProxy<AppEvent>,
     wake_pending: Arc<AtomicBool>,
+    /// The active window (the one the current event is for).
     ui: Option<Ui>,
+    /// The other windows (F2-05).
+    parked: HashMap<WindowId, Ui>,
     next_pane: PaneId,
     modifiers: ModifiersState,
     scroll_remainder: f32,
@@ -374,6 +407,7 @@ impl App {
             proxy,
             wake_pending: Arc::new(AtomicBool::new(false)),
             ui: None,
+            parked: HashMap::new(),
             next_pane: 1,
             modifiers: ModifiersState::empty(),
             scroll_remainder: 0.0,
@@ -395,7 +429,7 @@ impl App {
         }
     }
 
-    fn create_ui(&mut self, event_loop: &ActiveEventLoop) -> Result<Ui> {
+    fn create_ui(&mut self, event_loop: &ActiveEventLoop, adopt: Option<Adopted>) -> Result<Ui> {
         let restore = self
             .restore
             .take()
@@ -447,7 +481,7 @@ impl App {
         );
         egui.init_accesskit(event_loop, &window, self.proxy.clone());
         #[cfg(target_os = "macos")]
-        {
+        if self.menu.is_none() {
             self.menu = crate::menu_mac::install(&self.keymap, self.proxy.clone());
         }
         window.set_visible(true);
@@ -462,8 +496,16 @@ impl App {
             terminal_area: None,
             row_panes: Vec::new(),
             repaint_at: None,
+            local: None,
         };
         apply_font(&mut ui, &self.config.font);
+        if let Some((tab, panes)) = adopt {
+            ui.panes.extend(panes);
+            ui.tabs.list.push(tab);
+            ui.tabs.active = 0;
+            ui.resize_all();
+            return Ok(ui);
+        }
         if let Some(layout) = restore {
             let mut spawned = Vec::new();
             let tabs = layout.restore(|cwd| match self.spawn_pane(&ui, cwd.map(Into::into)) {
@@ -570,6 +612,11 @@ impl App {
                 self.ui = Some(ui);
                 self.focus_changed();
             }
+            Action::NewWindow => {
+                self.open_window(event_loop, None);
+                self.focus_changed();
+            }
+            Action::MoveTabToNewWindow => self.move_tab_to_new_window(event_loop),
             Action::ClosePane => {
                 if let Some(id) = ui.focused_id() {
                     self.close_pane(id, event_loop);
@@ -682,14 +729,111 @@ impl App {
         }
     }
 
-    /// Kills a pane and removes it; exits when it was the last one.
+    /// Makes `id` the active window, swapping the per-window state. False if unknown.
+    fn activate(&mut self, id: WindowId) -> bool {
+        if self.ui.as_ref().is_some_and(|ui| ui.window.id() == id) {
+            return true;
+        }
+        let Some(mut next) = self.parked.remove(&id) else {
+            return false;
+        };
+        let incoming = next.local.take().unwrap_or_default();
+        let outgoing = self.swap_local(incoming);
+        if let Some(mut current) = self.ui.take() {
+            current.local = Some(outgoing);
+            self.parked.insert(current.window.id(), current);
+        }
+        self.ui = Some(next);
+        true
+    }
+
+    /// Puts `local` into the `App` fields and returns what was there.
+    fn swap_local(&mut self, local: Local) -> Local {
+        use std::mem::replace;
+        Local {
+            modifiers: replace(&mut self.modifiers, local.modifiers),
+            scroll_remainder: replace(&mut self.scroll_remainder, local.scroll_remainder),
+            mouse: replace(&mut self.mouse, local.mouse),
+            ime_composing: replace(&mut self.ime_composing, local.ime_composing),
+            search: replace(&mut self.search, local.search),
+            bell_until: replace(&mut self.bell_until, local.bell_until),
+            sidebar_visible: replace(&mut self.sidebar_visible, local.sidebar_visible),
+            pending_action: replace(&mut self.pending_action, local.pending_action),
+        }
+    }
+
+    /// Every window, the active one first.
+    fn window_ids(&self) -> Vec<WindowId> {
+        self.ui
+            .iter()
+            .map(|ui| ui.window.id())
+            .chain(self.parked.keys().copied())
+            .collect()
+    }
+
+    /// Opens a window (adopting a tab moved from another window, if given) and makes it active.
+    fn open_window(&mut self, event_loop: &ActiveEventLoop, adopt: Option<Adopted>) {
+        match self.create_ui(event_loop, adopt) {
+            Ok(ui) => {
+                let outgoing = self.swap_local(Local::default());
+                if let Some(mut current) = self.ui.take() {
+                    current.local = Some(outgoing);
+                    self.parked.insert(current.window.id(), current);
+                }
+                ui.window.request_redraw();
+                self.ui = Some(ui);
+            }
+            Err(err) => log::error!("cannot open a window: {err:#}"),
+        }
+    }
+
+    /// Closes the active window (its panes die with it). Exits after the last one.
+    fn close_window(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(ui) = self.ui.take() {
+            for pane in ui.panes.values() {
+                pane.session.kill();
+            }
+        }
+        let _ = self.swap_local(Local::default());
+        match self.parked.keys().next().copied() {
+            Some(next) => {
+                self.activate(next);
+                self.focus_changed();
+            }
+            None => event_loop.exit(),
+        }
+    }
+
+    /// Moves the active tab to a new window (only when the window has other tabs).
+    fn move_tab_to_new_window(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(ui) = &mut self.ui else { return };
+        if ui.tabs.list.len() < 2 {
+            return;
+        }
+        let tab = ui.tabs.list.remove(ui.tabs.active);
+        ui.tabs.active = ui.tabs.active.min(ui.tabs.list.len() - 1);
+        let panes: Vec<(PaneId, Pane)> = tab
+            .root
+            .panes()
+            .into_iter()
+            .filter_map(|id| ui.panes.remove(&id).map(|p| (id, p)))
+            .collect();
+        for (_, pane) in &panes {
+            pane.session.search_clear();
+        }
+        self.focus_changed();
+        self.open_window(event_loop, Some((tab, panes)));
+        self.focus_changed();
+    }
+
+    /// Kills a pane and removes it; closes the window when it was its last one.
     fn close_pane(&mut self, id: PaneId, event_loop: &ActiveEventLoop) {
         let Some(ui) = &mut self.ui else { return };
         if let Some(pane) = ui.panes.remove(&id) {
             pane.session.kill();
         }
         if ui.tabs.remove_pane(id) {
-            event_loop.exit();
+            self.close_window(event_loop);
             return;
         }
         if self.mouse.pane == Some(id) {
@@ -1219,7 +1363,12 @@ impl App {
             ui.renderer.set_flash(true);
         }
         ui.window.request_redraw();
+        // Closing the last pane closes the window; the rest of the list belonged to it.
+        let window = self.ui.as_ref().map(|ui| ui.window.id());
         for id in exited {
+            if self.ui.as_ref().map(|ui| ui.window.id()) != window {
+                break;
+            }
             self.close_pane(id, event_loop);
         }
     }
@@ -1435,7 +1584,7 @@ impl ApplicationHandler<AppEvent> for App {
         if self.ui.is_some() {
             return;
         }
-        match self.create_ui(event_loop) {
+        match self.create_ui(event_loop, None) {
             Ok(ui) => {
                 ui.window.request_redraw();
                 self.ui = Some(ui);
@@ -1448,8 +1597,10 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
-        if let (StartCause::ResumeTimeReached { .. }, Some(ui)) = (cause, &self.ui) {
-            ui.window.request_redraw();
+        if let StartCause::ResumeTimeReached { .. } = cause {
+            for ui in self.ui.iter().chain(self.parked.values()) {
+                ui.window.request_redraw();
+            }
         }
     }
 
@@ -1464,6 +1615,9 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::AccessKit(event) => {
                 use egui_winit::accesskit_winit::WindowEvent as A11y;
+                if !self.activate(event.window_id) {
+                    return;
+                }
                 if let Some(ui) = &mut self.ui {
                     match event.window_event {
                         A11y::InitialTreeRequested => ui.chrome.context().enable_accesskit(),
@@ -1481,6 +1635,17 @@ impl ApplicationHandler<AppEvent> for App {
                     .session
                     .as_deref()
                     .and_then(|s| s.parse::<PaneId>().ok());
+                // The pane may live in any window.
+                if let Some(id) = target {
+                    let owner = self
+                        .parked
+                        .iter()
+                        .find(|(_, ui)| ui.panes.contains_key(&id))
+                        .map(|(w, _)| *w);
+                    if let Some(window) = owner {
+                        self.activate(window);
+                    }
+                }
                 if let Some(ui) = &mut self.ui {
                     let focused = ui.focused_id();
                     if let Some(id) = target
@@ -1496,12 +1661,19 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::Wakeup => {
                 self.wake_pending.store(false, Ordering::Release);
-                self.handle_session_events(event_loop);
+                for id in self.window_ids() {
+                    if self.activate(id) {
+                        self.handle_session_events(event_loop);
+                    }
+                }
             }
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if !self.activate(id) {
+            return;
+        }
         // egui sees pointer and window events; the keyboard belongs to the terminal unless an
         // egui text field (the command palette) is open.
         let palette_open = self
@@ -1529,13 +1701,11 @@ impl ApplicationHandler<AppEvent> for App {
         }
         match event {
             WindowEvent::CloseRequested => {
-                self.save_layout();
-                if let Some(ui) = &self.ui {
-                    for pane in ui.panes.values() {
-                        pane.session.kill();
-                    }
+                // The layout of the last window closed is the one reopened next time.
+                if self.parked.is_empty() {
+                    self.save_layout();
                 }
-                event_loop.exit();
+                self.close_window(event_loop);
             }
             WindowEvent::Resized(PhysicalSize { width, height }) => {
                 if let Some(ui) = &mut self.ui {
@@ -1571,13 +1741,26 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(action) = self.pending_action.take() {
-            self.run_action(action, event_loop);
+        let mut deadline: Option<Instant> = None;
+        for id in self.window_ids() {
+            if !self.activate(id) {
+                continue;
+            }
+            if let Some(action) = self.pending_action.take() {
+                self.run_action(action, event_loop);
+            }
+            if let Some(next) = self.window_deadline() {
+                deadline = Some(deadline.map_or(next, |d| d.min(next)));
+            }
         }
-        let Some(ui) = &self.ui else {
-            event_loop.set_control_flow(ControlFlow::Wait);
-            return;
-        };
+        event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
+    }
+}
+
+impl App {
+    /// When the active window next needs a frame without new input.
+    fn window_deadline(&self) -> Option<Instant> {
+        let ui = self.ui.as_ref()?;
         let now = Instant::now();
         // A synchronized update (DECSET 2026) must be flushed when its deadline passes even if
         // no more output arrives.
@@ -1596,13 +1779,15 @@ impl ApplicationHandler<AppEvent> for App {
                 crate::model::next_elapsed_change(since, now)
             })
             .min();
-        let deadline = [sync, self.bell_until, tick, ui.repaint_at]
+        [sync, self.bell_until, tick, ui.repaint_at]
             .into_iter()
             .flatten()
-            .min();
-        event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
+            .min()
     }
 }
+
+/// A tab and its panes moved into a new window.
+type Adopted = (crate::workspace::Tab, Vec<(PaneId, Pane)>);
 
 /// Whether a saved window position is still on a connected monitor (it may have been
 /// unplugged since).
