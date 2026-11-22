@@ -2,7 +2,23 @@
 
 A native, GPU-accelerated terminal written in Rust, built for running **many coding agents at once** (Claude Code, Codex, Gemini CLI, opencode, …). It targets **macOS, Linux (Ubuntu) and Windows**.
 
-> **Status: early development.** Planning is complete and phase F0 (foundations) is in progress. There is nothing usable yet.
+> **Status: pre-release, usable from source.** The terminal, tabs and splits work, along with the agent sidebar, notifications, shell integration and the usage dashboard. Installers are not available yet. See the [user guide](docs/user/guide.md).
+
+## What works today
+
+- **Terminal**:
+  - GPU rendering (`wgpu`: Metal, Vulkan, DirectX 12) with synchronized output and the Kitty keyboard protocol.
+  - Mouse, selection, links, search, IME and a bundled modern ConPTY on Windows.
+- **Tabs, splits and windows**:
+  - A command palette and shortcuts you can configure.
+  - The layout is restored at startup.
+- **Agent sidebar**:
+  - Live state for each session (*Working*, *Waiting*, *Done*), taken from OSC 7501, Claude Code hooks and notifications.
+  - Search and filters, Peek-and-reply, notifications, "go to the next session that needs you", New session and an agent dock.
+- **Shell integration** for zsh, bash, fish and PowerShell: prompt marks, the current directory, and project chips showing technology, branch and versions.
+- **Usage dashboard** for tokens, tasks and agent time, read from your agents' local logs, with nothing uploaded. It is also available as `hivetty usage`.
+
+![hivetty with two agents waiting for permission](docs/user/screenshot.png)
 
 ## Goals for v1.0
 
