@@ -43,6 +43,8 @@ pub(crate) struct Dialog {
     branch: String,
     error: Option<String>,
     needs_focus: bool,
+    /// Folders used before, newest first.
+    recent: Vec<String>,
 }
 
 /// What happened in the dialog this frame.
@@ -54,7 +56,12 @@ pub(crate) enum Outcome {
 }
 
 impl Dialog {
-    pub(crate) fn new(agents: Vec<AgentChoice>, agent: &str, folder: String) -> Self {
+    pub(crate) fn new(
+        agents: Vec<AgentChoice>,
+        agent: &str,
+        folder: String,
+        recent: Vec<String>,
+    ) -> Self {
         let selected = agents.iter().position(|a| a.id == agent).unwrap_or(0);
         Self {
             agents,
@@ -67,6 +74,7 @@ impl Dialog {
             branch: String::new(),
             error: None,
             needs_focus: true,
+            recent,
         }
     }
 
@@ -117,13 +125,31 @@ impl Dialog {
                                 ui.end_row();
 
                                 ui.label(strings::FIELD_FOLDER);
-                                let folder = ui.add(
-                                    egui::TextEdit::singleline(&mut self.folder)
-                                        .desired_width(width - 120.0),
-                                );
-                                if folder.changed() {
-                                    self.error = None;
-                                }
+                                ui.horizontal(|ui| {
+                                    let field_width = if self.recent.is_empty() {
+                                        width - 120.0
+                                    } else {
+                                        width - 190.0
+                                    };
+                                    let folder = ui.add(
+                                        egui::TextEdit::singleline(&mut self.folder)
+                                            .desired_width(field_width),
+                                    );
+                                    if folder.changed() {
+                                        self.error = None;
+                                    }
+                                    if !self.recent.is_empty() {
+                                        ui.menu_button(strings::RECENT, |ui| {
+                                            for recent in &self.recent {
+                                                if ui.button(recent).clicked() {
+                                                    self.folder.clone_from(recent);
+                                                    self.error = None;
+                                                    ui.close();
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
                                 ui.end_row();
 
                                 ui.label(strings::FIELD_PROMPT);

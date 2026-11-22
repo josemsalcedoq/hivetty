@@ -425,8 +425,15 @@ impl Chrome {
         self.welcome = Some(welcome::Welcome::new(info));
     }
 
-    pub fn open_new_session(&mut self, agents: Vec<AgentChoice>, agent: &str, folder: String) {
-        self.new_session = Some(new_session::Dialog::new(agents, agent, folder));
+    /// Opens the New session dialog; `recent` are folders used before, newest first.
+    pub fn open_new_session(
+        &mut self,
+        agents: Vec<AgentChoice>,
+        agent: &str,
+        folder: String,
+        recent: Vec<String>,
+    ) {
+        self.new_session = Some(new_session::Dialog::new(agents, agent, folder, recent));
     }
 
     /// Whether a text field of the chrome (palette, dialog, tab rename, search) takes the

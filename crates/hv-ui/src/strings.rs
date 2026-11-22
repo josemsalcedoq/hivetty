@@ -435,3 +435,5 @@ pub const MENU_SHOW_TRANSCRIPT: &str = "Show transcript";
 pub const MENU_OPEN_IN_EDITOR: &str = "Open in editor";
 /// Notification when the editor cannot start.
 pub const EDITOR_FAILED: &str = "Cannot start the editor (set [editor] command in config.toml)";
+/// New session: menu of the folders used before (F4-13).
+pub const RECENT: &str = "Recent";

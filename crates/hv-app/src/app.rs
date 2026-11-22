@@ -158,6 +158,9 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
     app.archive = crate::archive::path()
         .map(|p| crate::archive::load(&p))
         .unwrap_or_default();
+    app.recent_folders = crate::recent::path()
+        .map(|p| crate::recent::load(&p))
+        .unwrap_or_default();
     app.profiles = hv_agents::profile::builtin();
     app.agent_choices = std::iter::once(hv_ui::AgentChoice {
         id: String::new(),
@@ -499,6 +502,8 @@ struct App {
     config_notice: Option<String>,
     /// The count last shown on the app icon (F4-19).
     badge: usize,
+    /// Folders sessions were started in, newest first (F4-13).
+    recent_folders: Vec<String>,
     /// The worktree of the session being started (F4-22).
     next_worktree: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// The macOS menu bar (kept alive while shown).
@@ -592,6 +597,7 @@ impl App {
             config_notice: None,
             badge: 0,
             next_worktree: None,
+            recent_folders: Vec::new(),
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -1296,13 +1302,21 @@ impl App {
             .or_else(home_dir)
             .map(|d| d.to_string_lossy().into_owned())
             .unwrap_or_default();
-        ui.chrome.open_new_session(agents, &agent, folder);
+        ui.chrome
+            .open_new_session(agents, &agent, folder, self.recent_folders.clone());
         ui.window.request_redraw();
     }
 
     /// Starts a shell in the requested folder (new tab or split) and types the agent command
     /// once the shell is ready (S-01, S-11, A-16).
     fn start_agent_session(&mut self, request: &hv_ui::NewSession) {
+        // The folder the user picked goes first in the dialog's "Recent" menu (F4-13).
+        if self.next_worktree.is_none() && std::path::Path::new(&request.folder).is_absolute() {
+            crate::recent::add(&mut self.recent_folders, &request.folder);
+            if let Some(path) = crate::recent::path() {
+                crate::recent::save(path, self.recent_folders.clone());
+            }
+        }
         // A worktree first, off the UI thread; the session starts when it is ready.
         if let Some(branch) = &request.worktree {
             let branch = if branch.is_empty() {
