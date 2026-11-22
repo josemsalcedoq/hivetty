@@ -2,6 +2,7 @@
 //! usage dashboard. The terminal grid itself is drawn by `hv-render` in the space egui leaves.
 
 mod palette;
+mod sidebar;
 pub mod strings;
 mod tabs;
 mod theme;
@@ -9,7 +10,7 @@ mod theme;
 pub use palette::PaletteItem;
 pub use tabs::{TAB_BAR_HEIGHT, TabAction, TabItem};
 
-use egui::{Color32, CornerRadius, Margin, RichText, Sense, Stroke, Vec2};
+use egui::{Color32, Margin, Stroke};
 
 /// What the sidebar shows for one session (filled by the app from the session state).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +27,10 @@ pub struct SessionRow {
     pub state: RowState,
     /// Whether this is the focused session.
     pub focused: bool,
+    /// Agent name, if one runs there (also searchable).
+    pub agent: String,
+    /// Finished or needs the user and has not been looked at yet.
+    pub unseen: bool,
 }
 
 /// Coarse session state shown in the sidebar (docs/ui-spec.md 1).
@@ -87,6 +92,7 @@ pub struct Chrome {
     ctx: egui::Context,
     palette: Option<palette::Palette>,
     tab_bar: tabs::TabBar,
+    sidebar: sidebar::Sidebar,
 }
 
 /// Sidebar width in points (docs/ui-spec.md 1: 300 px default; narrower until tabs exist).
@@ -101,6 +107,7 @@ impl Chrome {
             ctx,
             palette: None,
             tab_bar: tabs::TabBar::default(),
+            sidebar: sidebar::Sidebar::default(),
         }
     }
 
@@ -117,6 +124,7 @@ impl Chrome {
         let mut central = egui::Rect::NOTHING;
         let palette = &mut self.palette;
         let tab_bar = &mut self.tab_bar;
+        let sidebar_state = &mut self.sidebar;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 egui::Panel::left("sidebar")
@@ -129,7 +137,7 @@ impl Chrome {
                             .stroke(Stroke::new(1.0, theme::BORDER)),
                     )
                     .show(ui, |ui| {
-                        clicked_session = sidebar(ui, &model.sessions);
+                        clicked_session = sidebar_state.show(ui, &model.sessions);
                     });
             }
             if !model.tabs.is_empty() {
@@ -195,7 +203,7 @@ impl Chrome {
 
     /// Whether a text field of the chrome (palette, tab rename) takes the keyboard and IME.
     pub fn takes_keyboard(&self) -> bool {
-        self.palette.is_some() || self.tab_bar.editing()
+        self.palette.is_some() || self.tab_bar.editing() || self.ctx.egui_wants_keyboard_input()
     }
 
     /// Whether egui wants keyboard input (a text field has focus).
@@ -212,96 +220,6 @@ fn state_color(state: RowState) -> Color32 {
         RowState::Error => theme::STATE_ERROR,
         RowState::Idle => theme::TEXT_MUTED,
     }
-}
-
-/// The session list. Returns the index of a clicked row.
-fn sidebar(ui: &mut egui::Ui, sessions: &[SessionRow]) -> Option<usize> {
-    let mut clicked = None;
-    ui.label(
-        RichText::new(strings::SESSIONS)
-            .size(12.0)
-            .color(theme::TEXT_MUTED),
-    );
-    ui.add_space(6.0);
-    let mut current_project: Option<&str> = None;
-    for (i, row) in sessions.iter().enumerate() {
-        if current_project != Some(row.project.as_str()) {
-            current_project = Some(&row.project);
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(&row.project)
-                    .size(12.0)
-                    .color(theme::TEXT_SECONDARY),
-            );
-        }
-        if session_row(ui, row) {
-            clicked = Some(i);
-        }
-    }
-    if sessions.is_empty() {
-        ui.label(RichText::new(strings::NO_SESSIONS).color(theme::TEXT_MUTED));
-    }
-    clicked
-}
-
-/// One two-line row: dot, title, elapsed time / state or activity.
-fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> bool {
-    let height = 44.0;
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
-    // What screen readers announce for the row (painted by hand, so egui cannot infer it).
-    let label = format!("{}, {}, {}", row.title, row.subtitle, row.elapsed);
-    response
-        .widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, row.focused, &label));
-    let painter = ui.painter_at(rect);
-    let bg = if row.focused {
-        theme::SELECTED_BG
-    } else if response.hovered() {
-        theme::HOVER_BG
-    } else {
-        Color32::TRANSPARENT
-    };
-    painter.rect_filled(rect, CornerRadius::same(6), bg);
-
-    let dot_color = state_color(row.state);
-    let left = rect.left() + 12.0;
-    painter.circle_filled(egui::pos2(left + 4.0, rect.top() + 15.0), 4.0, dot_color);
-
-    let text_left = left + 16.0;
-    let font = egui::FontId::proportional(13.0);
-    let small = egui::FontId::proportional(12.0);
-    let right = rect.right() - 10.0;
-    let time = painter.text(
-        egui::pos2(right, rect.top() + 8.0),
-        egui::Align2::RIGHT_TOP,
-        &row.elapsed,
-        small.clone(),
-        theme::TEXT_MUTED,
-    );
-    let title_width = (time.left() - text_left - 8.0).max(20.0);
-    let title = elide(ui, &row.title, &font, title_width);
-    painter.text(
-        egui::pos2(text_left, rect.top() + 7.0),
-        egui::Align2::LEFT_TOP,
-        title,
-        font,
-        theme::TEXT_PRIMARY,
-    );
-    let subtitle_color = match row.state {
-        RowState::Done => theme::STATE_DONE,
-        RowState::Waiting => theme::STATE_WAITING,
-        RowState::Error => theme::STATE_ERROR,
-        _ => theme::TEXT_SECONDARY,
-    };
-    let subtitle = elide(ui, &row.subtitle, &small, right - text_left);
-    painter.text(
-        egui::pos2(text_left, rect.top() + 25.0),
-        egui::Align2::LEFT_TOP,
-        subtitle,
-        small,
-        subtitle_color,
-    );
-    response.clicked()
 }
 
 /// Shortens `text` with an ellipsis so it fits in `width` points.
@@ -343,6 +261,7 @@ pub fn format_elapsed(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::Vec2;
 
     #[test]
     fn elapsed_format_matches_the_spec() {
@@ -420,6 +339,8 @@ mod tests {
                 elapsed: "1m".into(),
                 state: RowState::Waiting,
                 focused: true,
+                agent: String::new(),
+                unseen: false,
             }],
         };
         let mut out = chrome.run(input, &model);
@@ -433,8 +354,13 @@ mod tests {
             .nodes
             .iter()
             .map(|(_, node)| node)
-            .find(|node| node.role() == egui::Role::Button)
-            .expect("a button node");
+            .find(|node| {
+                node.role() == egui::Role::Button
+                    && node
+                        .label()
+                        .is_some_and(|l| l.starts_with("Fix the login bug"))
+            })
+            .expect("the session row as a button");
         assert_eq!(
             button.label(),
             Some("Fix the login bug, Needs permission: Bash, 1m")
@@ -462,6 +388,8 @@ mod tests {
                 elapsed: "3m".into(),
                 state: RowState::Working,
                 focused: true,
+                agent: String::new(),
+                unseen: false,
             }],
         };
         let mut out = chrome.run(input.clone(), &model);

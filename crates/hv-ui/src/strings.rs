@@ -81,6 +81,19 @@ pub fn action_label(name: &str) -> Option<&'static str> {
         "font_smaller" => "Decrease font size",
         "font_reset" => "Reset font size",
         "command_palette" => "Command palette",
+        "next_needs_you" => "Go to next session that needs you",
         _ => return None,
     })
 }
+/// Placeholder of the sidebar search box.
+pub const SEARCH_SESSIONS: &str = "Search sessions";
+/// Sidebar filters.
+pub const FILTER_ALL: &str = "All";
+/// Sidebar filters.
+pub const FILTER_NEEDS_YOU: &str = "Needs you";
+/// Sidebar filters.
+pub const FILTER_WORKING: &str = "Working";
+/// Sidebar filters.
+pub const FILTER_DONE: &str = "Done";
+/// Shown when the search or filter hides every session.
+pub const NO_MATCHES: &str = "No matching sessions";

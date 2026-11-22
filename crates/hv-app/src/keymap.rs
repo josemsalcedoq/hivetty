@@ -34,6 +34,8 @@ pub(crate) enum Action {
     FontSmaller,
     FontReset,
     CommandPalette,
+    /// Focus the next session waiting for the user, then the next finished-but-unseen one.
+    NextNeedsYou,
     /// Write this text to the focused terminal (`action = { send_text = "…" }`).
     SendText(String),
     /// Explicitly unbound (`action = "none"` in the config).
@@ -74,6 +76,7 @@ impl Action {
             "font_smaller" => Self::FontSmaller,
             "font_reset" => Self::FontReset,
             "command_palette" => Self::CommandPalette,
+            "next_needs_you" => Self::NextNeedsYou,
             "none" => Self::None,
             other => {
                 let n: usize = other.strip_prefix("go_to_tab_")?.parse().ok()?;
@@ -328,6 +331,7 @@ pub(crate) const PALETTE_ACTIONS: &[&str] = &[
     "font_bigger",
     "font_smaller",
     "font_reset",
+    "next_needs_you",
     "command_palette",
 ];
 
@@ -351,7 +355,7 @@ pub(crate) const MENU_SECTIONS: &[&[&str]] = &[
         "font_reset",
     ],
     &["next_tab", "previous_tab"],
-    &["command_palette"],
+    &["next_needs_you", "command_palette"],
 ];
 
 /// The palette / menu entry for an action name: its id is the index in [`PALETTE_ACTIONS`].
@@ -508,6 +512,7 @@ const MAC: &[(&str, &str)] = &[
     ("cmd+-", "font_smaller"),
     ("cmd+0", "font_reset"),
     ("shift+cmd+p", "command_palette"),
+    ("cmd+j", "next_needs_you"),
 ];
 
 const OTHERS: &[(&str, &str)] = &[
@@ -539,6 +544,7 @@ const OTHERS: &[(&str, &str)] = &[
     ("ctrl+-", "font_smaller"),
     ("ctrl+0", "font_reset"),
     ("ctrl+shift+p", "command_palette"),
+    ("ctrl+shift+j", "next_needs_you"),
 ];
 
 #[cfg(test)]

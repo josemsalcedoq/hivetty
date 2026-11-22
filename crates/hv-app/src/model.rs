@@ -186,6 +186,8 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         elapsed: format_elapsed(started.elapsed().as_secs()),
         state,
         focused: true,
+        agent: info.agent_name.clone().unwrap_or_default(),
+        unseen: info.unseen,
     }
 }
 

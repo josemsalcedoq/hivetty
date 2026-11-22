@@ -69,6 +69,8 @@ pub struct ProjectInfo {
     pub branch: Option<String>,
     /// Tool versions pinned in files: `("node", "20.11")`, `("rust", "1.100.0")`…
     pub versions: Vec<(String, String)>,
+    /// Root of the enclosing git repository (names the project in the sidebar).
+    pub root: Option<PathBuf>,
 }
 
 /// Inspects `dir`: technology from `dir` or, if nothing matches there, from the repository
@@ -87,6 +89,7 @@ pub fn inspect(dir: &Path, home: Option<&Path>) -> ProjectInfo {
         tech,
         branch: repo.as_ref().and_then(|r| branch(&r.git_dir)),
         versions: versions(&from),
+        root: repo.map(|r| r.root),
     }
 }
 

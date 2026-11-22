@@ -285,7 +285,14 @@ impl Ui {
                 let Some(pane) = self.panes.get(&id) else {
                     continue;
                 };
-                let mut row = crate::model::session_row(&pane.info, pane.session.cwd().as_deref());
+                // Group by repository when the chips found one, else by directory.
+                let project_dir = pane
+                    .chips
+                    .values()
+                    .next_back()
+                    .and_then(|info| info.root.clone())
+                    .or_else(|| pane.session.cwd());
+                let mut row = crate::model::session_row(&pane.info, project_dir.as_deref());
                 row.focused = Some(id) == focused;
                 most_urgent = more_urgent(most_urgent, row.state);
                 sessions.push(row);
@@ -780,6 +787,7 @@ impl App {
             Action::FontBigger => zoom(ui, 1.0),
             Action::FontSmaller => zoom(ui, -1.0),
             Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
+            Action::NextNeedsYou => self.focus_next_needing_you(),
             Action::CommandPalette => {
                 let items = crate::keymap::PALETTE_ACTIONS
                     .iter()
@@ -826,6 +834,47 @@ impl App {
             Err(_) => log::warn!("cannot save the layout"),
             Ok(Ok(())) => {}
         }
+    }
+
+    /// Focuses the next pane (after the focused one, across windows) that waits for the user;
+    /// if none does, the next one that finished unseen.
+    fn focus_next_needing_you(&mut self) {
+        // (window, pane, waiting, unseen) in a stable order: active window first.
+        let mut all = Vec::new();
+        for ui in self.ui.iter().chain(self.parked.values()) {
+            for tab in &ui.tabs.list {
+                for id in tab.root.panes() {
+                    if let Some(p) = ui.panes.get(&id) {
+                        let waiting = matches!(
+                            p.info.agent.state(),
+                            Some(hv_agents::AgentState::Blocked { .. })
+                        );
+                        all.push((ui.window.id(), id, waiting, p.info.unseen));
+                    }
+                }
+            }
+        }
+        let current = self.ui.as_ref().and_then(Ui::focused_id);
+        let start = all
+            .iter()
+            .position(|(_, id, ..)| Some(*id) == current)
+            .map_or(0, |i| i + 1);
+        let rotated = all[start..].iter().chain(&all[..start]);
+        let target = rotated
+            .clone()
+            .find(|(.., waiting, _)| *waiting)
+            .or_else(|| rotated.clone().find(|(.., unseen)| *unseen))
+            .map(|(w, id, ..)| (*w, *id));
+        let Some((window, pane)) = target else {
+            return;
+        };
+        if self.activate(window)
+            && let Some(ui) = &mut self.ui
+        {
+            ui.tabs.focus_pane(pane);
+            ui.window.focus_window();
+        }
+        self.focus_changed();
     }
 
     /// Tells the process watcher which shells to look under (all panes of all windows).

@@ -31,10 +31,14 @@ pub struct Plan {
 }
 
 /// The command Claude Code runs for `event`. Forward slashes work in every shell Claude Code
-/// uses, including bash on Windows.
+/// uses, including bash on Windows; single quotes keep `$`, backticks and `\\` in the path
+/// literal for the shell.
 pub fn hook_command(exe: &Path, event: &str) -> String {
-    let exe = exe.to_string_lossy().replace('\\', "/");
-    format!("\"{exe}\"{MARKER}{event}")
+    let exe = exe
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('\'', r"'\''");
+    format!("'{exe}'{MARKER}{event}")
 }
 
 fn is_ours(command: &str) -> bool {
@@ -160,15 +164,26 @@ pub fn claude_settings_path(home: &Path) -> PathBuf {
 /// Writes `plan` to `path`: a copy of the old file goes to `settings.json.hivetty-bak`, and the
 /// new one is written to a temporary file and renamed over the old (never half-written).
 pub fn apply(path: &Path, plan: &Plan) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
+    // Write through a symlink (dotfiles repos link settings.json) instead of replacing it.
+    let target = if path.is_symlink() {
+        std::fs::canonicalize(path)?
+    } else {
+        path.to_path_buf()
+    };
+    if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    if path.exists() {
-        std::fs::copy(path, path.with_extension("json.hivetty-bak"))?;
+    let permissions = std::fs::metadata(&target).ok().map(|m| m.permissions());
+    if target.exists() {
+        std::fs::copy(&target, target.with_extension("json.hivetty-bak"))?;
     }
-    let tmp = path.with_extension("json.hivetty-tmp");
+    let tmp = target.with_extension("json.hivetty-tmp");
     std::fs::write(&tmp, &plan.new_text)?;
-    std::fs::rename(&tmp, path)
+    // Keep the original permissions (the file may hold API keys and be private).
+    if let Some(permissions) = permissions {
+        std::fs::set_permissions(&tmp, permissions)?;
+    }
+    std::fs::rename(&tmp, &target)
 }
 
 #[cfg(test)]
@@ -199,7 +214,7 @@ mod tests {
         assert_eq!(stop[0]["hooks"][0]["command"], "say done");
         assert_eq!(
             stop[1]["hooks"][0]["command"],
-            "\"C:/Program Files/hivetty/hivetty.exe\" hook --agent claude-code --event Stop"
+            "'C:/Program Files/hivetty/hivetty.exe' hook --agent claude-code --event Stop"
         );
         assert_eq!(value["hooks"]["PreToolUse"][0]["matcher"], "*");
         // Keys keep their original order.
@@ -227,6 +242,15 @@ mod tests {
         let before: Value = serde_json::from_str(USER).unwrap();
         let after: Value = serde_json::from_str(&removed.new_text).unwrap();
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn shell_characters_in_the_path_stay_literal() {
+        let cmd = hook_command(Path::new("/opt/it's $(id)/hivetty"), "Stop");
+        assert_eq!(
+            cmd,
+            r"'/opt/it'\''s $(id)/hivetty' hook --agent claude-code --event Stop"
+        );
     }
 
     #[test]
