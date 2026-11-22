@@ -16,6 +16,7 @@ mod model;
 mod saved;
 mod usage_cli;
 mod workspace;
+mod worktree;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

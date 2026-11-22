@@ -291,3 +291,11 @@ pub const DELETE: &str = "Delete";
 pub const CONFIRM_CLOSE: &str = "Close this session? Its programs will be stopped.";
 /// Confirmation button.
 pub const CLOSE: &str = "Close";
+/// New session: worktree option (A-14).
+pub const FIELD_WORKTREE: &str = "Worktree";
+/// New session: worktree option.
+pub const CREATE_WORKTREE: &str = "create a git worktree";
+/// New session: branch hint.
+pub const BRANCH_HINT: &str = "branch (default agent/<prompt>)";
+/// Notification when the worktree could not be created.
+pub const WORKTREE_FAILED: &str = "Cannot create the worktree";

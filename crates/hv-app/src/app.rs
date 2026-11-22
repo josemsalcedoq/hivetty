@@ -45,6 +45,8 @@ pub(crate) enum AppEvent {
     Hook(hv_ipc::HookEvent),
     /// A screen reader asked for the accessibility tree or an action (SP-3, F4-25).
     AccessKit(egui_winit::accesskit_winit::Event),
+    /// A worktree for a new session was created (or failed) in the background (F4-22).
+    WorktreeReady(hv_ui::NewSession, Result<std::path::PathBuf, String>),
     /// Usage logs were read in the background (F5).
     UsageLoaded(Arc<UsageData>),
     /// The agent detected in a pane's process tree changed (F4-03).
@@ -1118,6 +1120,33 @@ impl App {
     /// Starts a shell in the requested folder (new tab or split) and types the agent command
     /// once the shell is ready (S-01, S-11, A-16).
     fn start_agent_session(&mut self, request: &hv_ui::NewSession) {
+        // A worktree first, off the UI thread; the session starts when it is ready.
+        if let Some(branch) = &request.worktree {
+            let branch = if branch.is_empty() {
+                crate::worktree::default_branch(&request.prompt)
+            } else {
+                branch.clone()
+            };
+            let folder = std::path::PathBuf::from(&request.folder);
+            let proxy = self.proxy.clone();
+            let request = request.clone();
+            let _ = std::thread::Builder::new()
+                .name("hv-worktree".into())
+                .spawn(move || {
+                    let root = hv_shell::detect::inspect(&folder, None).root;
+                    let result = match root {
+                        None => Err(format!("{} is not in a git repository", folder.display())),
+                        Some(root) => match crate::worktree::worktree_dir(&root, &branch) {
+                            None => Err("cannot place the worktree".to_owned()),
+                            Some(dir) => {
+                                crate::worktree::create(&root, &branch, &dir).map(|()| dir)
+                            }
+                        },
+                    };
+                    let _ = proxy.send_event(AppEvent::WorktreeReady(request, result));
+                });
+            return;
+        }
         let profile = hv_agents::profile::find(&self.profiles, &request.agent).cloned();
         if let Some(p) = &profile {
             self.last_agent.clone_from(&p.id);
@@ -2244,6 +2273,7 @@ impl App {
                 prompt: String::new(),
                 args: String::new(),
                 split: false,
+                worktree: None,
             });
         }
         if let Some(id) = out.palette_choice {
@@ -2505,6 +2535,17 @@ impl ApplicationHandler<AppEvent> for App {
                     self.send_agent_notifications(notes);
                 }
             }
+            AppEvent::WorktreeReady(mut request, result) => match result {
+                Ok(dir) => {
+                    request.folder = dir.to_string_lossy().into_owned();
+                    request.worktree = None;
+                    self.start_agent_session(&request);
+                }
+                Err(err) => {
+                    log::warn!("worktree: {err}");
+                    hv_platform::notify(hv_ui::strings::WORKTREE_FAILED, &err);
+                }
+            },
             AppEvent::UsageLoaded(data) => {
                 self.usage.loading = false;
                 self.usage.view = Some(Arc::new(
@@ -3241,6 +3282,7 @@ mod tests {
             prompt: prompt.into(),
             args: args.into(),
             split: false,
+            worktree: None,
         };
         assert_eq!(
             agent_command_line(claude, &request("", "--model opus"), "/bin/zsh"),

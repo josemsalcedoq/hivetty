@@ -26,6 +26,8 @@ pub struct NewSession {
     pub args: String,
     /// Open next to the focused pane instead of in a new tab.
     pub split: bool,
+    /// Start in a new git worktree on this branch (`Some("")` = pick a name).
+    pub worktree: Option<String>,
 }
 
 /// Dialog state while open.
@@ -37,6 +39,8 @@ pub(crate) struct Dialog {
     prompt: String,
     args: String,
     split: bool,
+    worktree: bool,
+    branch: String,
     error: Option<String>,
     needs_focus: bool,
 }
@@ -59,6 +63,8 @@ impl Dialog {
             prompt: String::new(),
             args: String::new(),
             split: false,
+            worktree: false,
+            branch: String::new(),
             error: None,
             needs_focus: true,
         }
@@ -140,6 +146,19 @@ impl Dialog {
                                 );
                                 ui.end_row();
 
+                                ui.label(strings::FIELD_WORKTREE);
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut self.worktree, strings::CREATE_WORKTREE);
+                                    if self.worktree {
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut self.branch)
+                                                .hint_text(strings::BRANCH_HINT)
+                                                .desired_width(200.0),
+                                        );
+                                    }
+                                });
+                                ui.end_row();
+
                                 ui.label(strings::FIELD_OPEN_IN);
                                 ui.horizontal(|ui| {
                                     ui.radio_value(&mut self.split, false, strings::OPEN_NEW_TAB);
@@ -186,6 +205,7 @@ impl Dialog {
             prompt: self.prompt.trim().to_owned(),
             args: self.args.trim().to_owned(),
             split: self.split,
+            worktree: self.worktree.then(|| self.branch.trim().to_owned()),
         })
     }
 }
