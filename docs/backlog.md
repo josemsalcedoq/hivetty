@@ -239,6 +239,10 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 ## F6 — Pulido y distribución
 
+**Estado (2026-11-22):**
+- 🟡 F6-12: `--doctor` informa de versión, SO, shell, ConPTY, configuración (y su error), GPU, directorio de datos, caché de uso, integración de shell, agentes en el PATH y si los hooks de Claude Code están instalados (o apuntan a otro binario). Falta el modo `--safe`.
+- 🟡 F6-13: guía de usuario en inglés (`docs/user/guide.md`: instalación desde el código, ventana, atajos, configuración, integración de shell, agentes y hooks, panel de uso, privacidad y solución de problemas) y README al día con captura. Falta la web y la FAQ.
+
 | ID | Tarea | Depende | Tam. |
 |---|---|---|---|
 | F6-01 | Temas: claro, oscuro, alto contraste; importar temas de iTerm2 y Alacritty; seguir el tema del sistema | F1 | M |

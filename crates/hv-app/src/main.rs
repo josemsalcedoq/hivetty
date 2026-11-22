@@ -295,6 +295,62 @@ fn doctor_report() -> String {
         }
         None => report.push_str("config: no config directory found\n"),
     }
+    let (config, config_error) = hv_config::default_path()
+        .as_deref()
+        .map_or_else(|| (hv_config::Config::default(), None), hv_config::load);
+    if let Some(err) = config_error {
+        report.push_str(&format!("config error: {err}\n"));
+    }
+    // GPU: the adapter the renderer would pick (a headless device, no window).
+    match hv_render::Renderer::new_headless(1, 1, 1.0, 14.0) {
+        Ok(renderer) => report.push_str(&format!("gpu: {}\n", renderer.adapter_description())),
+        Err(err) => report.push_str(&format!("gpu: NOT AVAILABLE ({err:#})\n")),
+    }
+    if let Some(dir) = hv_config::data_dir() {
+        report.push_str(&format!("data: {}\n", dir.display()));
+        let cache = dir.join("usage.cache");
+        if let Ok(meta) = std::fs::metadata(&cache) {
+            report.push_str(&format!("usage cache: {} KB\n", meta.len() / 1024));
+        }
+    }
+    report.push_str(&format!(
+        "shell integration: {}\n",
+        if config.shell.integration {
+            "on (zsh, bash, fish, PowerShell)"
+        } else {
+            "off ([shell] integration = false)"
+        }
+    ));
+    // Agents on PATH and whether hivetty's Claude Code hooks are installed.
+    let profiles = hv_agents::profile::builtin();
+    let installed = hv_agents::profile::installed(&profiles, std::env::var_os("PATH").as_deref());
+    let names: Vec<&str> = installed.iter().map(|(p, _)| p.name.as_str()).collect();
+    report.push_str(&format!(
+        "agents on PATH: {}\n",
+        if names.is_empty() {
+            "none found".to_owned()
+        } else {
+            names.join(", ")
+        }
+    ));
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    if let Some(home) = home {
+        let settings = hv_agents::install::claude_settings_path(std::path::Path::new(&home));
+        let text = std::fs::read_to_string(&settings).unwrap_or_default();
+        let state = match hv_agents::install::plan_install(
+            &text,
+            &std::env::current_exe().unwrap_or_default(),
+        ) {
+            Ok(plan) if plan.changes.is_empty() => "installed".to_owned(),
+            Ok(plan) if plan.changes.iter().all(|c| c.starts_with('~')) => {
+                "installed for another hivetty binary (run `hivetty agents install-hooks`)"
+                    .to_owned()
+            }
+            Ok(_) => "not installed (`hivetty agents install-hooks`)".to_owned(),
+            Err(err) => format!("cannot read {}: {err}", settings.display()),
+        };
+        report.push_str(&format!("claude code hooks: {state}\n"));
+    }
     report
 }
 
