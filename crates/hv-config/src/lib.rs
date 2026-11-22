@@ -129,6 +129,9 @@ pub struct WindowConfig {
     pub remember_geometry: bool,
     /// Reopen the tabs, splits and directories of the last session.
     pub restore_layout: bool,
+    /// Title bar: `"auto"` (hivetty's own on Windows, transparent on macOS, the system's on
+    /// Linux), `"full"` (always the system's) or `"none"` (always hivetty's).
+    pub decorations: String,
 }
 
 impl Default for WindowConfig {
@@ -136,6 +139,7 @@ impl Default for WindowConfig {
         Self {
             remember_geometry: true,
             restore_layout: true,
+            decorations: "auto".to_owned(),
         }
     }
 }

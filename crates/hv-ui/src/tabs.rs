@@ -68,7 +68,33 @@ pub enum TabAction {
     },
     /// An entry of the ☰ menu (its [`PaletteItem::id`]).
     Menu(usize),
+    /// The empty part of the bar was dragged: move the window (custom title bar).
+    DragWindow,
+    /// Maximize or restore the window (button or double click on the bar).
+    ToggleMaximize,
+    /// Minimize the window.
+    Minimize,
+    /// Close the window.
+    CloseWindow,
 }
+
+/// How the tab bar doubles as the window's title bar (F1-02).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TitleBar {
+    /// The OS draws its own title bar above.
+    #[default]
+    Native,
+    /// No OS title bar: the bar drags the window and draws minimize / maximize / close.
+    Custom {
+        /// Whether the window is maximized (picks the maximize or restore icon).
+        maximized: bool,
+    },
+    /// macOS transparent title bar: leave room on the left for the traffic lights.
+    MacInset,
+}
+
+const CONTROL_WIDTH: f32 = 46.0;
+const MAC_INSET: f32 = 78.0;
 
 /// State kept between frames.
 #[derive(Debug, Default)]
@@ -92,10 +118,18 @@ impl TabBar {
         ui: &mut egui::Ui,
         tabs: &[TabItem],
         menu: &[Vec<PaletteItem>],
+        title_bar: TitleBar,
     ) -> Option<TabAction> {
         let mut action = None;
         let menu_width = if menu.is_empty() { 0.0 } else { MENU_WIDTH };
-        let available = (ui.available_width() - PLUS_WIDTH - menu_width).max(TAB_MIN_WIDTH);
+        let chrome_width = match title_bar {
+            TitleBar::Native => 0.0,
+            // Room to grab the window, plus the three buttons.
+            TitleBar::Custom { .. } => CONTROL_WIDTH * 3.0 + 80.0,
+            TitleBar::MacInset => MAC_INSET + 80.0,
+        };
+        let available =
+            (ui.available_width() - PLUS_WIDTH - menu_width - chrome_width).max(TAB_MIN_WIDTH);
         let width = (available / tabs.len().max(1) as f32).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH);
         // A tab closing or opening shifts indices: drop a rename or drag in progress.
         if tabs.len() != self.last_len {
@@ -110,6 +144,9 @@ impl TabBar {
         let mut rects = Vec::with_capacity(tabs.len());
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            if title_bar == TitleBar::MacInset {
+                ui.add_space(MAC_INSET);
+            }
             if !menu.is_empty()
                 && let Some(id) = hamburger(ui, menu)
             {
@@ -140,6 +177,26 @@ impl TabBar {
             );
             if response.on_hover_text(strings::NEW_TAB).clicked() {
                 action = Some(TabAction::New);
+            }
+            if title_bar != TitleBar::Native {
+                let controls = match title_bar {
+                    TitleBar::Custom { .. } => CONTROL_WIDTH * 3.0,
+                    _ => 0.0,
+                };
+                // The empty rest of the bar moves the window and maximizes on double click.
+                let free = (ui.available_width() - controls).max(0.0);
+                let (_, drag) = ui
+                    .allocate_exact_size(Vec2::new(free, TAB_BAR_HEIGHT), Sense::click_and_drag());
+                if drag.double_clicked() {
+                    action = Some(TabAction::ToggleMaximize);
+                } else if drag.drag_started() {
+                    action = Some(TabAction::DragWindow);
+                }
+            }
+            if let TitleBar::Custom { maximized } = title_bar
+                && let Some(a) = window_controls(ui, maximized)
+            {
+                action = Some(a);
             }
         });
         // Finish a drag: the drop position decides the new index.
@@ -333,6 +390,83 @@ impl TabBar {
         }
         (rect, action)
     }
+}
+
+/// Minimize, maximize / restore and close, drawn as lines (the UI font has no such glyphs).
+fn window_controls(ui: &mut egui::Ui, maximized: bool) -> Option<TabAction> {
+    let mut action = None;
+    ui.spacing_mut().item_spacing.x = 0.0;
+    for (kind, label) in [
+        (0, strings::MINIMIZE),
+        (
+            1,
+            if maximized {
+                strings::RESTORE
+            } else {
+                strings::MAXIMIZE
+            },
+        ),
+        (2, strings::CLOSE_WINDOW),
+    ] {
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(CONTROL_WIDTH, TAB_BAR_HEIGHT), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+        let painter = ui.painter_at(rect);
+        let hovered = response.hovered();
+        if hovered {
+            let bg = if kind == 2 {
+                theme::STATE_ERROR()
+            } else {
+                theme::HOVER_BG()
+            };
+            painter.rect_filled(rect, CornerRadius::ZERO, bg);
+        }
+        let color = if hovered && kind == 2 {
+            egui::Color32::WHITE
+        } else {
+            theme::TEXT_SECONDARY()
+        };
+        let stroke = Stroke::new(1.0, color);
+        let c = rect.center();
+        match kind {
+            0 => {
+                painter.line_segment([c + Vec2::new(-5.0, 0.0), c + Vec2::new(5.0, 0.0)], stroke);
+            }
+            1 if maximized => {
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(c + Vec2::new(-1.0, 1.0), Vec2::splat(8.0)),
+                    CornerRadius::ZERO,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.line_segment(
+                    [c + Vec2::new(-2.0, -4.0), c + Vec2::new(5.0, -4.0)],
+                    stroke,
+                );
+                painter.line_segment([c + Vec2::new(5.0, -4.0), c + Vec2::new(5.0, 3.0)], stroke);
+            }
+            1 => {
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(c, Vec2::splat(10.0)),
+                    CornerRadius::ZERO,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+            }
+            _ => {
+                painter.line_segment([c + Vec2::new(-5.0, -5.0), c + Vec2::new(5.0, 5.0)], stroke);
+                painter.line_segment([c + Vec2::new(-5.0, 5.0), c + Vec2::new(5.0, -5.0)], stroke);
+            }
+        }
+        if response.on_hover_text(label).clicked() {
+            action = Some(match kind {
+                0 => TabAction::Minimize,
+                1 => TabAction::ToggleMaximize,
+                _ => TabAction::CloseWindow,
+            });
+        }
+    }
+    action
 }
 
 /// The ☰ button and its menu (Windows and Linux; macOS uses the system menu bar).

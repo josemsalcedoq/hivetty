@@ -243,6 +243,14 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             sidebar_visible: true,
             usage,
             peek: None,
+            // Same title bar as the window would have with the default config.
+            title_bar: if cfg!(windows) {
+                hv_ui::TitleBar::Custom { maximized: false }
+            } else if cfg!(target_os = "macos") {
+                hv_ui::TitleBar::MacInset
+            } else {
+                hv_ui::TitleBar::Native
+            },
             agents,
             new_session_hint,
             menu,

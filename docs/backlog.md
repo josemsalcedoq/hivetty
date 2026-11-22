@@ -49,7 +49,8 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 **Estado (2026-11-21):**
 - ✅ Hechas (primera versión): F1-01, F1-03…F1-08, F1-10, F1-11 (subrayado simple), F1-14, F1-15 (sin pintar el preedit), F1-16…F1-27, F1-28 (throughput al 83 % del emulador solo; ver [perf.md](perf.md)), F1-29, F1-30 (Kitty: flags 1 y 8), F1-31, F1-32, F1-33 (PATHEXT; el fork de portable-pty sigue pendiente), F1-34, F1-35 y F1-36 (preedit del IME subrayado en el cursor; `--screenshot --preedit` para probarlo).
-- ⏳ Pendientes: F1-02 (barra de título propia: va con la UI de egui en F2), F1-09 (atlas propio) y F1-12 (damage tracking fino), aplazadas hasta que las mediciones con muchos paneles lo pidan; F1-13 (renderer por software).
+- ✅ F1-02 (2026-11-22): en Windows la barra de pestañas es la barra de título (sin marco del SO: arrastrar el hueco mueve la ventana, doble clic maximiza, botones minimizar / maximizar-restaurar / cerrar, bordes de 6 px para redimensionar con su cursor); en macOS barra transparente con los semáforos sobre la barra de pestañas; en Linux la del sistema hasta dibujar decoraciones en el cliente para Wayland. `[window] decorations = "auto" | "full" | "none"`. Falta probarlo a mano en los 3 SO (en macOS solo comprobado con clippy).
+- ⏳ Pendientes: F1-09 (atlas propio) y F1-12 (damage tracking fino), aplazadas hasta que las mediciones con muchos paneles lo pidan; F1-13 (renderer por software).
 - Bug corregido: en Windows, ConPTY no cierra la salida cuando termina el proceso. La salida se detecta con un hilo que espera al hijo.
 - Herramientas nuevas: `hivetty --screenshot` (render headless; el CI sube capturas de los 3 SO), `--events`, `--scroll` y `hivetty usage`.
 

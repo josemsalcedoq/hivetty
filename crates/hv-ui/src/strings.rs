@@ -204,3 +204,11 @@ pub const PEEK_REPLY_HINT: &str = "Reply to this session (Enter sends)";
 pub const PEEK_SEND: &str = "Send";
 /// Peek buttons.
 pub const PEEK_GO_TO: &str = "Go to session";
+/// Window buttons of the custom title bar.
+pub const MINIMIZE: &str = "Minimize";
+/// Window buttons of the custom title bar.
+pub const MAXIMIZE: &str = "Maximize";
+/// Window buttons of the custom title bar.
+pub const RESTORE: &str = "Restore";
+/// Window buttons of the custom title bar.
+pub const CLOSE_WINDOW: &str = "Close window";

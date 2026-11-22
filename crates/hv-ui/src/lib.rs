@@ -13,7 +13,7 @@ mod usage;
 pub use new_session::{AgentChoice, NewSession};
 pub use palette::PaletteItem;
 pub use peek::{PeekAction, PeekView};
-pub use tabs::{TAB_BAR_HEIGHT, TabAction, TabItem};
+pub use tabs::{TAB_BAR_HEIGHT, TabAction, TabItem, TitleBar};
 pub use usage::{UsageAction, UsageRange, UsageView};
 
 use egui::{Color32, Margin, Stroke};
@@ -74,6 +74,8 @@ pub struct ChromeModel {
     pub usage: Option<UsageView>,
     /// A session being peeked at (S-20).
     pub peek: Option<PeekView>,
+    /// Whether the tab bar is also the window's title bar (F1-02).
+    pub title_bar: TitleBar,
 }
 
 /// What the chrome produced this frame.
@@ -200,7 +202,7 @@ impl Chrome {
                             .stroke(Stroke::new(1.0, theme::BORDER())),
                     )
                     .show(ui, |ui| {
-                        tab_action = tab_bar.show(ui, &model.tabs, &model.menu);
+                        tab_action = tab_bar.show(ui, &model.tabs, &model.menu, model.title_bar);
                     });
             }
             central = ui.available_rect_before_wrap();
@@ -465,6 +467,7 @@ mod tests {
             new_session_hint: String::new(),
             usage: None,
             peek: None,
+            title_bar: TitleBar::Native,
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
                 subtitle: "Needs permission: Bash".into(),
@@ -518,6 +521,7 @@ mod tests {
             new_session_hint: String::new(),
             usage: None,
             peek: None,
+            title_bar: TitleBar::Native,
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),
                 subtitle: "Working".into(),

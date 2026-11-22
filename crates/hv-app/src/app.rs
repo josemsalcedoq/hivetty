@@ -208,6 +208,8 @@ struct Ui {
     usage_open: bool,
     /// The pane being peeked at from the sidebar (S-20).
     peek: Option<PaneId>,
+    /// Whether hivetty draws the title bar (F1-02).
+    title_bar: TitleBarMode,
     /// Space egui left for the terminals last frame, in physical pixels.
     terminal_area: Option<[f32; 4]>,
     /// Sidebar row index → pane, from the last frame.
@@ -381,6 +383,7 @@ impl Ui {
             agents: agents.to_vec(),
             usage: None,
             peek: None,
+            title_bar: hv_ui::TitleBar::Native,
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
                 .map(crate::keymap::Chord::pretty)
@@ -496,6 +499,8 @@ struct MouseState {
     dragging: Option<Divider>,
     /// Divider under the pointer (for the resize cursor).
     over_divider: Option<Axis>,
+    /// Window edge under the pointer when hivetty draws the frame (F1-02).
+    resize_edge: Option<winit::window::ResizeDirection>,
 }
 
 /// How long the visual bell flashes.
@@ -555,11 +560,26 @@ impl App {
             .as_ref()
             .and_then(|l| l.window)
             .filter(|_| self.config.window.remember_geometry);
+        let title_bar = TitleBarMode::from_config(&self.config.window.decorations);
         let mut attrs = Window::default_attributes()
             .with_title(APP_TITLE)
             .with_inner_size(LogicalSize::new(1000.0, 640.0))
             // AccessKit must be attached before the window is first shown.
             .with_visible(false);
+        match title_bar {
+            TitleBarMode::Custom => attrs = attrs.with_decorations(false),
+            TitleBarMode::MacInset => {
+                #[cfg(target_os = "macos")]
+                {
+                    use winit::platform::macos::WindowAttributesExtMacOS;
+                    attrs = attrs
+                        .with_titlebar_transparent(true)
+                        .with_title_hidden(true)
+                        .with_fullsize_content_view(true);
+                }
+            }
+            TitleBarMode::Native => {}
+        }
         if let Some(g) = geometry {
             attrs = attrs
                 .with_inner_size(PhysicalSize::new(g.width.max(320), g.height.max(200)))
@@ -618,6 +638,7 @@ impl App {
             layout: Layout::default(),
             usage_open: false,
             peek: None,
+            title_bar,
             terminal_area: None,
             row_panes: Vec::new(),
             repaint_at: None,
@@ -1510,6 +1531,14 @@ impl App {
 
     fn on_mouse_button(&mut self, state: ElementState, button: MouseButton) {
         let Some(ui) = &mut self.ui else { return };
+        // Borderless window: the edges resize it.
+        if state == ElementState::Pressed
+            && button == MouseButton::Left
+            && let Some(edge) = self.mouse.resize_edge
+        {
+            let _ = ui.window.drag_resize_window(edge);
+            return;
+        }
         if state == ElementState::Released && self.mouse.dragging.take().is_some() {
             return; // the end of a divider drag is not a click in a pane
         }
@@ -1625,6 +1654,13 @@ impl App {
         self.mouse.x = x;
         self.mouse.y = y;
         let Some(ui) = &mut self.ui else { return };
+        self.mouse.resize_edge = (ui.title_bar == TitleBarMode::Custom
+            && !ui.window.is_maximized())
+        .then(|| {
+            let size = ui.window.inner_size();
+            resize_edge(size.width as f32, size.height as f32, x, y)
+        })
+        .flatten();
         ui.window.request_redraw(); // egui hover state, divider cursor
         if let Some(divider) = &self.mouse.dragging {
             let [sx, sy, sw, sh] = divider.span;
@@ -1862,7 +1898,18 @@ impl App {
     }
 
     fn redraw(&mut self) {
-        let cursor = if self.mouse.dragging.is_some() || self.mouse.over_divider.is_some() {
+        let edge_cursor = self.mouse.resize_edge.map(|edge| {
+            use winit::window::ResizeDirection as R;
+            match edge {
+                R::East | R::West => egui::CursorIcon::ResizeHorizontal,
+                R::North | R::South => egui::CursorIcon::ResizeVertical,
+                R::NorthEast | R::SouthWest => egui::CursorIcon::ResizeNeSw,
+                R::NorthWest | R::SouthEast => egui::CursorIcon::ResizeNwSe,
+            }
+        });
+        let cursor = if let Some(edge) = edge_cursor {
+            edge
+        } else if self.mouse.dragging.is_some() || self.mouse.over_divider.is_some() {
             match self
                 .mouse
                 .dragging
@@ -2104,6 +2151,12 @@ impl App {
                     .and_then(|name| Action::parse(name));
                 ui.window.request_redraw();
             }
+            hv_ui::TabAction::DragWindow => {
+                let _ = ui.window.drag_window();
+            }
+            hv_ui::TabAction::ToggleMaximize => ui.window.set_maximized(!ui.window.is_maximized()),
+            hv_ui::TabAction::Minimize => ui.window.set_minimized(true),
+            hv_ui::TabAction::CloseWindow => self.pending_action = Some(Action::CloseWindow),
             hv_ui::TabAction::New => {
                 let cwd = ui.focused().and_then(|p| p.session.cwd());
                 let Some(ui) = self.ui.take() else { return };
@@ -2136,6 +2189,13 @@ fn run_chrome(
     let input = ui.egui.take_egui_input(&ui.window);
     let mut model = ui.chrome_model(sidebar_visible, keymap, agents);
     model.usage = usage;
+    model.title_bar = match ui.title_bar {
+        TitleBarMode::Native => hv_ui::TitleBar::Native,
+        TitleBarMode::Custom => hv_ui::TitleBar::Custom {
+            maximized: ui.window.is_maximized(),
+        },
+        TitleBarMode::MacInset => hv_ui::TitleBar::MacInset,
+    };
     model.peek = ui.peek.and_then(|id| ui.panes.get(&id)).map(|pane| {
         let row = crate::model::session_row(&pane.info, None);
         // The last lines with text: where agents print their question.
@@ -2165,7 +2225,17 @@ fn run_chrome(
         .context()
         .pointer_latest_pos()
         .is_some_and(|p| !ui.over_chrome(p.x * ppp, p.y * ppp));
-    if pointer_over_terminal {
+    // Resize cursors on the window edges win everywhere; the terminal cursor only over panes.
+    let on_edge = matches!(
+        cursor,
+        egui::CursorIcon::ResizeNeSw | egui::CursorIcon::ResizeNwSe
+    ) || (ui.title_bar == TitleBarMode::Custom
+        && matches!(
+            cursor,
+            egui::CursorIcon::ResizeHorizontal | egui::CursorIcon::ResizeVertical
+        )
+        && !pointer_over_terminal);
+    if pointer_over_terminal || on_edge {
         out.full.platform_output.cursor_icon = cursor;
     }
     let platform = std::mem::take(&mut out.full.platform_output);
@@ -2756,6 +2826,50 @@ fn resume_command(
     Some(line)
 }
 
+/// Who draws the title bar (F1-02).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TitleBarMode {
+    /// The OS.
+    Native,
+    /// hivetty, in the tab bar (no OS frame).
+    Custom,
+    /// macOS: a transparent OS title bar over the tab bar.
+    MacInset,
+}
+
+impl TitleBarMode {
+    fn from_config(decorations: &str) -> Self {
+        match decorations {
+            "full" => Self::Native,
+            "none" => Self::Custom,
+            _ if cfg!(windows) => Self::Custom,
+            _ if cfg!(target_os = "macos") => Self::MacInset,
+            // Linux: Wayland needs client-side decorations for a borderless window; keep the
+            // system's until hivetty draws those.
+            _ => Self::Native,
+        }
+    }
+}
+
+/// The window edge or corner at a point, for resizing a borderless window: a 6 px band.
+fn resize_edge(width: f32, height: f32, x: f32, y: f32) -> Option<winit::window::ResizeDirection> {
+    use winit::window::ResizeDirection as R;
+    const BAND: f32 = 6.0;
+    let (left, right) = (x < BAND, x >= width - BAND);
+    let (top, bottom) = (y < BAND, y >= height - BAND);
+    match (left, right, top, bottom) {
+        (true, _, true, _) => Some(R::NorthWest),
+        (_, true, true, _) => Some(R::NorthEast),
+        (true, _, _, true) => Some(R::SouthWest),
+        (_, true, _, true) => Some(R::SouthEast),
+        (true, ..) => Some(R::West),
+        (_, true, ..) => Some(R::East),
+        (_, _, true, _) => Some(R::North),
+        (_, _, _, true) => Some(R::South),
+        _ => None,
+    }
+}
+
 /// Applies the light or dark theme to the terminals, the renderer and the chrome. The terminal
 /// palette is global, so every pane follows.
 fn apply_theme(chrome: &hv_ui::Chrome, light: bool) {
@@ -3007,6 +3121,17 @@ mod tests {
             resume_command(&profiles, &agent("x; rm -rf ~"), "always"),
             None
         );
+    }
+
+    #[test]
+    fn edges_and_corners_of_a_borderless_window() {
+        use winit::window::ResizeDirection as R;
+        assert_eq!(resize_edge(800.0, 600.0, 2.0, 300.0), Some(R::West));
+        assert_eq!(resize_edge(800.0, 600.0, 798.0, 598.0), Some(R::SouthEast));
+        assert_eq!(resize_edge(800.0, 600.0, 400.0, 1.0), Some(R::North));
+        assert_eq!(resize_edge(800.0, 600.0, 400.0, 300.0), None);
+        assert_eq!(TitleBarMode::from_config("full"), TitleBarMode::Native);
+        assert_eq!(TitleBarMode::from_config("none"), TitleBarMode::Custom);
     }
 
     #[test]
