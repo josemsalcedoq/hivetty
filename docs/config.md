@@ -39,7 +39,10 @@ builtin_box_drawing = true     # dibujar ─│┌ y powerline por código, alin
 thicken = false                # macOS: trazo más grueso
 
 [theme]
-name = "system"               # "system" (sigue al SO), "hivetty-dark", "hivetty-light"; más adelante la ruta a un .toml o temas de iTerm2/Alacritty
+name = "system"               # "system" (sigue al SO), "hivetty-dark", "hivetty-light"
+high_contrast = false          # blanco sobre negro con colores saturados (gana a colors)
+# [theme.colors]: foreground, background, cursor?, selection?, ansi (16) en #rrggbb;
+# `hivetty theme import <archivo>` lo genera desde .itermcolors o un tema TOML de Alacritty
 follow_system = true
 light = "hivetty-light"
 dark = "hivetty-dark"

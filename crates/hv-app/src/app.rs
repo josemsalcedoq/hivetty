@@ -647,6 +647,7 @@ impl App {
             .config
             .theme
             .is_light(window.theme().map(|t| t == winit::window::Theme::Light));
+        set_palette(&self.config.theme);
         apply_theme(&chrome, light);
         #[cfg(target_os = "macos")]
         if self.menu.is_none() {
@@ -1985,6 +1986,7 @@ impl App {
             .and_then(|ui| ui.window.theme())
             .map(|t| t == winit::window::Theme::Light);
         let light = config.theme.is_light(system_light);
+        set_palette(&config.theme);
         self.set_theme(light);
         #[cfg(target_os = "macos")]
         {
@@ -3445,6 +3447,17 @@ fn resize_edge(
         (_, _, _, true) => Some(R::South),
         _ => None,
     }
+}
+
+/// The config's custom terminal palette (or high contrast), or hivetty's own.
+fn set_palette(theme: &hv_config::Theme) {
+    hv_term::set_custom(theme.palette().map(|p| hv_term::CustomPalette {
+        foreground: p.foreground,
+        background: p.background,
+        cursor: p.cursor,
+        selection: p.selection,
+        ansi: p.ansi,
+    }));
 }
 
 /// Applies the light or dark theme to the terminals, the renderer and the chrome. The terminal

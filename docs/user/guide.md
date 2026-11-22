@@ -91,6 +91,18 @@ scrollback_lines = 10000
 remember_geometry = true
 restore_layout = true         # reopen tabs, splits and directories
 
+[theme]
+name = "system"               # "system" follows the OS; "hivetty-dark" or "hivetty-light"
+high_contrast = false         # white on black with saturated colors
+# Your own palette. `hivetty theme import <file>` converts an iTerm2 (.itermcolors) or
+# Alacritty theme into this block. The sidebar follows its background (light or dark).
+# [theme.colors]
+# foreground = "#abb2bf"
+# background = "#282c34"
+# cursor = "#ffffff"          # optional
+# selection = "#3e4451"       # optional
+# ansi = [ ...16 colors: black, red, green, yellow, blue, magenta, cyan, white, then bright... ]
+
 [agents]
 restore_on_launch = "ask"     # "ask" types the resume command and waits for Enter; "always"; "never"
 

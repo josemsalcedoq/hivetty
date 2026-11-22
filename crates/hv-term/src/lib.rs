@@ -16,4 +16,4 @@ pub mod snapshot;
 pub use hv_grid::{Cursor, CursorKind, Rgb8, SnapCell, Snapshot};
 pub use hv_pty::{GridSize, SpawnSpec};
 pub use session::{SelectKind, Session, SessionEvent};
-pub use snapshot::palette::set_light;
+pub use snapshot::palette::{Custom as CustomPalette, set_custom, set_light};

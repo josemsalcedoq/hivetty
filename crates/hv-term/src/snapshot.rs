@@ -25,33 +25,62 @@ pub(crate) mod palette {
 
     static LIGHT: AtomicBool = AtomicBool::new(false);
 
+    /// A palette from the config (custom colors or high contrast) that replaces the built-in
+    /// ones.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Custom {
+        pub foreground: u32,
+        pub background: u32,
+        pub cursor: u32,
+        pub selection: u32,
+        pub ansi: [u32; 16],
+    }
+
+    static CUSTOM: std::sync::RwLock<Option<Custom>> = std::sync::RwLock::new(None);
+
     /// Switches every terminal to the light or dark palette.
     pub fn set_light(on: bool) {
         LIGHT.store(on, Ordering::Relaxed);
+    }
+
+    /// Uses `palette` instead of the built-in ones (`None` = back to them).
+    pub fn set_custom(palette: Option<Custom>) {
+        *CUSTOM
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = palette;
+    }
+
+    fn custom() -> Option<Custom> {
+        *CUSTOM
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn light() -> bool {
         LIGHT.load(Ordering::Relaxed)
     }
 
-    fn pick(dark: u32, light_hex: u32) -> Rgb8 {
+    fn pick(dark: u32, light_hex: u32, from_custom: fn(&Custom) -> u32) -> Rgb8 {
+        if let Some(custom) = custom() {
+            return Rgb8::hex(from_custom(&custom));
+        }
         Rgb8::hex(if light() { light_hex } else { dark })
     }
 
     pub(crate) fn foreground() -> Rgb8 {
-        pick(0xE6E6E6, 0x1F2328)
+        pick(0xE6E6E6, 0x1F2328, |c| c.foreground)
     }
 
     pub(crate) fn background() -> Rgb8 {
-        pick(0x0A0A0B, 0xFFFFFF)
+        pick(0x0A0A0B, 0xFFFFFF, |c| c.background)
     }
 
     pub(crate) fn cursor() -> Rgb8 {
-        pick(0xE6E6E6, 0x1F2328)
+        pick(0xE6E6E6, 0x1F2328, |c| c.cursor)
     }
 
     pub(crate) fn selection() -> Rgb8 {
-        pick(0x264F78, 0xB6D7FF)
+        pick(0x264F78, 0xB6D7FF, |c| c.selection)
     }
 
     const ANSI: [u32; 16] = [
@@ -69,6 +98,9 @@ pub(crate) mod palette {
     pub(crate) fn indexed(i: u8) -> Rgb8 {
         match i {
             0..=15 => {
+                if let Some(custom) = custom() {
+                    return Rgb8::hex(custom.ansi[usize::from(i)]);
+                }
                 let table = if light() { &ANSI_LIGHT } else { &ANSI };
                 Rgb8::hex(table[usize::from(i)])
             }

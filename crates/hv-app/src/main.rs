@@ -50,6 +50,7 @@ OPTIONS:
     --palette            With --screenshot --ui, show the command palette
     --usage              With --screenshot --ui, show the usage dashboard (this machine's logs)
     --light              With --screenshot, use the light theme
+    --high-contrast      With --screenshot, use the high-contrast palette
     --doctor             Print diagnostic information about this system
     --safe               Start with default settings, no shell integration and the software
                          renderer (also HIVETTY_SAFE=1)
@@ -65,6 +66,8 @@ OPTIONS:
     agents uninstall-statusline [--dry-run]
                          Remove it again
     statusline           The statusline command itself (reads Claude Code's JSON on stdin)
+    theme import <FILE>  Convert an iTerm2 (.itermcolors) or Alacritty (.toml) theme and print
+                         the [theme.colors] block to paste into config.toml
     hook --agent <ID> --event <NAME>
                          Forward an agent hook (stdin) to the running hivetty; always exits 0
     -V, --version        Print version
@@ -98,6 +101,8 @@ enum Command {
     Doctor,
     Usage(usage_cli::UsageArgs),
     Agents(agents_cli::AgentsCommand),
+    /// `theme import <file>`: print `[theme.colors]` converted from another terminal's theme.
+    ThemeImport(PathBuf),
     Version,
     Help,
 }
@@ -131,6 +136,14 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             }
             "usage" => {
                 return usage_cli::UsageArgs::parse(&args[i + 1..]).map(Command::Usage);
+            }
+            "theme" => {
+                return match (args.get(i + 1).map(String::as_str), args.get(i + 2)) {
+                    (Some("import"), Some(file)) => Ok(Command::ThemeImport(PathBuf::from(file))),
+                    _ => {
+                        Err("usage: hivetty theme import <file.itermcolors|alacritty.toml>".into())
+                    }
+                };
             }
             "-e" | "--command" => {
                 let program = value(i)?.clone();
@@ -204,6 +217,32 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     })
 }
 
+/// `hivetty theme import <file>`: prints the converted theme; never writes the config.
+fn theme_import(file: &std::path::Path) -> anyhow::Result<()> {
+    use anyhow::Context;
+    let size = std::fs::metadata(file)
+        .with_context(|| format!("cannot read {}", file.display()))?
+        .len();
+    if size > hv_config::theme_import::MAX_BYTES as u64 {
+        anyhow::bail!("{} is too large for a theme", file.display());
+    }
+    let text =
+        std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
+    let iterm = file
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("itermcolors"))
+        || text.trim_start().starts_with("<?xml");
+    let colors = if iterm {
+        hv_config::theme_import::from_itermcolors(&text)
+    } else {
+        hv_config::theme_import::from_alacritty(&text)
+    }
+    .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+    println!("# From {}. Paste this into config.toml.", file.display());
+    print!("{}", hv_config::theme_import::to_toml(&colors));
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // Agent hooks come first and bypass everything else: no logging setup, no console, exit 0.
@@ -237,6 +276,22 @@ fn main() -> ExitCode {
     if hv_config::safe_mode() {
         hv_render::set_software(true);
     }
+    // Screenshots in the high-contrast palette (what `[theme] high_contrast` does).
+    let args: Vec<String> = if args.iter().any(|a| a == "--high-contrast") {
+        let p = hv_config::Palette::HIGH_CONTRAST;
+        hv_term::set_custom(Some(hv_term::CustomPalette {
+            foreground: p.foreground,
+            background: p.background,
+            cursor: p.cursor,
+            selection: p.selection,
+            ansi: p.ansi,
+        }));
+        args.into_iter()
+            .filter(|a| a != "--high-contrast")
+            .collect()
+    } else {
+        args
+    };
     let parsed = parse_args(&args);
     // Everything except opening the window prints to the console; in Windows release builds
     // (GUI subsystem) that needs the parent console attached first.
@@ -265,6 +320,7 @@ fn main() -> ExitCode {
         }
         Command::Run(spec, record) => app::run(spec, record),
         Command::Agents(command) => agents_cli::run(&command),
+        Command::ThemeImport(file) => theme_import(&file),
         Command::Usage(args) => {
             print!("{}", usage_cli::run(&args));
             Ok(())

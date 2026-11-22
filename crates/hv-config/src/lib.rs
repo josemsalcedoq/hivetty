@@ -11,6 +11,8 @@ use std::time::Duration;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
 
+pub mod theme_import;
+
 /// The whole configuration.
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -151,19 +153,123 @@ pub struct Theme {
     /// `"system"` follows the OS light/dark setting; `"hivetty-dark"` or `"hivetty-light"`
     /// force one.
     pub name: String,
+    /// White on black with saturated colors, for low vision (wins over `colors`).
+    pub high_contrast: bool,
+    /// A custom terminal palette (`hivetty theme import` writes one from iTerm2 or Alacritty).
+    pub colors: Option<ThemeColors>,
 }
 
 impl Default for Theme {
     fn default() -> Self {
         Self {
             name: "system".to_owned(),
+            high_contrast: false,
+            colors: None,
         }
     }
 }
 
+/// `[theme.colors]`: `#rrggbb` strings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeColors {
+    pub foreground: String,
+    pub background: String,
+    pub cursor: Option<String>,
+    pub selection: Option<String>,
+    /// The 16 ANSI colors: black, red, green, yellow, blue, magenta, cyan, white, then the
+    /// bright ones.
+    pub ansi: Vec<String>,
+}
+
+/// A terminal palette as `0xRRGGBB` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Palette {
+    pub foreground: u32,
+    pub background: u32,
+    pub cursor: u32,
+    pub selection: u32,
+    pub ansi: [u32; 16],
+}
+
+impl Palette {
+    /// The high-contrast palette (F6-01).
+    pub const HIGH_CONTRAST: Self = Self {
+        foreground: 0xFFFFFF,
+        background: 0x000000,
+        cursor: 0xFFFF00,
+        selection: 0x0050C8,
+        ansi: [
+            0x000000, 0xFF5555, 0x55FF55, 0xFFFF55, 0x7799FF, 0xFF77FF, 0x55FFFF, 0xFFFFFF, //
+            0xBBBBBB, 0xFF8888, 0x99FF99, 0xFFFF99, 0xAABBFF, 0xFFAAFF, 0x99FFFF, 0xFFFFFF,
+        ],
+    };
+
+    /// Whether the background is light (the chrome then uses its light theme).
+    pub fn is_light(&self) -> bool {
+        let [_, r, g, b] = self.background.to_be_bytes();
+        // Relative luminance, roughly (sRGB weights, no gamma).
+        0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b) > 128.0
+    }
+}
+
+/// `#rrggbb` (or `rrggbb`) to `0xRRGGBB`.
+fn parse_hex(text: &str) -> Option<u32> {
+    let digits = text.trim().strip_prefix('#').unwrap_or(text.trim());
+    (digits.len() == 6)
+        .then(|| u32::from_str_radix(digits, 16).ok())
+        .flatten()
+}
+
+impl ThemeColors {
+    /// Checks and converts the colors.
+    pub fn palette(&self) -> Result<Palette, String> {
+        let color = |name: &str, text: &str| {
+            parse_hex(text).ok_or_else(|| format!("theme.colors.{name}: '{text}' is not #rrggbb"))
+        };
+        let foreground = color("foreground", &self.foreground)?;
+        let background = color("background", &self.background)?;
+        if self.ansi.len() != 16 {
+            return Err(format!(
+                "theme.colors.ansi needs 16 colors, it has {}",
+                self.ansi.len()
+            ));
+        }
+        let mut ansi = [0; 16];
+        for (slot, text) in ansi.iter_mut().zip(&self.ansi) {
+            *slot = color("ansi", text)?;
+        }
+        Ok(Palette {
+            foreground,
+            background,
+            cursor: self
+                .cursor
+                .as_deref()
+                .map_or(Ok(foreground), |c| color("cursor", c))?,
+            selection: self
+                .selection
+                .as_deref()
+                .map_or(Ok(ansi[4]), |c| color("selection", c))?,
+            ansi,
+        })
+    }
+}
+
 impl Theme {
-    /// Whether to use the light variant, given what the OS prefers (`None` = unknown).
+    /// The terminal palette that replaces hivetty's dark and light ones, if any.
+    pub fn palette(&self) -> Option<Palette> {
+        if self.high_contrast {
+            return Some(Palette::HIGH_CONTRAST);
+        }
+        self.colors.as_ref().and_then(|c| c.palette().ok())
+    }
+
+    /// Whether to use the light variant, given what the OS prefers (`None` = unknown). A custom
+    /// palette decides by its background.
     pub fn is_light(&self, system_light: Option<bool>) -> bool {
+        if let Some(palette) = self.palette() {
+            return palette.is_light();
+        }
         match self.name.as_str() {
             "hivetty-light" | "light" => true,
             "hivetty-dark" | "dark" => false,
@@ -287,7 +393,12 @@ pub fn parse(text: &str) -> (Config, Option<String>) {
         Ok(mut config) => {
             config.font.size = config.font.size.clamp(6.0, 72.0);
             config.terminal.scrollback_lines = config.terminal.scrollback_lines.min(1_000_000);
-            (config, None)
+            // Bad custom colors: report them and keep the built-in palette.
+            let error = config.theme.colors.as_ref().and_then(|c| c.palette().err());
+            if error.is_some() {
+                config.theme.colors = None;
+            }
+            (config, error)
         }
         Err(err) => (
             Config::default(),
@@ -371,6 +482,53 @@ pub fn safe_config() -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_colors_are_checked_and_decide_light_or_dark() {
+        let ansi = vec!["#000000"; 16]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+        let colors = ThemeColors {
+            foreground: "#1f2328".into(),
+            background: "#fdf6e3".into(),
+            cursor: None,
+            selection: None,
+            ansi: ansi.clone(),
+        };
+        let theme = Theme {
+            colors: Some(colors.clone()),
+            ..Theme::default()
+        };
+        assert!(
+            theme.is_light(Some(false)),
+            "a light background wins over the OS"
+        );
+        assert_eq!(theme.palette().unwrap().cursor, 0x1F2328);
+        let high = Theme {
+            high_contrast: true,
+            ..theme
+        };
+        assert_eq!(high.palette(), Some(Palette::HIGH_CONTRAST));
+        assert!(!high.is_light(Some(true)));
+        let bad = ThemeColors {
+            ansi: ansi[..3].to_vec(),
+            ..colors
+        };
+        assert!(bad.palette().unwrap_err().contains("16 colors"));
+        let (config, error) = parse(
+            "[theme.colors]
+foreground = 'red'
+background = '#000000'
+ansi = []
+",
+        );
+        assert!(error.unwrap().contains("foreground"));
+        assert_eq!(
+            config.theme.colors, None,
+            "bad colors fall back to the built-in palette"
+        );
+    }
 
     #[test]
     fn empty_file_gives_defaults() {
