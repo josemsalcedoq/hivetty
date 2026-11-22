@@ -33,3 +33,25 @@ opener = "0.9.0"
 png = "0.18.1"
 pollster = "1.0.3"
 winit = "0.30"
+
+# Packaging with cargo-packager (SP-7, docs/spikes/SP-7.md). Paths are relative to this
+# crate. The binaries come from `target/release`, built before `cargo packager --release`;
+# the formats are chosen per OS on the command line (see .github/workflows/package.yml).
+[package.metadata.packager]
+product-name = "Hivetty"
+identifier = "dev.hivetty.Hivetty"
+description = "GPU-accelerated terminal with a sidebar for coding agents"
+homepage = "https://github.com/josemsalcedoq/hivetty"
+publisher = "hivetty"
+authors = ["hivetty contributors"]
+category = "DeveloperTool"
+binaries = [{ path = "hivetty", main = true }]
+icons = ["packaging/icon.png", "packaging/icon.ico"]
+# Windows only: the bundled ConPTY that `cargo xtask conpty-fetch --profile release`
+# installs next to the exe. On other OSes these globs match nothing. The MSI installs
+# resources next to the executable.
+resources = ["../../target/release/conpty.dll", "../../target/release/OpenConsole.exe"]
+
+[package.metadata.packager.deb]
+package-name = "hivetty"
+section = "x11"

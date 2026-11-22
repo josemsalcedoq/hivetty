@@ -1,0 +1,88 @@
+name: package
+
+# Builds unsigned packages (SP-7): .dmg on macOS, .deb + AppImage on Linux, .msi on Windows.
+# Signing, notarization and publishing come later (release.yml, phase F6).
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: [spike/sp-7-packaging] # TEMP: workflow_dispatch needs the file on main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PACKAGER_VERSION: 0.11.8
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            formats: app,dmg
+            artifacts: target/packages/*.dmg
+          - os: ubuntu-24.04
+            formats: deb,appimage
+            artifacts: |
+              target/packages/*.deb
+              target/packages/*.AppImage
+          - os: windows-latest
+            formats: wix
+            artifacts: target/packages/*.msi
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: package
+
+      - name: Install Linux system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig1-dev libxkbcommon-dev libwayland-dev libx11-dev \
+            libvulkan-dev mesa-vulkan-drivers
+
+      - name: Install cargo-packager
+        shell: bash
+        run: cargo install cargo-packager --version "$CARGO_PACKAGER_VERSION" --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked -p hv-app
+
+      - name: Bundle ConPTY next to the exe
+        if: runner.os == 'Windows'
+        run: cargo xtask conpty-fetch --profile release
+
+      - name: Package
+        shell: bash
+        run: >-
+          cargo packager --release --manifest-path crates/hv-app/Cargo.toml
+          --formats "${{ matrix.formats }}"
+          --out-dir "$GITHUB_WORKSPACE/target/packages"
+
+      - name: List packages
+        shell: bash
+        run: ls -la target/packages
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hivetty-${{ runner.os }}-unsigned
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
