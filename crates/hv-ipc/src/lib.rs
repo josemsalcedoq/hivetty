@@ -336,11 +336,14 @@ fn listen(name: &str) -> io::Result<interprocess::local_socket::Listener> {
 
 #[cfg(unix)]
 fn listen(name: &str) -> io::Result<interprocess::local_socket::Listener> {
-    use interprocess::os::unix::local_socket::ListenerOptionsExt;
-    ListenerOptions::new()
+    use std::os::unix::fs::PermissionsExt;
+    let listener = ListenerOptions::new()
         .name(name.to_fs_name::<GenericFilePath>()?)
-        .mode(0o600)
-        .create_sync()
+        .create_sync()?;
+    // chmod the path (fchmod on a socket is not supported on macOS). The private 0700 directory
+    // already keeps other users out; this narrows it further.
+    std::fs::set_permissions(name, std::fs::Permissions::from_mode(0o600))?;
+    Ok(listener)
 }
 
 /// Default deadline for clients that must not hang.
