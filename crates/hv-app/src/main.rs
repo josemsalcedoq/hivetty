@@ -17,6 +17,7 @@ mod model;
 mod recent;
 mod saved;
 mod statusline;
+mod update;
 mod usage_cli;
 mod welcome;
 mod workspace;

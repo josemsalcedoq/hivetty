@@ -111,6 +111,9 @@ service = ""                     # "ntfy", "telegram" o "webhook"
 url = ""                         # tema de ntfy, sendMessage de Telegram o URL del webhook
 chat_id = ""                     # solo Telegram
 
+[updates]
+check = false                  # avisar de versiones nuevas (consulta GitHub una vez al día; F6-11)
+
 [editor]
 command = "code"               # "Open in editor" del menú de sesión; la carpeta va al final
 

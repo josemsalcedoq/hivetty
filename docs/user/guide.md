@@ -102,6 +102,9 @@ scrollback_lines = 10000
 remember_geometry = true
 restore_layout = true         # reopen tabs, splits and directories
 
+[updates]
+check = false                 # true: once a day, ask GitHub for the latest release and say when there is a newer one
+
 [editor]
 command = "code"              # what "Open in editor" runs, with the folder last ("zed", "subl -n"…)
 
@@ -251,7 +254,7 @@ hivetty usage --csv > usage.csv        # or --json
 
 ## Privacy
 
-hivetty does not send telemetry. It reads your agents' local logs to build the usage dashboard, and the files of your current project to draw the chips. It talks to local processes only through a private socket (a named pipe on Windows) that requires a random per-launch token. It never writes your agents' configuration without showing you the change and asking first.
+hivetty does not send telemetry, and it only goes online for what you turn on (notification forwarding, the update check). It reads your agents' local logs to build the usage dashboard, and the files of your current project to draw the chips. It talks to local processes only through a private socket (a named pipe on Windows) that requires a random per-launch token. It never writes your agents' configuration without showing you the change and asking first.
 
 ## Troubleshooting
 

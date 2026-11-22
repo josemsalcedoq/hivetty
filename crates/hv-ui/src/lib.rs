@@ -129,6 +129,8 @@ pub struct ChromeModel {
     pub rename: Option<String>,
     /// A problem to tell the user about (a bad config), shown over the terminal until closed.
     pub notice: Option<String>,
+    /// A button in the notice (its label), e.g. "Release notes".
+    pub notice_action: Option<String>,
 }
 
 /// What the chrome produced this frame.
@@ -165,6 +167,8 @@ pub struct ChromeOutput {
     pub welcome: Option<Option<WelcomeChoice>>,
     /// The notice was closed.
     pub notice_closed: bool,
+    /// The notice's button was pressed.
+    pub notice_action_clicked: bool,
     /// A hover card is showing (the app refreshes the usage numbers if they are old).
     pub card_shown: bool,
     /// Restore or delete an archived session (index in `archived`).
@@ -269,6 +273,7 @@ impl Chrome {
         let welcome_state = &mut self.welcome;
         let mut welcome = None;
         let mut notice_closed = false;
+        let mut notice_action_clicked = false;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 // Drag its right edge to resize it (S-10).
@@ -325,7 +330,8 @@ impl Chrome {
                 confirmed = confirm_dialog(ui.ctx(), question, button);
             }
             if let Some(text) = &model.notice {
-                notice_closed = notice_bar(ui.ctx(), central, text);
+                (notice_closed, notice_action_clicked) =
+                    notice_bar(ui.ctx(), central, text, model.notice_action.as_deref());
             }
             if let Some((text, needs_focus)) = rename_state.as_mut() {
                 renamed = rename_dialog(ui.ctx(), text, needs_focus);
@@ -388,6 +394,7 @@ impl Chrome {
             renamed,
             welcome,
             notice_closed,
+            notice_action_clicked,
             card_shown,
             archive_restore,
             archive_delete,
@@ -470,9 +477,16 @@ fn state_color(state: RowState) -> Color32 {
     }
 }
 
-/// A warning bar at the top of the terminal area. Returns true when closed.
-fn notice_bar(ctx: &egui::Context, area: egui::Rect, text: &str) -> bool {
+/// A bar at the top of the terminal area, with an optional button. Returns whether it was
+/// closed and whether the button was pressed.
+fn notice_bar(
+    ctx: &egui::Context,
+    area: egui::Rect,
+    text: &str,
+    action: Option<&str>,
+) -> (bool, bool) {
     let mut closed = false;
+    let mut clicked = false;
     let width = (area.width() - 24.0).max(100.0);
     egui::Area::new(egui::Id::unique("notice"))
         .order(egui::Order::Foreground)
@@ -492,11 +506,16 @@ fn notice_bar(ctx: &egui::Context, area: egui::Rect, text: &str) -> bool {
                             if ui.small_button("×").clicked() {
                                 closed = true;
                             }
+                            if let Some(label) = action
+                                && ui.small_button(label).clicked()
+                            {
+                                clicked = true;
+                            }
                         });
                     });
                 });
         });
-    closed
+    (closed, clicked)
 }
 
 /// The rename dialog. Enter saves, Esc cancels.
@@ -757,6 +776,7 @@ mod tests {
             confirm: None,
             rename: None,
             notice: None,
+            notice_action: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
@@ -820,6 +840,7 @@ mod tests {
             confirm: None,
             rename: None,
             notice: None,
+            notice_action: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),

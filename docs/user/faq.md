@@ -11,7 +11,7 @@ A terminal for running many coding agents side by side. It is a regular GPU-acce
 Any program runs in it. hivetty knows Claude Code, Codex, Gemini CLI, opencode, Copilot CLI, Cursor CLI, Amp and Aider by name (`hivetty agents list`). Claude Code, Codex and Gemini CLI report their exact state through hooks. The others get a state guessed from their output, marked with **≈**.
 
 **Does hivetty send my data anywhere?**
-No. There is no telemetry. The usage dashboard reads the logs your agents already keep on your machine. hivetty only talks to the network if you turn on forwarding notifications to your phone (`[notifications.forward]`), and then only to the URL you configure.
+No. There is no telemetry. The usage dashboard reads the logs your agents already keep on your machine. hivetty only talks to the network if you turn on forwarding notifications to your phone (`[notifications.forward]`, only to the URL you configure) or the update check (`[updates] check`, once a day to GitHub's release list; nothing is downloaded).
 
 ## Agents and the sidebar
 

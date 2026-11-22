@@ -44,6 +44,8 @@ pub struct Config {
     pub keybindings: Vec<KeyBinding>,
     /// The editor for "Open in editor".
     pub editor: Editor,
+    /// Looking for new versions.
+    pub updates: Updates,
 }
 
 /// One `[[keybindings]]` entry.
@@ -287,6 +289,15 @@ impl Theme {
             _ => system_light.unwrap_or(false),
         }
     }
+}
+
+/// `[updates]`: whether hivetty looks for new versions (F6-11). Off unless the user turns it
+/// on, since it contacts GitHub.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Updates {
+    /// Once a day, ask GitHub for the latest release and say when there is a newer one.
+    pub check: bool,
 }
 
 /// `[editor]`: what "Open in editor" runs, with the folder as its last argument.

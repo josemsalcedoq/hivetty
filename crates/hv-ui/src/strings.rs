@@ -447,3 +447,13 @@ pub fn usd_cents(cents: u64) -> String {
         format!("${}.{:02}", cents / 100, cents % 100)
     }
 }
+/// Notice when a newer release exists (F6-11).
+pub fn update_available(version: &str) -> String {
+    format!("hivetty {version} is available.")
+}
+/// Notice button: open the release page.
+pub const RELEASE_NOTES: &str = "Release notes";
+/// First-run wizard: the update check.
+pub const WELCOME_UPDATES: &str = "Tell me when a new version is out";
+/// First-run wizard.
+pub const WELCOME_UPDATES_DETAIL: &str = "Once a day hivetty asks GitHub for the latest release. Nothing else is sent, and nothing is downloaded.";

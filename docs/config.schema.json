@@ -42,6 +42,10 @@
     "editor": {
       "description": "The editor for \"Open in editor\".",
       "$ref": "#/$defs/Editor"
+    },
+    "updates": {
+      "description": "Looking for new versions.",
+      "$ref": "#/$defs/Updates"
     }
   },
   "additionalProperties": false,
@@ -357,6 +361,18 @@
           "description": "The program and its arguments, split on spaces (`code`, `zed`, `subl -n`).",
           "type": "string",
           "default": "code"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Updates": {
+      "description": "`[updates]`: whether hivetty looks for new versions (F6-11). Off unless the user turns it\non, since it contacts GitHub.",
+      "type": "object",
+      "properties": {
+        "check": {
+          "description": "Once a day, ask GitHub for the latest release and say when there is a newer one.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false

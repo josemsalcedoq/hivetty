@@ -54,6 +54,8 @@ pub(crate) enum AppEvent {
     FocusPane(PaneId),
     /// The grouped notification was clicked: go to the next session that needs the user.
     FocusNextNeedsYou,
+    /// A newer release exists (F6-11).
+    UpdateAvailable(crate::update::Available),
     /// This is the first run: show the wizard (F6-03).
     Welcome(hv_ui::WelcomeInfo),
     /// Usage logs were read in the background (F5).
@@ -421,6 +423,7 @@ impl Ui {
             confirm: None,
             rename: None,
             notice: None,
+            notice_action: None,
             plan_limits: Vec::new(),
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
@@ -506,6 +509,8 @@ struct App {
     config_notice: Option<String>,
     /// The count last shown on the app icon (F4-19).
     badge: usize,
+    /// A newer release, until the notice is closed (F6-11).
+    update: Option<crate::update::Available>,
     /// Folders sessions were started in, newest first (F4-13).
     recent_folders: Vec<String>,
     /// The worktree of the session being started (F4-22).
@@ -600,6 +605,7 @@ impl App {
             plan_limits: PlanLimits::default(),
             config_notice: None,
             badge: 0,
+            update: None,
             next_worktree: None,
             recent_folders: Vec::new(),
             #[cfg(target_os = "macos")]
@@ -2411,7 +2417,14 @@ impl App {
                     }
                     lines
                 },
-                notice: self.config_notice.clone(),
+                // A config problem first; otherwise a newer release.
+                notice: self.config_notice.clone().or_else(|| {
+                    self.update
+                        .as_ref()
+                        .map(|u| hv_ui::strings::update_available(&u.version))
+                }),
+                notice_action: (self.config_notice.is_none() && self.update.is_some())
+                    .then(|| hv_ui::strings::RELEASE_NOTES.to_owned()),
             },
             cursor,
         );
@@ -2536,7 +2549,17 @@ impl App {
             self.on_session_menu(row, choice);
         }
         if out.notice_closed {
-            self.set_config_notice(None);
+            if self.config_notice.is_some() {
+                self.set_config_notice(None);
+            } else {
+                self.update = None;
+            }
+        }
+        if out.notice_action_clicked
+            && let Some(update) = &self.update
+            && let Err(err) = opener::open(&update.url)
+        {
+            log::warn!("cannot open the release page: {err}");
         }
         if let Some(choice) = out.welcome {
             // The config file it writes is picked up by the config watcher.
@@ -2734,6 +2757,7 @@ struct ChromeExtra<'a> {
     archived: Vec<hv_ui::ArchivedRow>,
     plan_limits: Vec<String>,
     notice: Option<String>,
+    notice_action: Option<String>,
 }
 
 fn run_chrome(
@@ -2750,6 +2774,7 @@ fn run_chrome(
     model.archived = extra.archived;
     model.plan_limits = extra.plan_limits;
     model.notice = extra.notice;
+    model.notice_action = extra.notice_action;
     model.confirm = ui.confirm_close.map(|(id, kind)| match kind {
         Confirm::Close => (
             hv_ui::strings::CONFIRM_CLOSE.to_owned(),
@@ -2863,6 +2888,17 @@ impl ApplicationHandler<AppEvent> for App {
             Ok(ui) => {
                 ui.window.request_redraw();
                 self.ui = Some(ui);
+                // F6-11: a newer release, if the user asked to be told (off the UI thread).
+                if self.config.updates.check && !hv_config::safe_mode() {
+                    let proxy = self.proxy.clone();
+                    let _ = std::thread::Builder::new()
+                        .name("hv-update".into())
+                        .spawn(move || {
+                            if let Some(available) = crate::update::check() {
+                                let _ = proxy.send_event(AppEvent::UpdateAvailable(available));
+                            }
+                        });
+                }
                 // F6-03: the first-run wizard, if this is the first run (checked off the UI
                 // thread). Not in safe mode.
                 if !hv_config::safe_mode() {
@@ -2974,6 +3010,12 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             },
             AppEvent::FocusPane(pane) => self.focus_pane_anywhere(pane),
+            AppEvent::UpdateAvailable(available) => {
+                self.update = Some(available);
+                for ui in self.ui.iter().chain(self.parked.values()) {
+                    ui.window.request_redraw();
+                }
+            }
             AppEvent::FocusNextNeedsYou => self.focus_next_needing_you(),
             AppEvent::Welcome(info) => {
                 if let Some(ui) = &mut self.ui {

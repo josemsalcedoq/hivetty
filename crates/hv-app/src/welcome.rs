@@ -63,8 +63,8 @@ fn agent_changes(installed: bool) -> WelcomeInfo {
 fn config_text(choice: &WelcomeChoice) -> String {
     format!(
         "# Written by the first-run wizard. All settings: docs/user/guide.md\n\n\
-         [theme]\nname = \"{}\"\n\n[shell]\nintegration = {}\n",
-        choice.theme, choice.shell_integration
+         [theme]\nname = \"{}\"\n\n[shell]\nintegration = {}\n\n[updates]\ncheck = {}\n",
+        choice.theme, choice.shell_integration, choice.check_updates
     )
 }
 
@@ -143,11 +143,13 @@ mod tests {
             shell_integration: false,
             install_hooks: false,
             install_statusline: false,
+            check_updates: true,
         };
         let (config, error) = hv_config::parse(&config_text(&choice));
         assert_eq!(error, None);
         assert_eq!(config.theme.name, "hivetty-light");
         assert!(!config.shell.integration);
+        assert!(config.updates.check);
     }
 
     #[test]

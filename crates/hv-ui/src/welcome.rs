@@ -24,6 +24,8 @@ pub struct WelcomeChoice {
     pub shell_integration: bool,
     pub install_hooks: bool,
     pub install_statusline: bool,
+    /// Look for new versions once a day (F6-11).
+    pub check_updates: bool,
 }
 
 /// Wizard state while open.
@@ -34,6 +36,7 @@ pub(crate) struct Welcome {
     shell_integration: bool,
     install_hooks: bool,
     install_statusline: bool,
+    check_updates: bool,
 }
 
 /// What happened this frame.
@@ -58,6 +61,8 @@ impl Welcome {
             shell_integration: true,
             install_hooks: false,
             install_statusline: false,
+            // Off until the user ticks it: it contacts GitHub.
+            check_updates: false,
         }
     }
 
@@ -105,6 +110,14 @@ impl Welcome {
                         );
                         ui.add_space(8.0);
 
+                        ui.checkbox(&mut self.check_updates, strings::WELCOME_UPDATES);
+                        ui.label(
+                            RichText::new(strings::WELCOME_UPDATES_DETAIL)
+                                .size(12.0)
+                                .color(theme::TEXT_MUTED()),
+                        );
+                        ui.add_space(8.0);
+
                         if let Some((path, changes)) = &self.info.hooks {
                             agent_change(
                                 ui,
@@ -142,6 +155,7 @@ impl Welcome {
         WelcomeChoice {
             theme: THEMES[self.theme].0.to_owned(),
             shell_integration: self.shell_integration,
+            check_updates: self.check_updates,
             install_hooks: self.install_hooks
                 && self.info.hooks.as_ref().is_some_and(|(_, c)| !c.is_empty()),
             install_statusline: self.install_statusline
