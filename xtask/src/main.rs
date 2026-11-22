@@ -93,6 +93,51 @@ fn ci() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+    // Code behind cfg(unix) is invisible to clippy on Windows (and vice versa). Check the crates
+    // without native build dependencies for the other OSes too, when their std is installed
+    // (`rustup target add x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc`).
+    let installed = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let host = std::env::consts::OS;
+    for (os, target) in CROSS_TARGETS {
+        if *os == host || !installed.lines().any(|l| l.trim() == *target) {
+            continue;
+        }
+        let mut args = vec!["clippy", "--target", target, "--all-targets", "--locked"];
+        for krate in PORTABLE_CRATES {
+            args.extend(["-p", krate]);
+        }
+        args.extend(["--", "-D", "warnings"]);
+        println!("==> cargo {}", args.join(" "));
+        if !Command::new("cargo")
+            .args(&args)
+            .status()
+            .is_ok_and(|s| s.success())
+        {
+            println!("xtask ci: clippy for {target} failed");
+            return ExitCode::FAILURE;
+        }
+    }
     println!("xtask ci: all checks passed");
     ExitCode::SUCCESS
 }
+
+/// Other-OS targets checked by `xtask ci` when installed: `(std::env::consts::OS, triple)`.
+const CROSS_TARGETS: &[(&str, &str)] = &[
+    ("linux", "x86_64-unknown-linux-gnu"),
+    ("macos", "aarch64-apple-darwin"),
+    ("windows", "x86_64-pc-windows-msvc"),
+];
+
+/// Crates whose dependencies build without a C toolchain for the target.
+const PORTABLE_CRATES: &[&str] = &[
+    "hv-ipc",
+    "hv-platform",
+    "hv-agents",
+    "hv-grid",
+    "hv-config",
+    "hv-usage",
+];
