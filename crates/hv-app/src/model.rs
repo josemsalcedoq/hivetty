@@ -12,6 +12,8 @@ use hv_ui::{RowState, SessionRow, format_elapsed, strings};
 pub(crate) struct SessionInfo {
     /// Last title the program set (OSC 0/2), if any.
     pub(crate) title: Option<String>,
+    /// A title the user gave the session; wins over the program's (S-13).
+    pub(crate) custom_title: Option<String>,
     /// When the session started.
     pub(crate) started: Instant,
     /// Whether the program has exited.
@@ -46,6 +48,7 @@ impl SessionInfo {
     pub(crate) fn new() -> Self {
         Self {
             title: None,
+            custom_title: None,
             started: Instant::now(),
             exited: false,
             agent: Tracker::default(),
@@ -246,8 +249,9 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         .and_then(|p| p.file_name())
         .map_or_else(|| "~".to_owned(), |n| n.to_string_lossy().into_owned());
     let title = info
-        .title
+        .custom_title
         .clone()
+        .or_else(|| info.title.clone())
         .filter(|t| !t.trim().is_empty())
         .or_else(|| info.agent_name.clone())
         .unwrap_or_else(|| strings::DEFAULT_TITLE.to_owned());

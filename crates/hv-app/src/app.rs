@@ -217,6 +217,8 @@ struct Ui {
     title_bar: TitleBarMode,
     /// A pane waiting for the user to confirm closing it.
     confirm_close: Option<PaneId>,
+    /// A pane being renamed.
+    renaming: Option<PaneId>,
     /// Space egui left for the terminals last frame, in physical pixels.
     terminal_area: Option<[f32; 4]>,
     /// Sidebar row index → pane, from the last frame.
@@ -324,13 +326,7 @@ impl Ui {
                 let Some(pane) = self.panes.get(&id) else {
                     continue;
                 };
-                // Group by repository when the chips found one, else by directory.
-                let project_dir = pane
-                    .chips
-                    .values()
-                    .next_back()
-                    .and_then(|info| info.root.clone())
-                    .or_else(|| pane.session.cwd());
+                let project_dir = project_dir(pane);
                 let mut row = crate::model::session_row(&pane.info, project_dir.as_deref());
                 row.focused = Some(id) == focused;
                 row.card = session_card(pane, usage);
@@ -395,6 +391,7 @@ impl Ui {
             title_bar: hv_ui::TitleBar::Native,
             archived: Vec::new(),
             confirm: None,
+            rename: None,
             plan_limits: Vec::new(),
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
@@ -660,6 +657,7 @@ impl App {
             peek: None,
             title_bar,
             confirm_close: None,
+            renaming: None,
             terminal_area: None,
             row_panes: Vec::new(),
             repaint_at: None,
@@ -900,6 +898,11 @@ impl App {
             Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
             Action::NextNeedsYou => self.focus_next_needing_you(),
             Action::ClosePaneById(id) => self.close_pane(id, event_loop),
+            Action::ClosePanesById(ids) => {
+                for id in ids {
+                    self.close_pane(id, event_loop);
+                }
+            }
             Action::ToggleUsage => self.toggle_usage(),
             Action::NewAgentSession => self.open_new_session_dialog(),
             Action::CommandPalette => {
@@ -1032,6 +1035,7 @@ impl App {
                 self.focus_changed();
             }
             hv_ui::SessionMenu::Peek => ui.peek = Some(id),
+            hv_ui::SessionMenu::Rename => ui.renaming = Some(id),
             hv_ui::SessionMenu::Archive => self.archive_pane(id),
             hv_ui::SessionMenu::CopyId => {
                 if let Some(session) = ui
@@ -1079,7 +1083,56 @@ impl App {
             archived_at: jiff::Timestamp::now().as_second(),
         });
         self.save_archive();
-        self.pending_action = Some(Action::ClosePaneById(id));
+        self.queue_close(id);
+    }
+
+    /// Closes a pane after this event (several can be queued).
+    fn queue_close(&mut self, id: PaneId) {
+        match &mut self.pending_action {
+            Some(Action::ClosePanesById(ids)) => ids.push(id),
+            _ => self.pending_action = Some(Action::ClosePanesById(vec![id])),
+        }
+    }
+
+    /// A choice in a project group's context menu (S-14). `row` is one of its sessions.
+    fn on_project_menu(&mut self, row: usize, choice: hv_ui::ProjectMenu) {
+        let Some(ui) = &self.ui else { return };
+        let Some(dir) = ui
+            .row_panes
+            .get(row)
+            .and_then(|id| ui.panes.get(id))
+            .and_then(project_dir)
+        else {
+            return;
+        };
+        match choice {
+            hv_ui::ProjectMenu::NewSession => {
+                self.open_new_session_dialog_in(Some(dir));
+            }
+            hv_ui::ProjectMenu::ShowFolder => {
+                if let Err(err) = opener::open(&dir) {
+                    log::warn!("cannot open {}: {err}", dir.display());
+                }
+            }
+            hv_ui::ProjectMenu::ArchiveFinished => {
+                let finished: Vec<PaneId> = ui
+                    .row_panes
+                    .iter()
+                    .filter_map(|id| Some((*id, ui.panes.get(id)?)))
+                    .filter(|(_, p)| project_dir(p).as_deref() == Some(dir.as_path()))
+                    .filter(|(_, p)| {
+                        crate::model::session_row(&p.info, None).state == hv_ui::RowState::Done
+                    })
+                    .map(|(id, _)| id)
+                    .collect();
+                for id in finished {
+                    self.archive_pane(id);
+                }
+            }
+        }
+        if let Some(ui) = &self.ui {
+            ui.window.request_redraw();
+        }
     }
 
     fn save_archive(&self) {
@@ -1115,12 +1168,16 @@ impl App {
 
     /// Opens the New session dialog with the last agent and the focused pane's folder.
     fn open_new_session_dialog(&mut self) {
+        self.open_new_session_dialog_in(None);
+    }
+
+    /// The New session dialog for `folder`, or the focused pane's folder.
+    fn open_new_session_dialog_in(&mut self, folder: Option<std::path::PathBuf>) {
         let agents = self.agent_choices.clone();
         let agent = self.last_agent.clone();
         let Some(ui) = &mut self.ui else { return };
-        let folder = ui
-            .focused()
-            .and_then(|p| p.session.cwd())
+        let folder = folder
+            .or_else(|| ui.focused().and_then(|p| p.session.cwd()))
             .or_else(home_dir)
             .map(|d| d.to_string_lossy().into_owned())
             .unwrap_or_default();
@@ -2229,6 +2286,20 @@ impl App {
         if let Some((row, choice)) = out.session_menu {
             self.on_session_menu(row, choice);
         }
+        if let Some((row, choice)) = out.project_menu {
+            self.on_project_menu(row, choice);
+        }
+        if let Some(answer) = out.renamed
+            && let Some(ui) = &mut self.ui
+            && let Some(id) = ui.renaming.take()
+        {
+            if let Some(name) = answer
+                && let Some(pane) = ui.panes.get_mut(&id)
+            {
+                pane.info.custom_title = (!name.is_empty()).then_some(name);
+            }
+            ui.window.request_redraw();
+        }
         if let Some(answer) = out.confirmed
             && let Some(ui) = &mut self.ui
             && let Some(id) = ui.confirm_close.take()
@@ -2410,6 +2481,13 @@ fn run_chrome(
     model.confirm = ui
         .confirm_close
         .map(|_| hv_ui::strings::CONFIRM_CLOSE.to_owned());
+    model.rename = ui.renaming.and_then(|id| ui.panes.get(&id)).map(|p| {
+        p.info
+            .custom_title
+            .clone()
+            .or_else(|| p.info.title.clone())
+            .unwrap_or_default()
+    });
     model.title_bar = match ui.title_bar {
         TitleBarMode::Native => hv_ui::TitleBar::Native,
         TitleBarMode::Custom => hv_ui::TitleBar::Custom {
@@ -3074,6 +3152,15 @@ fn session_totals(
         totals.cost = totals.cost.zip(pricing.cost(r)).map(|(a, b)| a + b);
     }
     out
+}
+
+/// The project a pane belongs to: its repository when the chips found one, else its folder.
+fn project_dir(pane: &Pane) -> Option<std::path::PathBuf> {
+    pane.chips
+        .values()
+        .next_back()
+        .and_then(|info| info.root.clone())
+        .or_else(|| pane.session.cwd())
 }
 
 /// The hover card of a pane (S-15): only the lines that are known.

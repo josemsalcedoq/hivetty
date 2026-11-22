@@ -246,6 +246,7 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             // Same title bar as the window would have with the default config.
             archived: Vec::new(),
             confirm: None,
+            rename: None,
             plan_limits: Vec::new(),
             title_bar: if cfg!(windows) {
                 hv_ui::TitleBar::Custom { maximized: false }

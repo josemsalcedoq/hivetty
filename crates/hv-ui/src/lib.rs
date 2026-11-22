@@ -45,11 +45,20 @@ pub struct SessionRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionMenu {
     Focus,
+    Rename,
     Peek,
     Archive,
     CopyId,
     ShowFolder,
     Close,
+}
+
+/// An entry of a project group's context menu (S-14). Collapsing is handled by the sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectMenu {
+    NewSession,
+    ShowFolder,
+    ArchiveFinished,
 }
 
 /// An archived session in the sidebar's Archived section (S-12).
@@ -103,6 +112,8 @@ pub struct ChromeModel {
     pub plan_limits: Vec<String>,
     /// A question to confirm, if one is pending (shown as a small dialog).
     pub confirm: Option<String>,
+    /// A session being renamed: its current title (opens the rename dialog).
+    pub rename: Option<String>,
 }
 
 /// What the chrome produced this frame.
@@ -131,6 +142,10 @@ pub struct ChromeOutput {
     pub peek_action: Option<PeekAction>,
     /// A session menu entry chosen: `(row index, entry)`.
     pub session_menu: Option<(usize, SessionMenu)>,
+    /// A project menu entry chosen: `(index of a row of that project, entry)`.
+    pub project_menu: Option<(usize, ProjectMenu)>,
+    /// The rename dialog closed: `Some(name)` saved (empty = automatic), `None` cancelled.
+    pub renamed: Option<Option<String>>,
     /// A hover card is showing (the app refreshes the usage numbers if they are old).
     pub card_shown: bool,
     /// Restore or delete an archived session (index in `archived`).
@@ -161,6 +176,8 @@ pub struct Chrome {
     peek: Option<peek::Peek>,
     /// A confirmation dialog was shown last frame (it takes the keyboard).
     confirm_open: bool,
+    /// The rename dialog's text and whether its field still needs the focus.
+    rename: Option<(String, bool)>,
 }
 
 /// Sidebar width in points (docs/ui-spec.md 1: 300 px default; narrower until tabs exist).
@@ -179,6 +196,7 @@ impl Chrome {
             new_session: None,
             peek: None,
             confirm_open: false,
+            rename: None,
         }
     }
 
@@ -204,6 +222,8 @@ impl Chrome {
         let mut peek_request = None;
         let mut peek_action = None;
         let mut session_menu = None;
+        let mut project_menu = None;
+        let mut renamed = None;
         let mut card_shown = false;
         let mut archive_restore = None;
         let mut archive_delete = None;
@@ -215,6 +235,12 @@ impl Chrome {
         }
         let peek_state = &mut self.peek;
         self.confirm_open = model.confirm.is_some();
+        match (&model.rename, &self.rename) {
+            (None, _) => self.rename = None,
+            (Some(current), None) => self.rename = Some((current.clone(), true)),
+            _ => {}
+        }
+        let rename_state = &mut self.rename;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 egui::Panel::left("sidebar")
@@ -237,6 +263,7 @@ impl Chrome {
                         new_session_clicked = out.new_session;
                         peek_request = out.peek;
                         session_menu = out.menu;
+                        project_menu = out.project_menu;
                         card_shown = out.card_shown;
                         archive_restore = out.archive_restore;
                         archive_delete = out.archive_delete;
@@ -265,6 +292,9 @@ impl Chrome {
             }
             if let Some(question) = &model.confirm {
                 confirmed = confirm_dialog(ui.ctx(), question);
+            }
+            if let Some((text, needs_focus)) = rename_state.as_mut() {
+                renamed = rename_dialog(ui.ctx(), text, needs_focus);
             }
             if let (Some(view), Some(state)) = (&model.peek, peek_state.as_mut()) {
                 peek_action = state.show(ui.ctx(), view);
@@ -310,6 +340,8 @@ impl Chrome {
             peek_request,
             peek_action,
             session_menu,
+            project_menu,
+            renamed,
             card_shown,
             archive_restore,
             archive_delete,
@@ -348,6 +380,7 @@ impl Chrome {
             || self.new_session.is_some()
             || self.peek.is_some()
             || self.confirm_open
+            || self.rename.is_some()
             || self.tab_bar.editing()
             || self.ctx.egui_wants_keyboard_input()
     }
@@ -371,6 +404,54 @@ fn state_color(state: RowState) -> Color32 {
         RowState::Error => theme::STATE_ERROR(),
         RowState::Idle => theme::TEXT_MUTED(),
     }
+}
+
+/// The rename dialog. Enter saves, Esc cancels.
+fn rename_dialog(
+    ctx: &egui::Context,
+    text: &mut String,
+    needs_focus: &mut bool,
+) -> Option<Option<String>> {
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        return Some(None);
+    }
+    let mut answer = None;
+    let screen = ctx.content_rect();
+    let width = 380.0_f32.min(screen.width() - 32.0);
+    egui::Area::new(egui::Id::unique("rename-session"))
+        .order(egui::Order::Foreground)
+        .fade_in(false)
+        .fixed_pos(egui::pos2(
+            screen.center().x - width / 2.0,
+            screen.top() + 120.0,
+        ))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme::ELEVATED_BG())
+                .stroke(Stroke::new(1.0, theme::BORDER()))
+                .corner_radius(egui::CornerRadius::same(10))
+                .inner_margin(Margin::same(14))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.label(strings::RENAME_SESSION);
+                    let field = ui.add(egui::TextEdit::singleline(text).desired_width(width));
+                    if *needs_focus {
+                        field.request_focus();
+                        *needs_focus = false;
+                    }
+                    let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.add_space(10.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(strings::SAVE).clicked() || enter {
+                            answer = Some(Some(text.trim().to_owned()));
+                        }
+                        if ui.button(strings::CANCEL).clicked() {
+                            answer = Some(None);
+                        }
+                    });
+                });
+        });
+    answer
 }
 
 /// A small yes/no dialog. Enter confirms, Esc cancels.
@@ -580,6 +661,7 @@ mod tests {
             title_bar: TitleBar::Native,
             archived: Vec::new(),
             confirm: None,
+            rename: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
@@ -638,6 +720,7 @@ mod tests {
             title_bar: TitleBar::Native,
             archived: Vec::new(),
             confirm: None,
+            rename: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),

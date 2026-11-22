@@ -347,3 +347,17 @@ pub fn plan_limit(window: &str, percent: f64, resets_in: &str) -> String {
 pub const FIVE_HOUR_LIMIT: &str = "5-hour limit";
 /// Plan window names.
 pub const WEEKLY_LIMIT: &str = "Weekly limit";
+/// Session context menu.
+pub const MENU_RENAME: &str = "Rename…";
+/// Rename dialog.
+pub const RENAME_SESSION: &str = "Rename session (empty = automatic title)";
+/// Rename dialog button.
+pub const SAVE: &str = "Save";
+/// Project context menu (S-14).
+pub const MENU_NEW_SESSION_HERE: &str = "New session here";
+/// Project context menu.
+pub const MENU_COLLAPSE: &str = "Collapse";
+/// Project context menu.
+pub const MENU_EXPAND: &str = "Expand";
+/// Project context menu.
+pub const MENU_ARCHIVE_FINISHED: &str = "Archive finished sessions";

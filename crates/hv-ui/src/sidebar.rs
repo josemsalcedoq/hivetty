@@ -3,7 +3,9 @@
 
 use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Vec2};
 
-use crate::{ArchivedRow, RowState, SessionMenu, SessionRow, elide, state_color, strings, theme};
+use crate::{
+    ArchivedRow, ProjectMenu, RowState, SessionMenu, SessionRow, elide, state_color, strings, theme,
+};
 
 /// Height kept free under the list for the agent dock.
 const DOCK_HEIGHT: f32 = 44.0;
@@ -43,6 +45,8 @@ impl Filter {
 pub(crate) struct Sidebar {
     query: String,
     filter: Filter,
+    /// Projects whose sessions are hidden (S-14).
+    collapsed: std::collections::HashSet<String>,
 }
 
 impl Sidebar {
@@ -128,11 +132,69 @@ impl Sidebar {
                 for project in projects {
                     ui.add_space(6.0);
                     let count = visible.iter().filter(|(_, s)| s.project == project).count();
-                    ui.label(
-                        RichText::new(format!("{project}  ·  {count}"))
-                            .size(12.0)
-                            .color(theme::TEXT_SECONDARY()),
+                    let collapsed = self.collapsed.contains(project);
+                    // Room for the fold arrow, painted below (the fonts have no triangles).
+                    let header = ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("    {project}  ·  {count}"))
+                                .size(12.0)
+                                .color(theme::TEXT_SECONDARY()),
+                        )
+                        .sense(Sense::click()),
                     );
+                    let c = egui::pos2(header.rect.left() + 5.0, header.rect.center().y);
+                    let points = if collapsed {
+                        vec![
+                            c + Vec2::new(-2.0, -4.0),
+                            c + Vec2::new(-2.0, 4.0),
+                            c + Vec2::new(3.0, 0.0),
+                        ]
+                    } else {
+                        vec![
+                            c + Vec2::new(-4.0, -2.0),
+                            c + Vec2::new(4.0, -2.0),
+                            c + Vec2::new(0.0, 3.0),
+                        ]
+                    };
+                    ui.painter().add(egui::Shape::convex_polygon(
+                        points,
+                        theme::TEXT_SECONDARY(),
+                        Stroke::NONE,
+                    ));
+                    let first = visible
+                        .iter()
+                        .find(|(_, s)| s.project == project)
+                        .map(|(i, _)| *i);
+                    let mut toggle = header.clicked();
+                    header.context_menu(|ui| {
+                        let fold = if collapsed {
+                            strings::MENU_EXPAND
+                        } else {
+                            strings::MENU_COLLAPSE
+                        };
+                        if ui.button(strings::MENU_NEW_SESSION_HERE).clicked() {
+                            out.project_menu = first.map(|i| (i, ProjectMenu::NewSession));
+                            ui.close();
+                        }
+                        if ui.button(fold).clicked() {
+                            toggle = true;
+                            ui.close();
+                        }
+                        if ui.button(strings::MENU_SHOW_FOLDER).clicked() {
+                            out.project_menu = first.map(|i| (i, ProjectMenu::ShowFolder));
+                            ui.close();
+                        }
+                        if ui.button(strings::MENU_ARCHIVE_FINISHED).clicked() {
+                            out.project_menu = first.map(|i| (i, ProjectMenu::ArchiveFinished));
+                            ui.close();
+                        }
+                    });
+                    if toggle && !self.collapsed.remove(project) {
+                        self.collapsed.insert(project.to_owned());
+                    }
+                    if collapsed {
+                        continue;
+                    }
                     for (index, row) in visible.iter().filter(|(_, s)| s.project == project) {
                         let (click, card) = session_row(ui, row);
                         out.card_shown |= card;
@@ -205,6 +267,7 @@ pub(crate) struct SidebarOutput {
     pub(crate) new_session: bool,
     pub(crate) peek: Option<usize>,
     pub(crate) menu: Option<(usize, SessionMenu)>,
+    pub(crate) project_menu: Option<(usize, ProjectMenu)>,
     pub(crate) card_shown: bool,
     pub(crate) archive_restore: Option<usize>,
     pub(crate) archive_delete: Option<usize>,
@@ -334,6 +397,7 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> (RowClick, bool) {
     response.context_menu(|ui| {
         for (choice, label) in [
             (SessionMenu::Focus, strings::MENU_FOCUS),
+            (SessionMenu::Rename, strings::MENU_RENAME),
             (SessionMenu::Peek, strings::MENU_PEEK),
             (SessionMenu::Archive, strings::MENU_ARCHIVE),
             (SessionMenu::CopyId, strings::MENU_COPY_ID),
