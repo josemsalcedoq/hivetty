@@ -74,6 +74,8 @@ Los tests end-to-end lanzan `hivetty` con una configuración temporal, crean ses
 
 ## 6. Checklist manual antes de cada release
 
+La versión detallada, paso a paso y con lo que debería verse, está en [checklist.md](checklist.md).
+
 Para **cada** plataforma (macOS arm64, macOS x86_64, Ubuntu 24.04 GNOME Wayland, Ubuntu 24.04 X11, Ubuntu 26.04 KDE Wayland, Windows 10 22H2, Windows 11, Windows 11 ARM):
 
 - [ ] Instalar desde el paquete firmado; arranca sin avisos de seguridad.
