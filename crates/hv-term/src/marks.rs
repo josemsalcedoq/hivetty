@@ -1,9 +1,9 @@
 //! Shell prompt marks (OSC 133, F3-07) anchored to lines of the scrollback.
 //!
 //! Lines are numbered from the top of the scrollback (`history_size + screen row` when the mark
-//! arrived). Known limit: once the scrollback is full, lines that fall off the top shift the
-//! numbering, so marks older than the scrollback drift; they are dropped when they point past
-//! the end.
+//! arrived). Known limit: once the scrollback is full the history size stops growing, so lines
+//! that fall off the top are not counted and every mark recorded after that point drifts up by
+//! the number of lines scrolled since. Marks that point past the end are dropped.
 
 use std::collections::VecDeque;
 

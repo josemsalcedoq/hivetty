@@ -28,6 +28,10 @@ struct Line {
     cwd: Option<String>,
     #[serde(rename = "isMeta")]
     is_meta: Option<bool>,
+    /// Messages of a subagent (Task tool): its prompt is not something the user typed.
+    #[serde(rename = "isSidechain")]
+    is_sidechain: Option<bool>,
+    uuid: Option<String>,
     message: Option<Message>,
 }
 
@@ -39,13 +43,16 @@ struct Message {
     content: Option<serde_json::Value>,
 }
 
+/// The marker the agent writes when the user interrupts it; not a prompt.
+const INTERRUPTED: &str = "[Request interrupted";
+
 /// Whether a user message is a prompt the user typed (a task), not a tool result, a meta
 /// message or the output of a local command.
 fn is_prompt(content: &serde_json::Value) -> bool {
     match content {
         serde_json::Value::String(text) => {
             let text = text.trim_start();
-            !text.is_empty() && !text.starts_with('<')
+            !text.is_empty() && !text.starts_with('<') && !text.starts_with(INTERRUPTED)
         }
         serde_json::Value::Array(items) => {
             let kind = |item: &serde_json::Value| {
@@ -60,7 +67,8 @@ fn is_prompt(content: &serde_json::Value) -> bool {
                     kind(i).as_deref() == Some("text")
                         && i.get("text")
                             .and_then(serde_json::Value::as_str)
-                            .is_some_and(|t| !t.trim_start().starts_with('<'))
+                            .map(str::trim_start)
+                            .is_some_and(|t| !t.starts_with('<') && !t.starts_with(INTERRUPTED))
                 })
         }
         _ => false,
@@ -137,7 +145,12 @@ pub fn parse_activity(
                 .as_ref()
                 .and_then(|m| m.content.as_ref())
                 .is_some_and(is_prompt);
-            if prompt && parsed.is_meta != Some(true) {
+            // A transcript read again (it was rewritten) must not count its prompts twice.
+            let new = parsed
+                .uuid
+                .as_ref()
+                .is_none_or(|id| seen.insert(format!("task:{id}")));
+            if prompt && new && parsed.is_meta != Some(true) && parsed.is_sidechain != Some(true) {
                 tasks.push(Task {
                     agent: "claude-code",
                     timestamp: parsed.timestamp.unwrap_or_default(),
@@ -240,6 +253,28 @@ mod tests {
         assert!(
             b.is_empty(),
             "the same messages in another file must not count twice"
+        );
+    }
+
+    #[test]
+    fn tasks_are_typed_prompts_counted_once() {
+        let input = concat!(
+            r#"{"type":"user","uuid":"u1","sessionId":"s","timestamp":"t","message":{"role":"user","content":"Fix the bug"}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"u2","isSidechain":true,"message":{"role":"user","content":"Search the repo"}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"u3","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"u4","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}"#,
+            "\n",
+        );
+        let mut seen = HashSet::new();
+        let (_, tasks) = parse_activity(input.as_bytes(), &mut seen);
+        assert_eq!(tasks.len(), 1, "only the typed prompt");
+        let (_, again) = parse_activity(input.as_bytes(), &mut seen);
+        assert!(
+            again.is_empty(),
+            "a rewritten transcript must not count twice"
         );
     }
 

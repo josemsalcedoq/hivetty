@@ -1794,7 +1794,8 @@ impl App {
             && !ui.window.is_maximized())
         .then(|| {
             let size = ui.window.inner_size();
-            resize_edge(size.width as f32, size.height as f32, x, y)
+            let band = RESIZE_BAND * ui.window.scale_factor() as f32;
+            resize_edge(size.width as f32, size.height as f32, x, y, band)
         })
         .flatten();
         ui.window.request_redraw(); // egui hover state, divider cursor
@@ -2622,8 +2623,20 @@ impl ApplicationHandler<AppEvent> for App {
             .ui
             .as_ref()
             .is_some_and(|ui| ui.chrome.takes_keyboard() || ui.usage_open);
+        // A press on a resize edge starts the OS resize loop, which swallows the release: egui
+        // must not see the press, or it would think the button stays down.
+        let resize_press = self.mouse.resize_edge.is_some()
+            && matches!(
+                event,
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                }
+            );
         if let Some(ui) = &mut self.ui
             && !matches!(event, WindowEvent::RedrawRequested)
+            && !resize_press
             && (palette_open
                 || !matches!(
                     event,
@@ -3076,12 +3089,20 @@ impl TitleBarMode {
     }
 }
 
-/// The window edge or corner at a point, for resizing a borderless window: a 6 px band.
-fn resize_edge(width: f32, height: f32, x: f32, y: f32) -> Option<winit::window::ResizeDirection> {
+/// Width of the resize band of a borderless window, in logical pixels.
+const RESIZE_BAND: f32 = 6.0;
+
+/// The window edge or corner at a point (physical pixels), for resizing a borderless window.
+fn resize_edge(
+    width: f32,
+    height: f32,
+    x: f32,
+    y: f32,
+    band: f32,
+) -> Option<winit::window::ResizeDirection> {
     use winit::window::ResizeDirection as R;
-    const BAND: f32 = 6.0;
-    let (left, right) = (x < BAND, x >= width - BAND);
-    let (top, bottom) = (y < BAND, y >= height - BAND);
+    let (left, right) = (x < band, x >= width - band);
+    let (top, bottom) = (y < band, y >= height - band);
     match (left, right, top, bottom) {
         (true, _, true, _) => Some(R::NorthWest),
         (_, true, true, _) => Some(R::NorthEast),
@@ -3352,10 +3373,13 @@ mod tests {
     #[test]
     fn edges_and_corners_of_a_borderless_window() {
         use winit::window::ResizeDirection as R;
-        assert_eq!(resize_edge(800.0, 600.0, 2.0, 300.0), Some(R::West));
-        assert_eq!(resize_edge(800.0, 600.0, 798.0, 598.0), Some(R::SouthEast));
-        assert_eq!(resize_edge(800.0, 600.0, 400.0, 1.0), Some(R::North));
-        assert_eq!(resize_edge(800.0, 600.0, 400.0, 300.0), None);
+        assert_eq!(resize_edge(800.0, 600.0, 2.0, 300.0, 6.0), Some(R::West));
+        assert_eq!(
+            resize_edge(800.0, 600.0, 798.0, 598.0, 6.0),
+            Some(R::SouthEast)
+        );
+        assert_eq!(resize_edge(800.0, 600.0, 400.0, 1.0, 6.0), Some(R::North));
+        assert_eq!(resize_edge(800.0, 600.0, 400.0, 300.0, 6.0), None);
         assert_eq!(TitleBarMode::from_config("full"), TitleBarMode::Native);
         assert_eq!(TitleBarMode::from_config("none"), TitleBarMode::Custom);
     }

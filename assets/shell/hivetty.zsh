@@ -43,5 +43,7 @@ __hivetty_preexec() {
 }
 
 autoload -Uz add-zsh-hook
-add-zsh-hook precmd __hivetty_precmd
+# First in the list, so `$?` is still the command's status and not another hook's (themes
+# add their own precmd hooks).
+precmd_functions=(__hivetty_precmd ${precmd_functions:#__hivetty_precmd})
 add-zsh-hook preexec __hivetty_preexec

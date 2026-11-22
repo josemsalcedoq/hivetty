@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Task, UsageRecord};
 
-/// Bump when the stored format changes; older caches are discarded and rebuilt.
-const VERSION: u32 = 1;
+/// Bump when the stored format or what counts as a task changes; older caches are discarded
+/// and rebuilt. 2: subagent prompts and interruptions are no longer tasks.
+const VERSION: u32 = 2;
 /// A cache larger than this is not ours (or is corrupt): rebuild instead of reading it.
 const MAX_CACHE: u64 = 512 << 20;
 
@@ -118,7 +119,8 @@ impl Store {
                 continue;
             };
             let cursor = self.inner.files.entry(path.clone()).or_default();
-            // A file that shrank was rewritten: read it again (duplicates are skipped by id).
+            // A file that shrank was rewritten: read it again (records and tasks seen before
+            // are skipped by id).
             if meta.len() < cursor.offset {
                 cursor.offset = 0;
             }

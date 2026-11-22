@@ -1,6 +1,16 @@
 # hivetty shell integration for fish: prompt marks (OSC 133) and the current directory (OSC 7).
 # hivetty adds this directory to XDG_DATA_DIRS; fish loads vendor_conf.d files at startup.
 
+# Give child processes the user's own XDG_DATA_DIRS back.
+if set -q HIVETTY_XDG_DATA_DIRS
+    if test -n "$HIVETTY_XDG_DATA_DIRS"
+        set -gx XDG_DATA_DIRS $HIVETTY_XDG_DATA_DIRS
+    else
+        set -e XDG_DATA_DIRS
+    end
+    set -e HIVETTY_XDG_DATA_DIRS
+end
+
 status is-interactive; or exit
 set -q __hivetty_loaded; and exit
 set -g __hivetty_loaded 1

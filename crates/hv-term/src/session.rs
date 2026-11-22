@@ -413,6 +413,10 @@ impl Session {
         let history = grid.history_size();
         let end = history + grid.screen_lines();
         let (start, stop) = state.marks.last_output(end)?;
+        let stop = stop.min(end);
+        if stop <= start {
+            return None;
+        }
         let to_line = |abs: usize| {
             Line(i32::try_from(abs).unwrap_or(i32::MAX) - i32::try_from(history).unwrap_or(0))
         };
@@ -510,6 +514,42 @@ fn side(right_half: bool) -> Side {
     if right_half { Side::Right } else { Side::Left }
 }
 
+/// Feeds one chunk of PTY output to the emulator, recording prompt marks on the line the
+/// cursor is on when each mark arrives, and collecting the intercepted events.
+fn feed(
+    term: &mut Term<EventProxy>,
+    processor: &mut Processor<StdSyncHandler>,
+    interceptor: &mut crate::osc::Interceptor,
+    marks: &mut crate::marks::Marks,
+    bytes: &[u8],
+    out: &mut Vec<SessionEvent>,
+) {
+    let history_before = term.grid().history_size();
+    let alt_before = term.mode().contains(TermMode::ALT_SCREEN);
+    // Feed the emulator up to each intercepted sequence, so a prompt mark is recorded
+    // on the line the cursor is on when it arrives.
+    let mut fed = 0;
+    for (end, event) in interceptor.feed_split(bytes) {
+        processor.advance(term, &bytes[fed..end]);
+        fed = end;
+        if let TermEvent::PromptMark { kind, exit_code } = &event
+            && !term.mode().contains(TermMode::ALT_SCREEN)
+        {
+            let row = usize::try_from(term.grid().cursor.point.line.0).unwrap_or(0);
+            marks.record(*kind, *exit_code, term.grid().history_size() + row);
+        }
+        out.push(SessionEvent::Term(event));
+    }
+    processor.advance(term, &bytes[fed..]);
+    // The scrollback was cleared (`clear`, CSI 3 J): the marks point nowhere now. The
+    // alternate screen has no scrollback of its own, so entering or leaving it (less,
+    // vim…) is not a clear.
+    let alt_after = term.mode().contains(TermMode::ALT_SCREEN);
+    if !alt_before && !alt_after && term.grid().history_size() < history_before {
+        marks.clear();
+    }
+}
+
 // Each argument is one piece of state shared with the UI thread; bundling them would only move
 // the list into a struct used in this one place.
 #[allow(clippy::too_many_arguments)]
@@ -544,26 +584,7 @@ fn reader_loop(
                 marks,
                 ..
             } = &mut *guard;
-            let history_before = term.grid().history_size();
-            // Feed the emulator up to each intercepted sequence, so a prompt mark is recorded
-            // on the line the cursor is on when it arrives.
-            let mut fed = 0;
-            for (end, event) in interceptor.feed_split(bytes) {
-                processor.advance(term, &bytes[fed..end]);
-                fed = end;
-                if let TermEvent::PromptMark { kind, exit_code } = &event
-                    && !term.mode().contains(TermMode::ALT_SCREEN)
-                {
-                    let row = usize::try_from(term.grid().cursor.point.line.0).unwrap_or(0);
-                    marks.record(*kind, *exit_code, term.grid().history_size() + row);
-                }
-                out.push(SessionEvent::Term(event));
-            }
-            processor.advance(term, &bytes[fed..]);
-            // The scrollback was cleared (`clear`, CSI 3 J): the marks point nowhere now.
-            if term.grid().history_size() < history_before {
-                marks.clear();
-            }
+            feed(term, processor, interceptor, marks, bytes, &mut out);
             for event in term_events.try_iter() {
                 match event {
                     // Answers to queries (DA, DSR/CSI 6n, colors…). ConPTY blocks until it gets
@@ -617,6 +638,45 @@ mod tests {
         let mut processor: Processor<StdSyncHandler> = Processor::new();
         processor.advance(&mut term, bytes);
         snapshot::take(&term)
+    }
+
+    #[test]
+    fn full_screen_programs_keep_prompt_marks_but_clear_drops_them() {
+        let (tx, _rx) = mpsc::channel();
+        let mut term = Term::new(
+            Config::default(),
+            &Dims { cols: 20, rows: 4 },
+            EventProxy(tx),
+        );
+        let mut processor: Processor<StdSyncHandler> = Processor::new();
+        let mut interceptor = crate::osc::Interceptor::default();
+        let mut marks = crate::marks::Marks::default();
+        let mut out = Vec::new();
+        let mut run = |bytes: &[u8], marks: &mut crate::marks::Marks| {
+            feed(
+                &mut term,
+                &mut processor,
+                &mut interceptor,
+                marks,
+                bytes,
+                &mut out,
+            );
+        };
+        // Enough lines to have scrollback, then a prompt.
+        run(
+            b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n\x1b]133;A\x07$ ",
+            &mut marks,
+        );
+        assert!(marks.last_prompt().is_some());
+        // less / vim: enter and leave the alternate screen.
+        run(b"\x1b[?1049hfull screen\x1b[?1049l", &mut marks);
+        assert!(
+            marks.last_prompt().is_some(),
+            "the alternate screen is not a clear"
+        );
+        // `clear` with CSI 3 J empties the scrollback.
+        run(b"\x1b[H\x1b[2J\x1b[3J", &mut marks);
+        assert_eq!(marks.last_prompt(), None);
     }
 
     #[test]

@@ -129,33 +129,49 @@ pub fn integrate(
             })
         }
         Shell::Bash => {
+            // bash takes long options only before short ones, and a login shell ignores
+            // --rcfile (the script sources the profile itself when HIVETTY_BASH_LOGIN is set).
             let mut login = false;
-            let mut rest = Vec::new();
+            let (mut long, mut short) = (Vec::new(), Vec::new());
             for arg in args {
-                match arg.as_str() {
-                    "-l" | "--login" => login = true,
-                    "-i" => {}
-                    // A command, a script, or files we would override: do not interfere.
-                    a if a == "-c"
-                        || a == "--rcfile"
-                        || a == "--init-file"
-                        || !a.starts_with('-') =>
-                    {
-                        return None;
+                if let Some(name) = arg.strip_prefix("--") {
+                    match name {
+                        "login" => login = true,
+                        // Files we would override, or modes we must not change.
+                        n if n == "rcfile"
+                            || n == "init-file"
+                            || n.starts_with("norc")
+                            || n.starts_with("posix") =>
+                        {
+                            return None;
+                        }
+                        _ => long.push(arg.clone()),
                     }
-                    a if a.starts_with("--norc") || a.starts_with("--posix") => return None,
-                    _ => rest.push(arg.clone()),
+                } else {
+                    // Anything else is a script to run: do not interfere.
+                    let flags = arg.strip_prefix('-').filter(|f| !f.is_empty())?;
+                    // Split clusters like `-il`.
+                    for flag in flags.chars() {
+                        match flag {
+                            'l' => login = true,
+                            'i' => {}
+                            // A command to run (or read from stdin): do not interfere.
+                            'c' | 's' => return None,
+                            other => short.push(format!("-{other}")),
+                        }
+                    }
                 }
             }
             if login {
                 extra.push(("HIVETTY_BASH_LOGIN".to_owned(), "1".to_owned()));
             }
-            let mut new_args = vec![
+            let mut new_args = long;
+            new_args.extend([
                 "--rcfile".to_owned(),
                 scripts.join("hivetty.bash").to_string_lossy().into_owned(),
                 "-i".to_owned(),
-            ];
-            new_args.extend(rest);
+            ]);
+            new_args.extend(short);
             Some(Integration {
                 args: new_args,
                 env: extra,
@@ -169,9 +185,13 @@ pub fn integrate(
                 return None;
             }
             let fish_dir = scripts.join("fish").to_string_lossy().into_owned();
-            let system = env("XDG_DATA_DIRS")
-                .filter(|d| !d.is_empty())
-                .unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned());
+            let user = env("XDG_DATA_DIRS").filter(|d| !d.is_empty());
+            // The vendor script restores the user's value (empty = it was unset).
+            extra.push((
+                "HIVETTY_XDG_DATA_DIRS".to_owned(),
+                user.clone().unwrap_or_default(),
+            ));
+            let system = user.unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned());
             extra.push(("XDG_DATA_DIRS".to_owned(), format!("{fish_dir}:{system}")));
             Some(Integration {
                 args: args.to_vec(),
@@ -203,8 +223,12 @@ pub fn integrate(
             if !lower.iter().any(|a| a == "-noexit") {
                 new_args.push("-NoExit".to_owned());
             }
+            // Dot-source the script's text, not the file: Windows PowerShell's default
+            // execution policy (Restricted) refuses to run .ps1 files but not script blocks.
             new_args.push("-Command".to_owned());
-            new_args.push(format!(". '{script}'"));
+            new_args.push(format!(
+                ". ([ScriptBlock]::Create([IO.File]::ReadAllText('{script}')))"
+            ));
             Some(Integration {
                 args: new_args,
                 env: extra,
@@ -263,6 +287,13 @@ mod tests {
         assert!(i.env.contains(&("HIVETTY_BASH_LOGIN".into(), "1".into())));
         assert!(integrate("bash", &args("--norc"), dir, none).is_none());
         assert!(integrate("bash", &args("script.sh"), dir, none).is_none());
+        // Long options go first; clusters are split.
+        let i = integrate("bash", &args("-ilx --noprofile"), dir, none).unwrap();
+        assert_eq!(i.args[0], "--noprofile");
+        assert_eq!(i.args[1], "--rcfile");
+        assert_eq!(&i.args[3..], ["-i", "-x"]);
+        assert!(i.env.contains(&("HIVETTY_BASH_LOGIN".into(), "1".into())));
+        assert!(integrate("bash", &args("-ic"), dir, none).is_none());
     }
 
     #[test]
@@ -280,7 +311,9 @@ mod tests {
         assert_eq!(i.args[0], "-NoLogo");
         assert_eq!(i.args[1], "-NoExit");
         assert_eq!(i.args[2], "-Command");
-        assert!(i.args[3].starts_with(". '") && i.args[3].contains("o''neil"));
+        assert!(
+            i.args[3].starts_with(". ([ScriptBlock]::Create(") && i.args[3].contains("o''neil")
+        );
         assert!(integrate("pwsh", &args("-File x.ps1"), dir, none).is_none());
         assert!(integrate("powershell", &args("-Command Get-Date"), dir, none).is_none());
     }
