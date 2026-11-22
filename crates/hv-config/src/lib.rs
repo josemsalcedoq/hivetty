@@ -42,6 +42,8 @@ pub struct Config {
     pub theme: Theme,
     /// Shortcut overrides, applied on top of the defaults (docs/keybindings.md).
     pub keybindings: Vec<KeyBinding>,
+    /// The editor for "Open in editor".
+    pub editor: Editor,
 }
 
 /// One `[[keybindings]]` entry.
@@ -283,6 +285,22 @@ impl Theme {
             "hivetty-light" | "light" => true,
             "hivetty-dark" | "dark" => false,
             _ => system_light.unwrap_or(false),
+        }
+    }
+}
+
+/// `[editor]`: what "Open in editor" runs, with the folder as its last argument.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Editor {
+    /// The program and its arguments, split on spaces (`code`, `zed`, `subl -n`).
+    pub command: String,
+}
+
+impl Default for Editor {
+    fn default() -> Self {
+        Self {
+            command: "code".to_owned(),
         }
     }
 }

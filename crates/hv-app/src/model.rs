@@ -18,6 +18,8 @@ pub(crate) struct SessionInfo {
     pub(crate) worktree: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// Remove that worktree when the pane closes (the user asked to).
     pub(crate) remove_worktree: bool,
+    /// The agent's transcript, from its hooks (`transcript_path`).
+    pub(crate) transcript: Option<std::path::PathBuf>,
     /// When the session started.
     pub(crate) started: Instant,
     /// Whether the program has exited.
@@ -60,6 +62,7 @@ impl SessionInfo {
             custom_title: None,
             worktree: None,
             remove_worktree: false,
+            transcript: None,
             started: Instant::now(),
             exited: false,
             agent: Tracker::default(),
@@ -263,6 +266,9 @@ impl SessionInfo {
             }
             return false;
         }
+        if let Some(path) = transcript_path(&hook.payload) {
+            self.transcript = Some(path);
+        }
         let (update, id, name) = match hook.agent.as_str() {
             "claude" | "claude-code" => (
                 hv_agents::claude::from_hook(&hook.event, &hook.payload),
@@ -293,6 +299,17 @@ impl SessionInfo {
         }
         changed
     }
+}
+
+/// The `transcript_path` of a hook payload: an absolute path to a `.jsonl` or `.json` file
+/// (it is only ever shown in the file manager, never opened or run).
+fn transcript_path(payload: &str) -> Option<std::path::PathBuf> {
+    let json: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let path = std::path::PathBuf::from(json.get("transcript_path")?.as_str()?);
+    let log = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("jsonl") || e.eq_ignore_ascii_case("json"));
+    (path.is_absolute() && log).then_some(path)
 }
 
 /// Output this soon after input is its echo or a redraw, not work (F4-09).
@@ -395,6 +412,7 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         agent: info.agent_name.clone().unwrap_or_default(),
         unseen: info.unseen,
         worktree: info.worktree.is_some(),
+        transcript: info.transcript.is_some(),
         card: Vec::new(),
     }
 }
@@ -449,6 +467,28 @@ pub(crate) fn chips(info: &hv_shell::detect::ProjectInfo) -> Vec<hv_render::Chip
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcript_paths_are_absolute_logs_only() {
+        let abs = if cfg!(windows) {
+            "C:/Users/me/.claude/s.jsonl"
+        } else {
+            "/home/me/.claude/s.jsonl"
+        };
+        let payload = |p: &str| format!(r#"{{"transcript_path":"{p}"}}"#);
+        assert_eq!(
+            transcript_path(&payload(abs)),
+            Some(std::path::PathBuf::from(abs))
+        );
+        assert_eq!(transcript_path(&payload("relative/s.jsonl")), None);
+        let exe = if cfg!(windows) {
+            "C:/evil/run.exe"
+        } else {
+            "/tmp/run.sh"
+        };
+        assert_eq!(transcript_path(&payload(exe)), None);
+        assert_eq!(transcript_path("not json"), None);
+    }
     use std::time::Duration;
 
     #[test]

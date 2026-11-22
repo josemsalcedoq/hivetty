@@ -711,26 +711,26 @@ impl App {
             let mut spawned = Vec::new();
             let mode = self.config.agents.restore_on_launch.clone();
             let profiles = self.profiles.clone();
-            let tabs =
-                layout.restore(
-                    |cwd, agent| match self.spawn_pane(&ui, cwd.map(Into::into)) {
-                        Ok((id, mut pane)) => {
-                            // F4-21: reopen the agent session that ran here.
-                            if let Some(command) =
-                                agent.and_then(|a| resume_command(&profiles, a, &mode))
-                            {
-                                pane.pending_command =
-                                    Some((command, Instant::now() + Duration::from_millis(1500)));
-                            }
-                            spawned.push((id, pane));
-                            Some(id)
+            let tabs = layout.restore(|cwd, agent, title| {
+                match self.spawn_pane(&ui, cwd.map(Into::into)) {
+                    Ok((id, mut pane)) => {
+                        pane.info.custom_title = title;
+                        // F4-21: reopen the agent session that ran here.
+                        if let Some(command) =
+                            agent.and_then(|a| resume_command(&profiles, a, &mode))
+                        {
+                            pane.pending_command =
+                                Some((command, Instant::now() + Duration::from_millis(1500)));
                         }
-                        Err(err) => {
-                            log::warn!("cannot reopen a pane: {err:#}");
-                            None
-                        }
-                    },
-                );
+                        spawned.push((id, pane));
+                        Some(id)
+                    }
+                    Err(err) => {
+                        log::warn!("cannot reopen a pane: {err:#}");
+                        None
+                    }
+                }
+            });
             ui.tabs = tabs;
             ui.panes.extend(spawned);
             if !ui.tabs.list.is_empty() {
@@ -988,6 +988,7 @@ impl App {
             };
             crate::saved::PaneState {
                 cwd: pane.session.cwd(),
+                title: pane.info.custom_title.clone(),
                 agent: pane
                     .info
                     .agent_id
@@ -1078,6 +1079,27 @@ impl App {
             }
             hv_ui::SessionMenu::Peek => ui.peek = Some(id),
             hv_ui::SessionMenu::Rename => ui.renaming = Some(id),
+            hv_ui::SessionMenu::Restart => {
+                self.restart_pane(id);
+                return;
+            }
+            hv_ui::SessionMenu::ShowTranscript => {
+                // The folder that holds it: opening a folder never runs anything.
+                if let Some(dir) = ui
+                    .panes
+                    .get(&id)
+                    .and_then(|p| p.info.transcript.as_deref())
+                    .and_then(std::path::Path::parent)
+                    && let Err(err) = opener::open(dir)
+                {
+                    log::warn!("cannot open {}: {err}", dir.display());
+                }
+            }
+            hv_ui::SessionMenu::OpenInEditor => {
+                if let Some(dir) = ui.panes.get(&id).and_then(|p| p.session.cwd()) {
+                    open_in_editor(&self.config.editor.command, dir);
+                }
+            }
             hv_ui::SessionMenu::Archive => self.archive_pane(id),
             hv_ui::SessionMenu::CopyId => {
                 if let Some(session) = ui
@@ -1105,6 +1127,54 @@ impl App {
         if let Some(ui) = &self.ui {
             ui.window.request_redraw();
         }
+    }
+
+    /// Starts a session again in the same place: a new shell in the same folder, the agent
+    /// resumed when its session id is known, the user's name kept (S-13).
+    fn restart_pane(&mut self, id: PaneId) {
+        let Some(ui) = self.ui.take() else { return };
+        let Some(old) = ui.panes.get(&id) else {
+            self.ui = Some(ui);
+            return;
+        };
+        let cwd = old.session.cwd();
+        let agent = old
+            .info
+            .agent_id
+            .clone()
+            .map(|agent| crate::saved::SavedAgent {
+                id: agent,
+                session: old.info.agent.agent_session().map(str::to_owned),
+            });
+        let agent_name = old.info.agent_name.clone();
+        let title = old.info.custom_title.clone();
+        let spawned = self.spawn_pane(&ui, cwd);
+        let mut ui = ui;
+        match spawned {
+            Ok((new_id, mut pane)) => {
+                if let Some(agent) = &agent
+                    && let Some(command) = resume_command(&self.profiles, agent, "always")
+                {
+                    pane.pending_command =
+                        Some((command, Instant::now() + Duration::from_millis(1500)));
+                    pane.info.agent_id = Some(agent.id.clone());
+                    pane.info.agent_name = agent_name;
+                }
+                pane.info.custom_title = title;
+                if let Some(mut old) = ui.panes.remove(&id) {
+                    record_interval(old.info.working_interval(true));
+                    old.session.kill();
+                }
+                ui.panes.insert(new_id, pane);
+                ui.tabs.replace_pane(id, new_id);
+                if self.mouse.pane == Some(id) {
+                    self.mouse.pane = None;
+                }
+            }
+            Err(err) => log::error!("cannot restart the session: {err:#}"),
+        }
+        self.ui = Some(ui);
+        self.focus_changed();
     }
 
     /// Keeps a record of a pane (to restore it later) and closes it (F4-15).
@@ -3366,6 +3436,33 @@ fn countdown(seconds: u64) -> String {
     } else {
         format!("{}m", m.max(1))
     }
+}
+
+/// Opens `dir` with the configured editor (its command split on spaces, the folder last), in
+/// the background. A failure is reported as a notification.
+fn open_in_editor(command: &str, dir: std::path::PathBuf) {
+    let mut parts = command.split_whitespace();
+    let Some(program) = parts.next() else {
+        hv_platform::notify(hv_ui::strings::EDITOR_FAILED, "");
+        return;
+    };
+    let args: Vec<String> = parts.map(str::to_owned).collect();
+    let program = hv_pty::resolve_program(program);
+    let _ = std::thread::Builder::new()
+        .name("hv-editor".into())
+        .spawn(move || {
+            let started = crate::worktree::background(&mut std::process::Command::new(&program))
+                .args(&args)
+                .arg(&dir)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            if let Err(err) = started {
+                log::warn!("cannot start the editor: {err}");
+                hv_platform::notify(hv_ui::strings::EDITOR_FAILED, &err.to_string());
+            }
+        });
 }
 
 /// A desktop notification, also forwarded to the phone when configured (F4-33).

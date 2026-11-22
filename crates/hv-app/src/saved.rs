@@ -39,6 +39,9 @@ pub(crate) enum SavedNode {
         /// The agent that ran there and its own session id, for resuming (F4-21).
         #[serde(default)]
         agent: Option<SavedAgent>,
+        /// A name the user gave the session (S-13).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     },
     Split {
         horizontal: bool,
@@ -62,6 +65,21 @@ pub(crate) struct SavedAgent {
 pub(crate) struct PaneState {
     pub(crate) cwd: Option<PathBuf>,
     pub(crate) agent: Option<SavedAgent>,
+    pub(crate) title: Option<String>,
+}
+
+/// Longest saved session name restored.
+const MAX_TITLE: usize = 200;
+
+/// A saved name as it may be shown: one line, no control characters, not too long.
+fn clean_title(title: &str) -> Option<String> {
+    let clean: String = title
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(MAX_TITLE)
+        .collect();
+    let clean = clean.trim();
+    (!clean.is_empty()).then(|| clean.to_owned())
 }
 
 /// Window size and position in physical pixels.
@@ -107,7 +125,7 @@ impl SavedLayout {
     /// start are left out. Returns no tabs if nothing could start.
     pub(crate) fn restore(
         &self,
-        mut spawn: impl FnMut(Option<&Path>, Option<&SavedAgent>) -> Option<PaneId>,
+        mut spawn: impl FnMut(Option<&Path>, Option<&SavedAgent>, Option<String>) -> Option<PaneId>,
     ) -> Tabs {
         let mut budget = MAX_PANES;
         let mut out = Tabs::default();
@@ -165,6 +183,7 @@ fn save_node(node: &PaneNode, pane: &impl Fn(PaneId) -> PaneState) -> SavedNode 
             SavedNode::Pane {
                 cwd: state.cwd,
                 agent: state.agent,
+                title: state.title,
             }
         }
         PaneNode::Split { axis, ratio, a, b } => SavedNode::Split {
@@ -178,18 +197,19 @@ fn save_node(node: &PaneNode, pane: &impl Fn(PaneId) -> PaneState) -> SavedNode 
 
 fn restore_node(
     node: &SavedNode,
-    spawn: &mut impl FnMut(Option<&Path>, Option<&SavedAgent>) -> Option<PaneId>,
+    spawn: &mut impl FnMut(Option<&Path>, Option<&SavedAgent>, Option<String>) -> Option<PaneId>,
     budget: &mut usize,
 ) -> Option<PaneNode> {
     match node {
-        SavedNode::Pane { cwd, agent } => {
+        SavedNode::Pane { cwd, agent, title } => {
             if *budget == 0 {
                 return None;
             }
             *budget -= 1;
             // A directory that no longer exists falls back to the default one.
             let cwd = cwd.as_deref().filter(|d| d.is_dir());
-            spawn(cwd, agent.as_ref()).map(PaneNode::Leaf)
+            let title = title.as_deref().and_then(clean_title);
+            spawn(cwd, agent.as_ref(), title).map(PaneNode::Leaf)
         }
         SavedNode::Split {
             horizontal,
@@ -252,6 +272,7 @@ mod tests {
                 id: "claude-code".into(),
                 session: Some("abc-123".into()),
             }),
+            title: (id == 3).then(|| "Fix the\nlogin bug".into()),
         });
         saved.active = tabs.active;
         let json = serde_json::to_string(&saved).unwrap();
@@ -261,7 +282,9 @@ mod tests {
         let mut next = 10;
         let mut cwds = Vec::new();
         let mut agents = Vec::new();
-        let restored = back.restore(|cwd, agent| {
+        let mut titles = Vec::new();
+        let restored = back.restore(|cwd, agent, title| {
+            titles.push(title);
             cwds.push(cwd.map(Path::to_path_buf));
             agents.push(agent.cloned());
             next += 1;
@@ -276,6 +299,10 @@ mod tests {
         assert_eq!(restored.list[0].focused, 12);
         assert_eq!(restored.list[0].title_override.as_deref(), Some("api"));
         assert_eq!(cwds, vec![None, Some(std::env::temp_dir()), None]);
+        assert!(
+            titles.contains(&Some("Fix the login bug".to_owned())),
+            "{titles:?}"
+        );
     }
 
     #[test]
@@ -297,10 +324,12 @@ mod tests {
                     a: Box::new(SavedNode::Pane {
                         cwd: Some("/definitely/not/here".into()),
                         agent: None,
+                        title: None,
                     }),
                     b: Box::new(SavedNode::Pane {
                         cwd: None,
                         agent: None,
+                        title: None,
                     }),
                 },
                 focused: 7,
@@ -309,7 +338,7 @@ mod tests {
             window: None,
         };
         let mut calls = 0;
-        let tabs = saved.restore(|cwd, _| {
+        let tabs = saved.restore(|cwd, _, _| {
             assert!(cwd.is_none());
             calls += 1;
             (calls == 2).then_some(42) // the first pane fails to start
@@ -324,6 +353,7 @@ mod tests {
         let mut node = SavedNode::Pane {
             cwd: None,
             agent: None,
+            title: None,
         };
         for _ in 0..200 {
             node = SavedNode::Split {
@@ -333,6 +363,7 @@ mod tests {
                 b: Box::new(SavedNode::Pane {
                     cwd: None,
                     agent: None,
+                    title: None,
                 }),
             };
         }
@@ -347,7 +378,7 @@ mod tests {
             window: None,
         };
         let mut spawned = 0;
-        saved.restore(|_, _| {
+        saved.restore(|_, _, _| {
             spawned += 1;
             Some(spawned)
         });

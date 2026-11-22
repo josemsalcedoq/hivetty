@@ -427,3 +427,11 @@ pub const ESTIMATED: &str = "≈";
 pub const CARD_STATE: &str = "State";
 /// Hover card.
 pub const ESTIMATED_DETAIL: &str = "estimated from its output (install its hooks for exact states)";
+/// Session context menu: start the session again in the same place (S-13).
+pub const MENU_RESTART: &str = "Restart";
+/// Session context menu: the folder of the agent's transcript.
+pub const MENU_SHOW_TRANSCRIPT: &str = "Show transcript";
+/// Session context menu.
+pub const MENU_OPEN_IN_EDITOR: &str = "Open in editor";
+/// Notification when the editor cannot start.
+pub const EDITOR_FAILED: &str = "Cannot start the editor (set [editor] command in config.toml)";

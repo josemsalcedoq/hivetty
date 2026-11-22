@@ -421,14 +421,19 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> (RowClick, bool) {
         for (choice, label) in [
             (SessionMenu::Focus, strings::MENU_FOCUS),
             (SessionMenu::Rename, strings::MENU_RENAME),
+            (SessionMenu::Restart, strings::MENU_RESTART),
             (SessionMenu::Peek, strings::MENU_PEEK),
             (SessionMenu::Archive, strings::MENU_ARCHIVE),
             (SessionMenu::CopyId, strings::MENU_COPY_ID),
             (SessionMenu::ShowFolder, strings::MENU_SHOW_FOLDER),
+            (SessionMenu::OpenInEditor, strings::MENU_OPEN_IN_EDITOR),
+            (SessionMenu::ShowTranscript, strings::MENU_SHOW_TRANSCRIPT),
             (SessionMenu::RemoveWorktree, strings::MENU_REMOVE_WORKTREE),
             (SessionMenu::Close, strings::MENU_CLOSE),
         ] {
-            if choice == SessionMenu::RemoveWorktree && !row.worktree {
+            if choice == SessionMenu::RemoveWorktree && !row.worktree
+                || choice == SessionMenu::ShowTranscript && !row.transcript
+            {
                 continue;
             }
             if ui.button(label).clicked() {

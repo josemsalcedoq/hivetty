@@ -102,6 +102,9 @@ scrollback_lines = 10000
 remember_geometry = true
 restore_layout = true         # reopen tabs, splits and directories
 
+[editor]
+command = "code"              # what "Open in editor" runs, with the folder last ("zed", "subl -n"…)
+
 [theme]
 name = "system"               # "system" follows the OS; "hivetty-dark" or "hivetty-light"
 high_contrast = false         # white on black with saturated colors

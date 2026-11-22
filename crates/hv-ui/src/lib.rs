@@ -41,6 +41,8 @@ pub struct SessionRow {
     pub unseen: bool,
     /// hivetty opened it in a git worktree it created (the menu offers to remove it).
     pub worktree: bool,
+    /// The agent's transcript is known (the menu offers to show it).
+    pub transcript: bool,
     /// Lines of the hover card (S-15): `(label, value)`.
     pub card: Vec<(String, String)>,
 }
@@ -50,6 +52,9 @@ pub struct SessionRow {
 pub enum SessionMenu {
     Focus,
     Rename,
+    Restart,
+    ShowTranscript,
+    OpenInEditor,
     Peek,
     Archive,
     CopyId,
@@ -756,6 +761,7 @@ mod tests {
                 agent: String::new(),
                 unseen: false,
                 worktree: false,
+                transcript: false,
                 card: Vec::new(),
             }],
         };
@@ -818,6 +824,7 @@ mod tests {
                 agent: String::new(),
                 unseen: false,
                 worktree: false,
+                transcript: false,
                 card: Vec::new(),
             }],
         };

@@ -38,6 +38,10 @@
       "items": {
         "$ref": "#/$defs/KeyBinding"
       }
+    },
+    "editor": {
+      "description": "The editor for \"Open in editor\".",
+      "$ref": "#/$defs/Editor"
     }
   },
   "additionalProperties": false,
@@ -333,6 +337,18 @@
           ]
         }
       ]
+    },
+    "Editor": {
+      "description": "`[editor]`: what \"Open in editor\" runs, with the folder as its last argument.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The program and its arguments, split on spaces (`code`, `zed`, `subl -n`).",
+          "type": "string",
+          "default": "code"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -166,6 +166,18 @@ impl PaneNode {
     }
 
     /// Splits `target` in two, putting `new` after it. Returns false if `target` is not here.
+    /// Puts `new` where `old` is. Returns false if `old` is not in this tree.
+    pub(crate) fn replace(&mut self, old: PaneId, new: PaneId) -> bool {
+        match self {
+            Self::Leaf(id) if *id == old => {
+                *id = new;
+                true
+            }
+            Self::Leaf(_) => false,
+            Self::Split { a, b, .. } => a.replace(old, new) || b.replace(old, new),
+        }
+    }
+
     pub(crate) fn split(&mut self, target: PaneId, new: PaneId, axis: Axis) -> bool {
         match self {
             Self::Leaf(id) if *id == target => {
@@ -370,6 +382,19 @@ impl Tabs {
     }
 
     /// Activates the tab holding `pane` and focuses it.
+    /// Puts pane `new` in the place of `old` (restarting a session). False if `old` is in no tab.
+    pub(crate) fn replace_pane(&mut self, old: PaneId, new: PaneId) -> bool {
+        for tab in &mut self.list {
+            if tab.root.replace(old, new) {
+                if tab.focused == old {
+                    tab.focused = new;
+                }
+                return true;
+            }
+        }
+        false
+    }
+
     pub(crate) fn focus_pane(&mut self, pane: PaneId) -> bool {
         let Some(index) = self.list.iter().position(|t| t.root.contains(pane)) else {
             return false;
@@ -391,6 +416,24 @@ impl Tabs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_restarted_pane_takes_the_old_ones_place() {
+        let mut tabs = Tabs::default();
+        tabs.open(1);
+        assert!(
+            tabs.active_mut()
+                .unwrap()
+                .root
+                .split(1, 2, Axis::Horizontal)
+        );
+        tabs.active_mut().unwrap().focused = 2;
+        assert!(tabs.replace_pane(2, 7));
+        let tab = tabs.active().unwrap();
+        assert_eq!(tab.root.panes(), vec![1, 7]);
+        assert_eq!(tab.focused, 7);
+        assert!(!tabs.replace_pane(42, 8));
+    }
 
     const AREA: [f32; 4] = [0.0, 0.0, 1001.0, 601.0];
 
