@@ -41,6 +41,8 @@ fn main() -> ExitCode {
                     "--release",
                     "-p",
                     "hv-term",
+                    "-p",
+                    "hv-render",
                     "--lib",
                     "bench_",
                     "--",

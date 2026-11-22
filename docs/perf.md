@@ -11,9 +11,10 @@ Mediciones con `cargo xtask bench` (build release) y con la app, en el PC de des
 | N-01 arranque hasta el primer frame | ≤ 200 ms | pendiente de medir con instrumentación | ⏳ |
 | N-02 latencia tecla → píxel | p95 ≤ 1 frame + 4 ms | pendiente (Typometer, manual) | ⏳ |
 | N-05/N-06 memoria | ≤ 80 MB base, ≤ 25 MB por panel | pendiente (F2, con varios paneles) | ⏳ |
-| N-07 10 paneles a 60 fps | 60 fps | pendiente (F2) | ⏳ |
+| N-07 10 paneles a 60 fps | 60 fps | **p50 8,2 ms, p95 12,1 ms por frame** con 10 paneles de 47×29 en 1920×1080 y **todas las filas cambiando en cada frame** (peor caso: salida continua en todos). Trabajo de CPU + GPU hasta terminar, sin lectura de vuelta. RTX 4060, DX12 (`bench_ten_panes_continuous_output`, `cargo xtask bench`) | ✅ (con poco margen; ver notas) |
 | N-12 `cat` de 1 GB sin congelar | sí | el lector trabaja en bloques de 64 KiB con locks cortos; pendiente de medir con la app | ⏳ |
 
 ## Notas
 - El interceptor de OSC (un segundo `vte::Parser`) cuesta un 17 %. Optimización posible si hiciera falta: saltarlo cuando el bloque no contiene `ESC` y el parser está en estado base.
 - El texto aún se compone con glyphon por filas, cacheadas por contenido. El atlas propio (F1-09) y el damage tracking fino (F1-12) quedan para cuando las mediciones con muchos paneles lo pidan.
+- N-07: casi todo el tiempo es componer texto en la CPU (cosmic-text rehace cada fila que cambia). Con 10 paneles con salida continua quedan ~4 ms de margen en una GPU de escritorio. Si en portátiles o con iGPU no llega: (1) el atlas propio con glifos cacheados por carácter y estilo (F1-09), sin volver a componer filas ASCII; (2) limitar a 30 fps los paneles sin foco con salida continua; (3) componer en un hilo aparte.

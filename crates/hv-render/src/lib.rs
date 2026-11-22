@@ -1172,6 +1172,7 @@ fn measure_cell(fs: &mut FontSystem, family: &str, font_px: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     fn cell(ch: char, fg: Rgb8) -> SnapCell {
         SnapCell {
@@ -1185,6 +1186,104 @@ mod tests {
             selected: false,
             link: 0,
         }
+    }
+
+    /// F2-10 / N-07: ten visible panes whose every row changes every frame (continuous
+    /// output). Measures CPU work plus GPU completion per frame, without readback.
+    /// Run with `cargo xtask bench`.
+    #[test]
+    #[ignore = "benchmark; run with cargo xtask bench"]
+    fn bench_ten_panes_continuous_output() {
+        let (width, height) = (1920u32, 1080u32);
+        let mut renderer = Renderer::new_headless(width, height, 1.0, 14.0).unwrap();
+        let (cols_n, rows_n) = (5usize, 2usize);
+        let (pw, ph) = (width as f32 / cols_n as f32, height as f32 / rows_n as f32);
+        let areas: Vec<[f32; 4]> = (0..cols_n * rows_n)
+            .map(|i| {
+                let (c, r) = (i % cols_n, i / cols_n);
+                [c as f32 * pw, r as f32 * ph, pw - 1.0, ph - 1.0]
+            })
+            .collect();
+        let (grid_cols, grid_rows) = renderer.grid_size_in(areas[0]);
+        let (cols, rows) = (usize::from(grid_cols), usize::from(grid_rows));
+        let palette = [
+            Rgb8::hex(0xD4D4D4),
+            Rgb8::hex(0x4EC9B0),
+            Rgb8::hex(0xCE9178),
+            Rgb8::hex(0x569CD6),
+        ];
+        let make = |frame: usize, pane: usize| {
+            let mut cells = Vec::with_capacity(rows * cols);
+            for row in 0..rows {
+                let line = frame + row + pane * 7;
+                let text =
+                    format!("[{line:06}] compiling hv-term v0.1 (crates/hv-term) ok ñ 日本 ✓ ");
+                let chars: Vec<char> = text.chars().cycle().take(cols).collect();
+                for (col, ch) in chars.into_iter().enumerate() {
+                    cells.push(cell(ch, palette[(col / 9 + line) % palette.len()]));
+                }
+            }
+            Snapshot {
+                cols,
+                rows,
+                cells,
+                cursor: None,
+                background: Rgb8::hex(0x0C0C0C),
+                foreground: Rgb8::hex(0xD4D4D4),
+                display_offset: 0,
+                hyperlinks: Vec::new(),
+            }
+        };
+        let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bench"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: renderer.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut times = Vec::new();
+        for frame in 0..180 {
+            let snaps: Vec<Snapshot> = (0..areas.len()).map(|p| make(frame, p)).collect();
+            let start = Instant::now();
+            let panes: Vec<PaneView<'_>> = snaps
+                .iter()
+                .zip(&areas)
+                .enumerate()
+                .map(|(i, (snap, area))| PaneView {
+                    id: i as u64,
+                    snap,
+                    area: *area,
+                    focused: i == 0,
+                })
+                .collect();
+            let (extra, encoder) = renderer.encode(&panes, &[], &view, None).unwrap();
+            renderer
+                .queue
+                .submit(extra.into_iter().chain([encoder.finish()]));
+            renderer
+                .device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .unwrap();
+            renderer.atlas.trim();
+            if frame >= 30 {
+                times.push(start.elapsed());
+            }
+        }
+        times.sort();
+        let p50 = times[times.len() / 2];
+        let p95 = times[times.len() * 95 / 100];
+        println!(
+            "10 panes {cols}x{rows}, every row changing: p50 {p50:?}, p95 {p95:?} per frame (budget 16.7 ms) on {}",
+            renderer.adapter_description()
+        );
     }
 
     #[test]
