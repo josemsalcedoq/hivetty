@@ -86,14 +86,41 @@ impl Interceptor {
         self.parser.advance(&mut self.collector, bytes);
         std::mem::take(&mut self.collector.events)
     }
+
+    /// Like [`Interceptor::feed`], with the offset in `bytes` just after each event's sequence,
+    /// so the caller can feed the emulator up to there and know the row it belongs to
+    /// (docs/vt-compliance.md 1, point 3).
+    pub fn feed_split(&mut self, bytes: &[u8]) -> Vec<(usize, TermEvent)> {
+        let mut out = Vec::new();
+        let mut offset = 0;
+        self.collector.stop_on_event = true;
+        while offset < bytes.len() {
+            offset += self
+                .parser
+                .advance_until_terminated(&mut self.collector, &bytes[offset..]);
+            out.extend(
+                std::mem::take(&mut self.collector.events)
+                    .into_iter()
+                    .map(|event| (offset, event)),
+            );
+        }
+        self.collector.stop_on_event = false;
+        out
+    }
 }
 
 #[derive(Default)]
 struct Collector {
     events: Vec<TermEvent>,
+    /// Make `advance_until_terminated` return right after an event.
+    stop_on_event: bool,
 }
 
 impl Perform for Collector {
+    fn terminated(&self) -> bool {
+        self.stop_on_event && !self.events.is_empty()
+    }
+
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
         if params.iter().map(|p| p.len()).sum::<usize>() > MAX_OSC_BYTES {
             return;
@@ -238,6 +265,24 @@ mod tests {
 
     fn feed(bytes: &[u8]) -> Vec<TermEvent> {
         Interceptor::new().feed(bytes)
+    }
+
+    #[test]
+    fn split_reports_where_each_sequence_ends() {
+        let bytes = b"ab\x1b]133;A\x07cd\x1b]133;B\x1b\\ef";
+        let events = Interceptor::new().feed_split(bytes);
+        let offsets: Vec<usize> = events.iter().map(|(o, _)| *o).collect();
+        // Right after the BEL, and at the ESC of an ESC \ terminator (vte dispatches there; the
+        // emulator keeps its own parser state across the split).
+        assert_eq!(offsets, vec![10, 20]);
+        assert!(matches!(
+            events[1].1,
+            TermEvent::PromptMark { kind: 'B', .. }
+        ));
+        // A sequence split across reads still ends at the right place in the second read.
+        let mut i = Interceptor::new();
+        assert!(i.feed_split(b"x\x1b]133;").is_empty());
+        assert_eq!(i.feed_split(b"C\x07yz")[0].0, 2);
     }
 
     #[test]

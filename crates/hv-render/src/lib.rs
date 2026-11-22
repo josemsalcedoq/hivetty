@@ -74,6 +74,10 @@ pub struct PaneView<'a> {
     pub focused: bool,
 }
 
+/// Prompt mark colors: command succeeded, failed, still running or unknown.
+const MARK_OK: Rgb8 = Rgb8::hex(0x3FB950);
+const MARK_FAILED: Rgb8 = Rgb8::hex(0xF85149);
+const MARK_PENDING: Rgb8 = Rgb8::hex(0x6B6B73);
 /// Color of the lines between panes.
 const DIVIDER: Rgb8 = Rgb8::hex(0x26262B);
 /// How much unfocused panes are dimmed (0 = not at all).
@@ -1008,6 +1012,24 @@ impl Renderer {
                 }
             }
         }
+        // Prompt marks (OSC 133) in the left padding, colored by the command's exit code.
+        let pad = (PADDING * self.scale).round();
+        let mark_w = (2.0 * self.scale).round().max(2.0);
+        for mark in &snap.marks {
+            let color = match mark.exit_code {
+                Some(0) => MARK_OK,
+                Some(_) => MARK_FAILED,
+                None => MARK_PENDING,
+            };
+            let y = oy + mark.row as f32 * ch;
+            over.push(Rect::new(
+                ox - pad + (pad - mark_w) / 2.0,
+                y + 1.0,
+                mark_w,
+                ch - 2.0,
+                color,
+            ));
+        }
         if let Some(cursor) = snap.cursor {
             let x = ox + cursor.col as f32 * cw;
             let y = oy + cursor.row as f32 * ch;
@@ -1238,6 +1260,7 @@ mod tests {
                 foreground: Rgb8::hex(0xD4D4D4),
                 display_offset: 0,
                 hyperlinks: Vec::new(),
+                marks: Vec::new(),
             }
         };
         let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {

@@ -99,6 +99,17 @@ pub struct Snapshot {
     pub display_offset: usize,
     /// OSC 8 hyperlink targets referenced by [`SnapCell::link`].
     pub hyperlinks: Vec<String>,
+    /// Shell prompts (OSC 133) on visible rows, for the margin marks.
+    pub marks: Vec<RowMark>,
+}
+
+/// A shell prompt on a visible row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowMark {
+    /// Visible row of the prompt.
+    pub row: usize,
+    /// Exit code of the command run from this prompt; `None` while it runs or if unknown.
+    pub exit_code: Option<i32>,
 }
 
 impl Snapshot {

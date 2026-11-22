@@ -7,7 +7,7 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Rgb};
 
-pub use hv_grid::{Cursor, CursorKind, Rgb8, SnapCell, Snapshot};
+pub use hv_grid::{Cursor, CursorKind, Rgb8, RowMark, SnapCell, Snapshot};
 
 fn rgb8(c: Rgb) -> Rgb8 {
     Rgb8 {
@@ -182,5 +182,6 @@ pub(crate) fn take<T: alacritty_terminal::event::EventListener>(term: &Term<T>) 
         background,
         foreground,
         display_offset,
+        marks: Vec::new(),
     }
 }

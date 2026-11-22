@@ -7,6 +7,7 @@
 
 pub mod input;
 pub mod links;
+mod marks;
 pub mod osc;
 pub mod record;
 pub mod session;

@@ -125,6 +125,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 **Estado (2026-11-22):**
 - ✅ F3-01…F3-04: scripts en `assets/shell/` incrustados en el binario y copiados al directorio de datos (por versión, escritura atómica). zsh por `ZDOTDIR` (restaura el del usuario y carga su `.zshenv`), bash con `--rcfile` que carga antes `/etc/profile` y `~/.bash_profile` o `~/.bashrc` (según sea de login), fish por `XDG_DATA_DIRS` + `vendor_conf.d`, y PowerShell 5.1/7 con `-NoExit -Command . 'hivetty.ps1'` que envuelve `prompt`. Emiten OSC 133 A/B/C/D (con código de salida) y OSC 7 (y OSC 9;9 en PowerShell). Nunca se tocan si la línea de comandos ejecuta un script o un comando. Opción `[shell] integration`. PowerShell probado aquí con el interceptor; zsh, bash y fish faltan por probar en macOS/Linux.
+- ✅ F3-07: las marcas OSC 133 se anclan a su línea (el interceptor parte el bloque en el límite de cada secuencia con `advance_until_terminated` y se lee la fila del cursor). Barra en el margen izquierdo verde, roja o gris según el código de salida; saltar al prompt anterior o siguiente (`Ctrl+Shift+↑/↓`, `⌘↑/↓`); "Copy last command output" en la paleta y el menú. Límite conocido: con el scrollback lleno las marcas más antiguas se desplazan; se borran al limpiar el scrollback.
 - ✅ F3-05 y F3-08: el interceptor ya recibía OSC 7/133, y los paneles nuevos heredan el cwd del panel con foco.
 
 | ID | Tarea | Req | Depende | Tam. |

@@ -18,6 +18,7 @@ use anyhow::Result;
 use hv_pty::{GridSize, Pty, SpawnSpec};
 
 use crate::input::{KeyModes, MouseModes};
+use crate::marks::Marks;
 use crate::osc::{Interceptor, TermEvent};
 use crate::snapshot::{self, Snapshot};
 
@@ -84,6 +85,8 @@ struct TermState {
     processor: Processor<StdSyncHandler>,
     interceptor: Interceptor,
     term_events: Receiver<Event>,
+    /// Shell prompt marks (OSC 133) by scrollback line.
+    marks: Marks,
 }
 
 /// A running terminal session.
@@ -137,6 +140,7 @@ impl Session {
             processor: Processor::new(),
             search: None,
             interceptor: Interceptor::new(),
+            marks: Marks::default(),
             term_events: term_rx,
         }));
         let writer = Arc::new(Mutex::new(io.writer));
@@ -358,7 +362,55 @@ impl Session {
 
     /// Copies the visible screen.
     pub fn snapshot(&self) -> Snapshot {
-        snapshot::take(&lock(&self.state).term)
+        let state = lock(&self.state);
+        let mut snap = snapshot::take(&state.term);
+        if !state.term.mode().contains(TermMode::ALT_SCREEN) {
+            let top = state
+                .term
+                .grid()
+                .history_size()
+                .saturating_sub(snap.display_offset);
+            snap.marks = state.marks.visible(top, snap.rows);
+        }
+        snap
+    }
+
+    /// Scrolls so the previous (`up`) or next shell prompt is at the top of the view.
+    /// Returns false when there is none in that direction.
+    pub fn jump_to_prompt(&self, up: bool) -> bool {
+        let mut state = lock(&self.state);
+        let history = state.term.grid().history_size();
+        let offset = state.term.grid().display_offset();
+        let top = history.saturating_sub(offset);
+        let Some(target) = state.marks.prompt_near(top, up) else {
+            if !up {
+                state.term.scroll_display(Scroll::Bottom);
+            }
+            return false;
+        };
+        let new_offset = history.saturating_sub(target).min(history);
+        let delta = i32::try_from(new_offset).unwrap_or(i32::MAX)
+            - i32::try_from(offset).unwrap_or(i32::MAX);
+        state.term.scroll_display(Scroll::Delta(delta));
+        true
+    }
+
+    /// Text printed by the last command (between its OSC 133 C and D marks), if the shell
+    /// reports them.
+    pub fn last_command_output(&self) -> Option<String> {
+        let state = lock(&self.state);
+        let grid = state.term.grid();
+        let history = grid.history_size();
+        let end = history + grid.screen_lines();
+        let (start, stop) = state.marks.last_output(end)?;
+        let to_line = |abs: usize| {
+            Line(i32::try_from(abs).unwrap_or(i32::MAX) - i32::try_from(history).unwrap_or(0))
+        };
+        let first = Point::new(to_line(start), Column(0));
+        let last = Point::new(to_line(stop - 1), state.term.last_column());
+        let text = state.term.bounds_to_string(first, last);
+        let text = text.trim_end().to_owned();
+        (!text.is_empty()).then_some(text)
     }
 
     /// Modes that affect key encoding.
@@ -479,10 +531,29 @@ fn reader_loop(
                 processor,
                 interceptor,
                 term_events,
+                marks,
                 ..
             } = &mut *guard;
-            out.extend(interceptor.feed(bytes).into_iter().map(SessionEvent::Term));
-            processor.advance(term, bytes);
+            let history_before = term.grid().history_size();
+            // Feed the emulator up to each intercepted sequence, so a prompt mark is recorded
+            // on the line the cursor is on when it arrives.
+            let mut fed = 0;
+            for (end, event) in interceptor.feed_split(bytes) {
+                processor.advance(term, &bytes[fed..end]);
+                fed = end;
+                if let TermEvent::PromptMark { kind, exit_code } = &event
+                    && !term.mode().contains(TermMode::ALT_SCREEN)
+                {
+                    let row = usize::try_from(term.grid().cursor.point.line.0).unwrap_or(0);
+                    marks.record(*kind, *exit_code, term.grid().history_size() + row);
+                }
+                out.push(SessionEvent::Term(event));
+            }
+            processor.advance(term, &bytes[fed..]);
+            // The scrollback was cleared (`clear`, CSI 3 J): the marks point nowhere now.
+            if term.grid().history_size() < history_before {
+                marks.clear();
+            }
             for event in term_events.try_iter() {
                 match event {
                     // Answers to queries (DA, DSR/CSI 6n, colors…). ConPTY blocks until it gets

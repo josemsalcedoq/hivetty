@@ -709,6 +709,18 @@ impl App {
                     copy_selection(&pane.session);
                 }
             }
+            Action::JumpToPrompt(up) => {
+                if let Some(pane) = ui.focused() {
+                    pane.session.jump_to_prompt(up);
+                }
+            }
+            Action::CopyLastOutput => {
+                if let Some(text) = ui.focused().and_then(|p| p.session.last_command_output())
+                    && let Err(err) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text))
+                {
+                    log::warn!("clipboard write failed: {err}");
+                }
+            }
             Action::Paste => {
                 if let Some(pane) = ui.focused() {
                     paste_clipboard(&pane.session);
