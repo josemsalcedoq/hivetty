@@ -7,6 +7,7 @@ mod agents_cli;
 mod app;
 mod archive;
 mod crash;
+mod forward;
 mod headless;
 mod hook;
 mod keymap;

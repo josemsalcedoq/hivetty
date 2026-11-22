@@ -1235,7 +1235,7 @@ impl App {
                 continue;
             }
             if self.notify_group.admit(Instant::now(), window) {
-                hv_platform::notify(&title, &body);
+                notify(config, &title, &body);
             }
         }
     }
@@ -2011,7 +2011,7 @@ impl App {
                                 .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned());
                             let body =
                                 hv_ui::strings::command_finished(&name, exit, &took_text(took));
-                            hv_platform::notify(title, &body);
+                            notify(notes, title, &body);
                             if Some(*id) != focused {
                                 pane.info.unseen = true;
                             }
@@ -2740,7 +2740,8 @@ impl ApplicationHandler<AppEvent> for App {
         let group_window =
             Duration::from_secs(self.config.notifications.group_window_seconds.max(1));
         if let Some(count) = self.notify_group.due_summary(Instant::now(), group_window) {
-            hv_platform::notify(
+            notify(
+                &self.config.notifications,
                 &hv_ui::strings::sessions_need_you(count),
                 hv_ui::strings::NOTIFY_OPEN_HIVETTY,
             );
@@ -2952,6 +2953,12 @@ impl Default for UsageState {
             filter: None,
         }
     }
+}
+
+/// A desktop notification, also forwarded to the phone when configured (F4-33).
+fn notify(config: &hv_config::Notifications, title: &str, body: &str) {
+    hv_platform::notify(title, body);
+    crate::forward::send(&config.forward, title, body);
 }
 
 /// Where the agent time hivetty measures is kept.

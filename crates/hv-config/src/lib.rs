@@ -203,6 +203,21 @@ pub struct Notifications {
     pub on: Vec<String>,
     /// More than three notifications in this many seconds are merged into one.
     pub group_window_seconds: u64,
+    /// Also send them to the phone (F4-33).
+    pub forward: Forward,
+}
+
+/// `[notifications.forward]`: where notifications are also sent. Off by default.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Forward {
+    /// "ntfy", "telegram" or "webhook"; empty = off.
+    pub service: String,
+    /// ntfy topic URL, Telegram `https://api.telegram.org/bot<token>/sendMessage`, or the
+    /// webhook URL.
+    pub url: String,
+    /// Telegram chat id.
+    pub chat_id: String,
 }
 
 impl Default for Notifications {
@@ -213,6 +228,7 @@ impl Default for Notifications {
             long_command_seconds: 30,
             on: vec!["waiting".into(), "done".into(), "error".into()],
             group_window_seconds: 10,
+            forward: Forward::default(),
         }
     }
 }

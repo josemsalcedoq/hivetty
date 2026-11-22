@@ -103,6 +103,11 @@ sound = { waiting = "default", done = "none", error = "default" }
 group_window_seconds = 10
 long_command_seconds = 30      # notificar comandos de shell que tardan más que esto
 
+[notifications.forward]          # reenviar al móvil (F4-33); apagado por defecto; usa curl
+service = ""                     # "ntfy", "telegram" o "webhook"
+url = ""                         # tema de ntfy, sendMessage de Telegram o URL del webhook
+chat_id = ""                     # solo Telegram
+
 [agents]
 auto_detect = true
 detect_interval_ms = 1000

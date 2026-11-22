@@ -101,6 +101,13 @@ on = ["waiting", "done", "error"]
 group_window_seconds = 10
 long_command_seconds = 30     # notify when a shell command runs longer than this; 0 = off
 
+# Also send notifications to your phone (off by default). Uses the system's curl.
+[notifications.forward]
+service = "ntfy"              # "ntfy", "telegram" or "webhook"
+url = "https://ntfy.sh/your-private-topic"
+# Telegram: url = "https://api.telegram.org/bot<token>/sendMessage" and chat_id = "<your chat id>"
+# Webhook: POSTs {"source":"hivetty","title":…,"body":…} as JSON to url
+
 # Change or remove shortcuts. "primary" is ⌘ on macOS and Ctrl elsewhere.
 [[keybindings]]
 key = "primary+shift+t"
