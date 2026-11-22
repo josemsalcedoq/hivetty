@@ -35,6 +35,8 @@ pub(crate) struct Capture {
     pub(crate) split: bool,
     /// Show the command palette (with `ui`).
     pub(crate) palette: bool,
+    /// Show the first-run wizard with sample data (with `ui`).
+    pub(crate) welcome: bool,
     /// Show the usage dashboard with this machine's real data (with `ui`).
     pub(crate) usage: bool,
     /// Use the light theme.
@@ -55,6 +57,7 @@ impl Default for Capture {
             preedit: None,
             split: false,
             palette: false,
+            welcome: false,
             usage: false,
             light: false,
         }
@@ -284,6 +287,20 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
                 .collect();
             chrome.open_palette(items);
             // One frame to lay the palette out and focus it.
+            let warm = chrome.run(raw_input(width, height), &model);
+            pending_textures.append(warm.full.textures_delta);
+        }
+        if opts.welcome {
+            chrome.open_welcome(hv_ui::WelcomeInfo {
+                hooks: Some((
+                    "~/.claude/settings.json".into(),
+                    vec![
+                        "+ SessionStart: 'hivetty' hook --agent claude-code --event SessionStart"
+                            .into(),
+                    ],
+                )),
+                statusline: Some(("~/.claude/settings.json".into(), Vec::new())),
+            });
             let warm = chrome.run(raw_input(width, height), &model);
             pending_textures.append(warm.full.textures_delta);
         }

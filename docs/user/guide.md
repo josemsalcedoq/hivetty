@@ -66,6 +66,8 @@ The command palette lists actions that have no default shortcut too, such as "Co
 
 ## Configuration
 
+The first time hivetty opens (with no `config.toml` yet) it asks for a theme and whether to use shell integration, and, if Claude Code is installed, offers its hooks and statusline, listing the exact changes to `~/.claude/settings.json` first. Nothing is changed unless you tick it. **Skip** leaves everything as it is; the wizard does not come back.
+
 hivetty reads `config.toml` from:
 - Windows: `%APPDATA%\hivetty\config.toml`
 - macOS: `~/Library/Application Support/hivetty/config.toml`

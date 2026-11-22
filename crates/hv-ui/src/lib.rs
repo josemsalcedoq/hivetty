@@ -9,12 +9,14 @@ pub mod strings;
 mod tabs;
 mod theme;
 mod usage;
+mod welcome;
 
 pub use new_session::{AgentChoice, NewSession};
 pub use palette::PaletteItem;
 pub use peek::{PeekAction, PeekView};
 pub use tabs::{TAB_BAR_HEIGHT, TabAction, TabItem, TitleBar};
 pub use usage::{UsageAction, UsageRange, UsageView};
+pub use welcome::{WelcomeChoice, WelcomeInfo};
 
 use egui::{Color32, Margin, Stroke};
 
@@ -146,6 +148,8 @@ pub struct ChromeOutput {
     pub project_menu: Option<(usize, ProjectMenu)>,
     /// The rename dialog closed: `Some(name)` saved (empty = automatic), `None` cancelled.
     pub renamed: Option<Option<String>>,
+    /// The first-run wizard closed: `Some(choice)` or `None` when skipped.
+    pub welcome: Option<Option<WelcomeChoice>>,
     /// A hover card is showing (the app refreshes the usage numbers if they are old).
     pub card_shown: bool,
     /// Restore or delete an archived session (index in `archived`).
@@ -178,6 +182,8 @@ pub struct Chrome {
     confirm_open: bool,
     /// The rename dialog's text and whether its field still needs the focus.
     rename: Option<(String, bool)>,
+    /// The first-run wizard (F6-03).
+    welcome: Option<welcome::Welcome>,
 }
 
 /// Sidebar width in points (docs/ui-spec.md 1: 300 px default; narrower until tabs exist).
@@ -200,6 +206,7 @@ impl Chrome {
             peek: None,
             confirm_open: false,
             rename: None,
+            welcome: None,
         }
     }
 
@@ -244,6 +251,8 @@ impl Chrome {
             _ => {}
         }
         let rename_state = &mut self.rename;
+        let welcome_state = &mut self.welcome;
+        let mut welcome = None;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 // Drag its right edge to resize it (S-10).
@@ -301,6 +310,16 @@ impl Chrome {
             if let Some((text, needs_focus)) = rename_state.as_mut() {
                 renamed = rename_dialog(ui.ctx(), text, needs_focus);
             }
+            if let Some(wizard) = welcome_state.as_mut() {
+                match wizard.show(ui.ctx()) {
+                    welcome::Outcome::Open => {}
+                    welcome::Outcome::Skipped => welcome = Some(None),
+                    welcome::Outcome::Done(choice) => welcome = Some(Some(choice)),
+                }
+                if welcome.is_some() {
+                    *welcome_state = None;
+                }
+            }
             if let (Some(view), Some(state)) = (&model.peek, peek_state.as_mut()) {
                 peek_action = state.show(ui.ctx(), view);
             }
@@ -347,6 +366,7 @@ impl Chrome {
             session_menu,
             project_menu,
             renamed,
+            welcome,
             card_shown,
             archive_restore,
             archive_delete,
@@ -374,6 +394,11 @@ impl Chrome {
     }
 
     /// Opens the New session dialog with an agent (profile id) and folder preselected.
+    /// Shows the first-run wizard (F6-03).
+    pub fn open_welcome(&mut self, info: WelcomeInfo) {
+        self.welcome = Some(welcome::Welcome::new(info));
+    }
+
     pub fn open_new_session(&mut self, agents: Vec<AgentChoice>, agent: &str, folder: String) {
         self.new_session = Some(new_session::Dialog::new(agents, agent, folder));
     }
@@ -386,6 +411,7 @@ impl Chrome {
             || self.peek.is_some()
             || self.confirm_open
             || self.rename.is_some()
+            || self.welcome.is_some()
             || self.tab_bar.editing()
             || self.ctx.egui_wants_keyboard_input()
     }

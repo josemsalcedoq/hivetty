@@ -47,6 +47,8 @@ pub(crate) enum AppEvent {
     AccessKit(egui_winit::accesskit_winit::Event),
     /// A worktree for a new session was created (or failed) in the background (F4-22).
     WorktreeReady(hv_ui::NewSession, Result<std::path::PathBuf, String>),
+    /// This is the first run: show the wizard (F6-03).
+    Welcome(hv_ui::WelcomeInfo),
     /// Usage logs were read in the background (F5).
     UsageLoaded(Arc<UsageData>),
     /// The agent detected in a pane's process tree changed (F4-03).
@@ -2296,6 +2298,16 @@ impl App {
         if let Some((row, choice)) = out.session_menu {
             self.on_session_menu(row, choice);
         }
+        if let Some(choice) = out.welcome {
+            // The config file it writes is picked up by the config watcher.
+            let _ = std::thread::Builder::new()
+                .name("hv-welcome".into())
+                .spawn(move || {
+                    if let Err(err) = crate::welcome::finish(choice.as_ref()) {
+                        log::warn!("first-run setup: {err}");
+                    }
+                });
+        }
         if let Some((row, choice)) = out.project_menu {
             self.on_project_menu(row, choice);
         }
@@ -2579,6 +2591,19 @@ impl ApplicationHandler<AppEvent> for App {
             Ok(ui) => {
                 ui.window.request_redraw();
                 self.ui = Some(ui);
+                // F6-03: the first-run wizard, if this is the first run (checked off the UI
+                // thread). Not in safe mode.
+                if !hv_config::safe_mode() {
+                    let proxy = self.proxy.clone();
+                    let _ =
+                        std::thread::Builder::new()
+                            .name("hv-welcome".into())
+                            .spawn(move || {
+                                if let Some(info) = crate::welcome::prepare() {
+                                    let _ = proxy.send_event(AppEvent::Welcome(info));
+                                }
+                            });
+                }
             }
             Err(err) => {
                 self.fatal = Some(err);
@@ -2674,6 +2699,12 @@ impl ApplicationHandler<AppEvent> for App {
                     hv_platform::notify(hv_ui::strings::WORKTREE_FAILED, &err);
                 }
             },
+            AppEvent::Welcome(info) => {
+                if let Some(ui) = &mut self.ui {
+                    ui.chrome.open_welcome(info);
+                    ui.window.request_redraw();
+                }
+            }
             AppEvent::UsageLoaded(data) => {
                 self.usage.loading = false;
                 self.usage.view = Some(Arc::new(

@@ -17,6 +17,7 @@ mod model;
 mod saved;
 mod statusline;
 mod usage_cli;
+mod welcome;
 mod workspace;
 mod worktree;
 
@@ -48,6 +49,7 @@ OPTIONS:
     --preedit <TEXT>     With --screenshot, draw TEXT as input-method composition at the cursor
     --split              With --screenshot, run the program in two panes side by side
     --palette            With --screenshot --ui, show the command palette
+    --welcome            With --screenshot --ui, show the first-run wizard (sample data)
     --usage              With --screenshot --ui, show the usage dashboard (this machine's logs)
     --light              With --screenshot, use the light theme
     --high-contrast      With --screenshot, use the high-contrast palette
@@ -95,6 +97,7 @@ enum Command {
         preedit: Option<String>,
         split: bool,
         palette: bool,
+        welcome: bool,
         usage: bool,
         light: bool,
     },
@@ -118,6 +121,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut preedit = None;
     let mut split = false;
     let mut palette = false;
+    let mut welcome = false;
     let mut usage_flag = false;
     let mut light = false;
     let mut record: Option<PathBuf> = None;
@@ -177,6 +181,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             }
             "--split" => split = true,
             "--palette" => palette = true,
+            "--welcome" => welcome = true,
             "--usage" => usage_flag = true,
             "--light" => light = true,
             "--preedit" => {
@@ -210,6 +215,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             preedit,
             split,
             palette,
+            welcome,
             usage: usage_flag,
             light,
         },
@@ -338,6 +344,7 @@ fn main() -> ExitCode {
             preedit,
             split,
             palette,
+            welcome,
             usage,
             light,
         } => {
@@ -352,6 +359,7 @@ fn main() -> ExitCode {
                 preedit,
                 split,
                 palette,
+                welcome,
                 usage,
                 light,
                 ..headless::Capture::default()

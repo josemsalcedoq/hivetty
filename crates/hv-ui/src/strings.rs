@@ -365,3 +365,34 @@ pub const MENU_ARCHIVE_FINISHED: &str = "Archive finished sessions";
 pub fn runs_out_in(when: &str) -> String {
     format!("at this pace, runs out in {when}")
 }
+/// First-run wizard (F6-03).
+pub const WELCOME_TITLE: &str = "Welcome to hivetty";
+/// First-run wizard.
+pub const WELCOME_INTRO: &str =
+    "A few choices to start. You can change all of them later in config.toml.";
+/// First-run wizard.
+pub const WELCOME_THEME: &str = "Theme";
+/// First-run wizard: theme options.
+pub const THEME_SYSTEM: &str = "Follow the system";
+/// First-run wizard: theme options.
+pub const THEME_DARK: &str = "Dark";
+/// First-run wizard: theme options.
+pub const THEME_LIGHT: &str = "Light";
+/// First-run wizard.
+pub const WELCOME_SHELL: &str = "Shell integration";
+/// First-run wizard.
+pub const WELCOME_SHELL_DETAIL: &str = "Prompt marks, the current folder and project chips. hivetty loads a small script when your shell starts; your own files are not changed.";
+/// First-run wizard.
+pub const WELCOME_HOOKS: &str = "Live state of Claude Code sessions (hooks)";
+/// First-run wizard.
+pub const WELCOME_STATUSLINE: &str = "Context use and plan limits (Claude Code statusline)";
+/// First-run wizard.
+pub const WELCOME_ALREADY: &str = "already set up";
+/// First-run wizard: the file the agent changes go to.
+pub fn welcome_changes(path: &str) -> String {
+    format!("Changes to {path} (a backup is kept next to it):")
+}
+/// First-run wizard.
+pub const WELCOME_START: &str = "Start";
+/// First-run wizard.
+pub const WELCOME_SKIP: &str = "Skip";

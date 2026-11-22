@@ -94,7 +94,7 @@ pub(crate) fn run(command: &AgentsCommand) -> Result<()> {
     }
 }
 
-fn settings_path() -> Result<std::path::PathBuf> {
+pub(crate) fn settings_path() -> Result<std::path::PathBuf> {
     let home = std::env::var_os("USERPROFILE")
         .filter(|_| cfg!(windows))
         .or_else(|| std::env::var_os("HOME"))
