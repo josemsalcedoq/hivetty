@@ -194,6 +194,18 @@ impl fmt::Debug for Renderer {
     }
 }
 
+/// Use the software adapter (WARP, llvmpipe) instead of the GPU (safe mode, N-23).
+static SOFTWARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Makes every renderer created from now on use the software adapter.
+pub fn set_software(on: bool) {
+    SOFTWARE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn software() -> bool {
+    SOFTWARE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Renderer {
     /// Creates a renderer for `window` (physical size `width` x `height`, DPI `scale`).
     pub fn new<W>(
@@ -216,7 +228,7 @@ impl Renderer {
             .context("cannot create GPU surface")?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,
-            force_fallback_adapter: false,
+            force_fallback_adapter: software(),
             compatible_surface: Some(&surface),
             ..Default::default()
         }))
@@ -259,6 +271,7 @@ impl Renderer {
         ));
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,
+            force_fallback_adapter: software(),
             ..Default::default()
         }))
         .context("no GPU adapter")?;

@@ -343,6 +343,31 @@ fn debounce(rx: &Receiver<()>, on_change: &impl Fn()) {
     }
 }
 
+/// Safe mode (`--safe` or `HIVETTY_SAFE=1`, N-23): default settings, no shell integration, no
+/// layout restore and the software renderer, to start even when the config or the GPU is the
+/// problem.
+static SAFE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Turns safe mode on for this process.
+pub fn set_safe_mode() {
+    SAFE_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether safe mode is on (the flag or `HIVETTY_SAFE=1`).
+pub fn safe_mode() -> bool {
+    SAFE_MODE.load(std::sync::atomic::Ordering::Relaxed)
+        || std::env::var_os("HIVETTY_SAFE").is_some_and(|v| v == "1")
+}
+
+/// The settings used in safe mode.
+pub fn safe_config() -> Config {
+    let mut config = Config::default();
+    config.shell.integration = false;
+    config.shell.chips = false;
+    config.window.restore_layout = false;
+    config
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

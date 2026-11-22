@@ -51,6 +51,8 @@ OPTIONS:
     --usage              With --screenshot --ui, show the usage dashboard (this machine's logs)
     --light              With --screenshot, use the light theme
     --doctor             Print diagnostic information about this system
+    --safe               Start with default settings, no shell integration and the software
+                         renderer (also HIVETTY_SAFE=1)
     usage [--json|--csv] [--project NAME] [--days N]
                          Print token usage per day from the agents' local logs
     agents [list]        List the coding agents hivetty knows and which are installed
@@ -70,6 +72,7 @@ OPTIONS:
 
 ENVIRONMENT:
     HIVETTY_LOG          Log level (error, warn, info, debug, trace). Default: warn
+    HIVETTY_SAFE=1       Same as --safe
 ";
 
 /// What the command line asked for.
@@ -224,6 +227,16 @@ fn main() -> ExitCode {
     )
     .init();
     crash::install();
+    // `--safe` applies to every command (N-23).
+    let args: Vec<String> = if args.iter().any(|a| a == "--safe") {
+        hv_config::set_safe_mode();
+        args.into_iter().filter(|a| a != "--safe").collect()
+    } else {
+        args
+    };
+    if hv_config::safe_mode() {
+        hv_render::set_software(true);
+    }
     let parsed = parse_args(&args);
     // Everything except opening the window prints to the console; in Windows release builds
     // (GUI subsystem) that needs the parent console attached first.
@@ -311,6 +324,12 @@ fn doctor_report() -> String {
     );
     if cfg!(windows) {
         report.push_str(&format!("conpty: {}\n", conpty_status()));
+    }
+    if hv_config::safe_mode() {
+        report.push_str(
+            "safe mode: on (default settings, no shell integration, software renderer)
+",
+        );
     }
     match hv_config::default_path() {
         Some(path) => {

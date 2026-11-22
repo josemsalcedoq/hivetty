@@ -182,6 +182,9 @@ pub struct Chrome {
 
 /// Sidebar width in points (docs/ui-spec.md 1: 300 px default; narrower until tabs exist).
 const SIDEBAR_WIDTH: f32 = 260.0;
+/// Narrowest and widest the sidebar can be dragged.
+const SIDEBAR_MIN: f32 = 200.0;
+const SIDEBAR_MAX: f32 = 480.0;
 
 impl Chrome {
     /// Creates the chrome with hivetty's dark theme.
@@ -243,9 +246,11 @@ impl Chrome {
         let rename_state = &mut self.rename;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
+                // Drag its right edge to resize it (S-10).
                 egui::Panel::left("sidebar")
-                    .exact_size(SIDEBAR_WIDTH)
-                    .resizable(false)
+                    .default_size(SIDEBAR_WIDTH)
+                    .size_range(SIDEBAR_MIN..=SIDEBAR_MAX)
+                    .resizable(true)
                     .frame(
                         egui::Frame::new()
                             .fill(theme::SIDEBAR_BG())

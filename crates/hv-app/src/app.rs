@@ -73,10 +73,18 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
     let event_loop = EventLoop::<AppEvent>::with_user_event()
         .build()
         .context("cannot start event loop")?;
-    let config_path = hv_config::default_path();
-    let (config, config_error) = config_path
-        .as_deref()
-        .map_or_else(|| (hv_config::Config::default(), None), hv_config::load);
+    let safe = hv_config::safe_mode();
+    // Safe mode ignores the config file (and does not watch it).
+    let config_path = hv_config::default_path().filter(|_| !safe);
+    let (config, config_error) = if safe {
+        log::warn!("safe mode: default settings, no shell integration, software renderer");
+        hv_render::set_software(true);
+        (hv_config::safe_config(), None)
+    } else {
+        config_path
+            .as_deref()
+            .map_or_else(|| (hv_config::Config::default(), None), hv_config::load)
+    };
     if let Some(err) = config_error {
         log::warn!("{err}");
     }
