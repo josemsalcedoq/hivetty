@@ -339,9 +339,13 @@ pub fn observed(duration: &str) -> String {
 }
 /// Hover card: context window used.
 pub const CARD_CONTEXT: &str = "Context";
-/// Plan limits in the usage dashboard (U-65): `5-hour limit 24% · resets in 2h 10m`.
-pub fn plan_limit(window: &str, percent: f64, resets_in: &str) -> String {
-    format!("{window} {percent:.0}% · resets in {resets_in}")
+/// Plan limits in the usage dashboard (U-65): `Codex · 5-hour limit 24% · resets in 2h 10m`.
+pub fn plan_limit(agent: &str, window: &str, percent: f64, resets_in: &str) -> String {
+    format!("{agent} · {window} {percent:.0}% · resets in {resets_in}")
+}
+/// A plan window of another length: `8-hour limit`.
+pub fn hours_limit(hours: u64) -> String {
+    format!("{hours}-hour limit")
 }
 /// Plan window names.
 pub const FIVE_HOUR_LIMIT: &str = "5-hour limit";

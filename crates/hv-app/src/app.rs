@@ -2244,7 +2244,14 @@ impl App {
                 usage,
                 usage_data: usage_data.as_deref(),
                 archived,
-                plan_limits: self.plan_limits.lines(),
+                plan_limits: {
+                    // The statusline's (Claude Code) and the ones Codex writes in its logs.
+                    let mut lines = self.plan_limits.lines();
+                    if let Some(data) = &self.usage.data {
+                        lines.extend(data.limit_lines());
+                    }
+                    lines
+                },
                 notice: self.config_notice.clone(),
             },
             cursor,
@@ -3089,6 +3096,8 @@ pub(crate) struct UsageData {
     sessions: HashMap<String, SessionTotals>,
     /// Agent time hivetty measured (F4-23).
     observed: Vec<hv_usage::observed::Interval>,
+    /// Codex's plan windows, from its newest log (F5-19).
+    codex_limits: Vec<hv_usage::codex::RateWindow>,
     read_at: Option<Instant>,
 }
 
@@ -3134,6 +3143,9 @@ impl UsageData {
             observed: observed_path()
                 .map(|p| hv_usage::observed::load(&p))
                 .unwrap_or_default(),
+            codex_limits: hv_usage::codex::default_root()
+                .map(|root| hv_usage::codex::latest_rate_limits(&root))
+                .unwrap_or_default(),
             read_at: Some(Instant::now()),
         }
     }
@@ -3141,6 +3153,21 @@ impl UsageData {
     /// The records and tasks read.
     pub(crate) fn parts(&self) -> (&[hv_usage::UsageRecord], &[hv_usage::Task]) {
         (&self.records, &self.tasks)
+    }
+
+    /// The plan windows found in the agents' logs (Codex), worded for the dashboard.
+    pub(crate) fn limit_lines(&self) -> Vec<String> {
+        self.codex_limits
+            .iter()
+            .filter_map(|w| {
+                limit_line(
+                    "Codex",
+                    w.used_percent,
+                    w.resets_at,
+                    w.window_minutes.saturating_mul(60),
+                )
+            })
+            .collect()
     }
 
     /// The user's price table read with the logs.
@@ -3245,27 +3272,35 @@ impl PlanLimits {
 
     /// The windows that have not reset yet, worded for the dashboard.
     fn lines(&self) -> Vec<String> {
-        let now = jiff::Timestamp::now().as_second();
-        [
-            (hv_ui::strings::FIVE_HOUR_LIMIT, self.five_hour),
-            (hv_ui::strings::WEEKLY_LIMIT, self.seven_day),
-        ]
-        .into_iter()
-        .zip([5 * 3600, 7 * 86_400])
-        .filter_map(|((name, limit), window)| {
-            let limit = limit?;
-            let left = u64::try_from(limit.resets_at - now)
-                .ok()
-                .filter(|s| *s > 0)?;
-            let mut line =
-                hv_ui::strings::plan_limit(name, limit.used_percentage, &countdown(left));
-            if let Some(out) = runs_out_in(limit.used_percentage, window, left) {
-                line = format!("{line} · {}", hv_ui::strings::runs_out_in(&countdown(out)));
-            }
-            Some(line)
-        })
-        .collect()
+        [(self.five_hour, 5 * 3600), (self.seven_day, 7 * 86_400)]
+            .into_iter()
+            .filter_map(|(limit, window)| {
+                let limit = limit?;
+                limit_line(
+                    "Claude Code",
+                    limit.used_percentage,
+                    limit.resets_at,
+                    window,
+                )
+            })
+            .collect()
     }
+}
+
+/// One plan window worded for the dashboard, if it has not reset yet. `window` in seconds.
+fn limit_line(agent: &str, used: f64, resets_at: i64, window: u64) -> Option<String> {
+    let now = jiff::Timestamp::now().as_second();
+    let left = u64::try_from(resets_at - now).ok().filter(|s| *s > 0)?;
+    let name = match window {
+        18_000 => hv_ui::strings::FIVE_HOUR_LIMIT.to_owned(),
+        604_800 => hv_ui::strings::WEEKLY_LIMIT.to_owned(),
+        other => hv_ui::strings::hours_limit(other / 3600),
+    };
+    let mut line = hv_ui::strings::plan_limit(agent, &name, used, &countdown(left));
+    if let Some(out) = runs_out_in(used, window, left) {
+        line = format!("{line} · {}", hv_ui::strings::runs_out_in(&countdown(out)));
+    }
+    Some(line)
 }
 
 /// Seconds until a plan window reaches 100 % at the pace so far, when that is before it resets.
@@ -3871,7 +3906,7 @@ mod tests {
         let lines = limits.lines();
         assert_eq!(lines.len(), 1);
         assert!(
-            lines[0].starts_with("5-hour limit 24% · resets in 2h 1"),
+            lines[0].starts_with("Claude Code · 5-hour limit 24% · resets in 2h 1"),
             "{}",
             lines[0]
         );

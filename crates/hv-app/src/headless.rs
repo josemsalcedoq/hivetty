@@ -234,8 +234,10 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             .chord_for(&crate::keymap::Action::NewAgentSession)
             .map(crate::keymap::Chord::pretty)
             .unwrap_or_default();
+        let mut plan_limits = Vec::new();
         let usage = opts.usage.then(|| {
             let data = crate::app::UsageData::read();
+            plan_limits = data.limit_lines();
             hv_ui::UsageView::Ready(
                 hv_ui::UsageRange::Month,
                 std::sync::Arc::new(data.dashboard(hv_ui::UsageRange::Month, None)),
@@ -251,7 +253,7 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             confirm: None,
             rename: None,
             notice: None,
-            plan_limits: Vec::new(),
+            plan_limits,
             title_bar: if cfg!(windows) {
                 hv_ui::TitleBar::Custom { maximized: false }
             } else if cfg!(target_os = "macos") {
