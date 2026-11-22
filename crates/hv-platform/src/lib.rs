@@ -104,10 +104,48 @@ fn wait_bounded(wait: impl FnOnce()) {
     WAITING.fetch_sub(1, Ordering::AcqRel);
 }
 
+/// hivetty's AppUserModelID, as the installer registers it (F6-09).
+#[cfg(windows)]
+const APP_USER_MODEL_ID: &str = "dev.hivetty.Hivetty";
+
+/// The AppUserModelID to send toasts as, when the installer registered it. Windows shows no
+/// toast at all for an unregistered ID, so a build that was not installed keeps the default
+/// (PowerShell's).
+#[cfg(windows)]
+fn registered_app_id() -> Option<&'static str> {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::System::Registry::{
+        HKEY, HKEY_CLASSES_ROOT, KEY_READ, RegCloseKey, RegOpenKeyExW,
+    };
+    static REGISTERED: OnceLock<bool> = OnceLock::new();
+    let registered = *REGISTERED.get_or_init(|| {
+        let path: Vec<u16> = format!("AppUserModelId\\{APP_USER_MODEL_ID}")
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let mut key: HKEY = std::ptr::null_mut();
+        // SAFETY: `path` is a NUL-terminated UTF-16 string that outlives the call, `key` is a
+        // valid out pointer, and a key that was opened is closed right away.
+        unsafe {
+            let opened =
+                RegOpenKeyExW(HKEY_CLASSES_ROOT, path.as_ptr(), 0, KEY_READ, &mut key) == 0;
+            if opened {
+                RegCloseKey(key);
+            }
+            opened
+        }
+    });
+    registered.then_some(APP_USER_MODEL_ID)
+}
+
 #[cfg(not(target_os = "macos"))]
 fn send_notification(title: &str, body: &str, options: NotifyOptions) -> Result<(), String> {
     let mut notification = notify_rust::Notification::new();
     notification.summary(title).body(body).appname("hivetty");
+    #[cfg(windows)]
+    if let Some(app_id) = registered_app_id() {
+        notification.app_id(app_id);
+    }
     if options.sound {
         // Windows' default toast sound; the freedesktop sound for a new message on Linux.
         notification.sound_name(if cfg!(windows) {

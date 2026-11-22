@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Registers hivetty's AppUserModelID so its notifications show under its own name instead of
+     PowerShell's (F6-09). The app uses the ID only when it finds this key. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <ComponentGroup Id="HivettyAppUserModelId">
+      <Component Id="HivettyAppUserModelIdKey" Directory="INSTALLDIR" Guid="{E2039214-6005-4755-A941-1F65C97599AB}">
+        <RegistryKey Root="HKLM" Key="Software\Classes\AppUserModelId\dev.hivetty.Hivetty">
+          <RegistryValue Type="string" Name="DisplayName" Value="hivetty" KeyPath="yes" />
+        </RegistryKey>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

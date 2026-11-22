@@ -68,7 +68,19 @@ jobs:
         run: cargo install cargo-packager --version "$CARGO_PACKAGER_VERSION" --locked
 
       - name: Build release binary
+        if: runner.os != 'macOS'
         run: cargo build --release --locked -p hv-app
+
+      # macOS: one binary for Apple silicon and Intel (F6-07).
+      - name: Build universal binary
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --locked -p hv-app --target aarch64-apple-darwin
+          cargo build --release --locked -p hv-app --target x86_64-apple-darwin
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create -output target/universal-apple-darwin/release/hivetty target/aarch64-apple-darwin/release/hivetty target/x86_64-apple-darwin/release/hivetty
+          lipo -info target/universal-apple-darwin/release/hivetty
 
       - name: Bundle ConPTY next to the exe
         if: runner.os == 'Windows'
@@ -81,8 +93,18 @@ jobs:
         shell: bash
         run: >-
           cargo packager --release --manifest-path crates/hv-app/Cargo.toml
+          ${{ runner.os == 'macOS' && '--target universal-apple-darwin' || '' }}
           --formats "${{ matrix.formats }}"
           --out-dir "$GITHUB_WORKSPACE/target/packages"
+
+      - name: Register as x-terminal-emulator (.deb)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for deb in target/packages/*.deb; do
+            sh crates/hv-app/packaging/deb-alternatives.sh "$deb"
+            dpkg-deb -I "$deb" | grep -E "postinst|prerm"
+          done
 
       - name: SBOM (CycloneDX)
         shell: bash

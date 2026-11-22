@@ -626,6 +626,17 @@ impl App {
             .with_inner_size(LogicalSize::new(1000.0, 640.0))
             // AccessKit must be attached before the window is first shown.
             .with_visible(false);
+        // Linux: the X11 class and Wayland app_id the desktop entry names (StartupWMClass), so
+        // docks group the window with hivetty's icon.
+        #[cfg(target_os = "linux")]
+        {
+            attrs = winit::platform::wayland::WindowAttributesExtWayland::with_name(
+                attrs, "hivetty", "hivetty",
+            );
+            attrs = winit::platform::x11::WindowAttributesExtX11::with_name(
+                attrs, "hivetty", "hivetty",
+            );
+        }
         match title_bar {
             TitleBarMode::Custom => attrs = attrs.with_decorations(false),
             TitleBarMode::MacInset => {

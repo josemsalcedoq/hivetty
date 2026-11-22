@@ -68,6 +68,13 @@ resources = [
     "../../THIRD_PARTY_NOTICES.md",
 ]
 
+[package.metadata.packager.wix]
+# Registers the AppUserModelID notifications use (F6-09).
+fragment-paths = ["packaging/aumid.wxs"]
+component-group-refs = ["HivettyAppUserModelId"]
+
 [package.metadata.packager.deb]
 package-name = "hivetty"
 section = "x11"
+# A terminal emulator entry (Categories=TerminalEmulator) instead of the generic one.
+desktop-template = "packaging/hivetty.desktop.hbs"
