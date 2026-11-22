@@ -6,6 +6,7 @@
 pub mod claude;
 pub mod install;
 pub mod profile;
+pub mod statusline;
 pub mod watch;
 
 use std::time::{Duration, Instant};

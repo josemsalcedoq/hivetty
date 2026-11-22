@@ -15,8 +15,10 @@ A native, GPU-accelerated terminal written in Rust, built for running **many cod
 - **Agent sidebar**:
   - Live state for each session (*Working*, *Waiting*, *Done*), taken from OSC 7501, Claude Code hooks and notifications.
   - Search and filters, Peek-and-reply, notifications, "go to the next session that needs you", New session and an agent dock.
+  - A hover card per session (model, branch, tokens, last tool), a right-click menu, and archive and restore.
+  - New sessions in their own git worktree, and notifications forwarded to your phone (ntfy, Telegram or a webhook) if you want.
 - **Shell integration** for zsh, bash, fish and PowerShell: prompt marks, the current directory, and project chips showing technology, branch and versions.
-- **Usage dashboard** for tokens, tasks and agent time, read from your agents' local logs, with nothing uploaded. It is also available as `hivetty usage`.
+- **Usage dashboard** for tokens, tasks and agent time, read from your agents' local logs, with nothing uploaded. It is also available as `hivetty usage`. Add your own `pricing.toml` to see an estimated cost.
 
 ![hivetty with two agents waiting for permission](docs/user/screenshot.png)
 

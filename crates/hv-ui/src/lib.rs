@@ -99,6 +99,8 @@ pub struct ChromeModel {
     pub title_bar: TitleBar,
     /// Archived sessions (S-12).
     pub archived: Vec<ArchivedRow>,
+    /// Plan limits from the agent's statusline, already worded (U-65).
+    pub plan_limits: Vec<String>,
     /// A question to confirm, if one is pending (shown as a small dialog).
     pub confirm: Option<String>,
 }
@@ -259,7 +261,7 @@ impl Chrome {
             }
             central = ui.available_rect_before_wrap();
             if let Some(view) = &model.usage {
-                usage_action = usage::show(ui.ctx(), central, view);
+                usage_action = usage::show(ui.ctx(), central, view, &model.plan_limits);
             }
             if let Some(question) = &model.confirm {
                 confirmed = confirm_dialog(ui.ctx(), question);
@@ -578,6 +580,7 @@ mod tests {
             title_bar: TitleBar::Native,
             archived: Vec::new(),
             confirm: None,
+            plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
                 subtitle: "Needs permission: Bash".into(),
@@ -635,6 +638,7 @@ mod tests {
             title_bar: TitleBar::Native,
             archived: Vec::new(),
             confirm: None,
+            plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),
                 subtitle: "Working".into(),

@@ -31,6 +31,8 @@ pub(crate) struct SessionInfo {
     pub(crate) agent_id: Option<String>,
     /// Its display name.
     pub(crate) agent_name: Option<String>,
+    /// Context window used, from the agent's statusline (F4-32).
+    pub(crate) context_percent: Option<f64>,
     /// Since when (Unix seconds) the agent has been working, as seen here (F4-23).
     pub(crate) working_since: Option<i64>,
     /// The last tool the agent used, worded for the hover card (S-15).
@@ -55,6 +57,7 @@ impl SessionInfo {
             agent_name: None,
             last_tool: None,
             working_since: None,
+            context_percent: None,
             notified: None,
         }
     }
@@ -179,6 +182,13 @@ impl SessionInfo {
     /// Feeds a hook forwarded by `hivetty hook` (already routed to this pane by its
     /// `HIVETTY_SESSION_ID`). Returns true if the sidebar changed.
     pub(crate) fn on_hook(&mut self, hook: &hv_ipc::HookEvent) -> bool {
+        // The statusline is not a state change; it only reports numbers.
+        if hook.event == "StatusLine" {
+            if let Some(status) = hv_agents::statusline::parse(&hook.payload) {
+                self.context_percent = status.context_percent.or(self.context_percent);
+            }
+            return false;
+        }
         let update = match hook.agent.as_str() {
             "claude" | "claude-code" => hv_agents::claude::from_hook(&hook.event, &hook.payload),
             _ => return false,
@@ -355,6 +365,20 @@ mod tests {
             event: event.into(),
             payload: payload.into(),
         }
+    }
+
+    #[test]
+    fn the_statusline_reports_context_without_changing_state() {
+        let mut info = SessionInfo::new();
+        info.on_hook(&hook("UserPromptSubmit", "{}"));
+        let state = info.agent.state().cloned();
+        let changed = info.on_hook(&hook(
+            "StatusLine",
+            r#"{"context_window":{"used_percentage":42}}"#,
+        ));
+        assert!(!changed);
+        assert_eq!(info.agent.state().cloned(), state);
+        assert_eq!(info.context_percent, Some(42.0));
     }
 
     #[test]

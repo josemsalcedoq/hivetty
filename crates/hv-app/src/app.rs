@@ -395,6 +395,7 @@ impl Ui {
             title_bar: hv_ui::TitleBar::Native,
             archived: Vec::new(),
             confirm: None,
+            plan_limits: Vec::new(),
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
                 .map(crate::keymap::Chord::pretty)
@@ -469,6 +470,8 @@ struct App {
     usage: UsageState,
     /// Archived sessions (F4-15).
     archive: Vec<crate::archive::ArchivedSession>,
+    /// Plan limits last reported by an agent's statusline (F4-32).
+    plan_limits: PlanLimits,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -556,6 +559,7 @@ impl App {
             last_agent: "claude-code".to_owned(),
             usage: UsageState::default(),
             archive: Vec::new(),
+            plan_limits: PlanLimits::default(),
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -2101,6 +2105,7 @@ impl App {
                 usage,
                 usage_data: usage_data.as_deref(),
                 archived,
+                plan_limits: self.plan_limits.lines(),
             },
             cursor,
         );
@@ -2386,6 +2391,7 @@ struct ChromeExtra<'a> {
     /// Usage numbers for the hover cards.
     usage_data: Option<&'a UsageData>,
     archived: Vec<hv_ui::ArchivedRow>,
+    plan_limits: Vec<String>,
 }
 
 fn run_chrome(
@@ -2400,6 +2406,7 @@ fn run_chrome(
     let mut model = ui.chrome_model(sidebar_visible, keymap, agents, extra.usage_data);
     model.usage = extra.usage;
     model.archived = extra.archived;
+    model.plan_limits = extra.plan_limits;
     model.confirm = ui
         .confirm_close
         .map(|_| hv_ui::strings::CONFIRM_CLOSE.to_owned());
@@ -2544,6 +2551,11 @@ impl ApplicationHandler<AppEvent> for App {
                     if let Some(window) = owner {
                         self.activate(window);
                     }
+                }
+                if hook.event == "StatusLine"
+                    && let Some(status) = hv_agents::statusline::parse(&hook.payload)
+                {
+                    self.plan_limits.update(&status);
                 }
                 if let Some(ui) = &mut self.ui {
                     let focused = ui.focused_id();
@@ -2955,6 +2967,54 @@ impl Default for UsageState {
     }
 }
 
+/// The plan's 5-hour and weekly windows, from the agents' statuslines (F4-32, U-65).
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct PlanLimits {
+    five_hour: Option<hv_agents::statusline::Limit>,
+    seven_day: Option<hv_agents::statusline::Limit>,
+}
+
+impl PlanLimits {
+    fn update(&mut self, status: &hv_agents::statusline::StatusLine) {
+        self.five_hour = status.five_hour.or(self.five_hour);
+        self.seven_day = status.seven_day.or(self.seven_day);
+    }
+
+    /// The windows that have not reset yet, worded for the dashboard.
+    fn lines(&self) -> Vec<String> {
+        let now = jiff::Timestamp::now().as_second();
+        [
+            (hv_ui::strings::FIVE_HOUR_LIMIT, self.five_hour),
+            (hv_ui::strings::WEEKLY_LIMIT, self.seven_day),
+        ]
+        .into_iter()
+        .filter_map(|(name, limit)| {
+            let limit = limit?;
+            let left = u64::try_from(limit.resets_at - now)
+                .ok()
+                .filter(|s| *s > 0)?;
+            Some(hv_ui::strings::plan_limit(
+                name,
+                limit.used_percentage,
+                &countdown(left),
+            ))
+        })
+        .collect()
+    }
+}
+
+/// `5d 11h`, `2h 10m`, `7m`.
+fn countdown(seconds: u64) -> String {
+    let (d, h, m) = (seconds / 86_400, seconds / 3600 % 24, seconds / 60 % 60);
+    if d > 0 {
+        format!("{d}d {h}h")
+    } else if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{}m", m.max(1))
+    }
+}
+
 /// A desktop notification, also forwarded to the phone when configured (F4-33).
 fn notify(config: &hv_config::Notifications, title: &str, body: &str) {
     hv_platform::notify(title, body);
@@ -3052,6 +3112,9 @@ fn session_card(pane: &Pane, usage: Option<&UsageData>) -> Vec<(String, String)>
         s::CARD_STARTED.to_owned(),
         s::ago(&hv_ui::format_elapsed(started.elapsed().as_secs())),
     ));
+    if let Some(percent) = pane.info.context_percent {
+        card.push((s::CARD_CONTEXT.to_owned(), format!("{percent:.0}%")));
+    }
     if let Some(tool) = &pane.info.last_tool {
         card.push((s::CARD_LAST_TOOL.to_owned(), tool.clone()));
     }
@@ -3462,6 +3525,36 @@ fn translate_key(event: &KeyEvent, mods: Mods) -> Option<TermKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_limits_count_down_and_expire() {
+        assert_eq!(countdown(5 * 86_400 + 11 * 3600 + 59), "5d 11h");
+        assert_eq!(countdown(2 * 3600 + 10 * 60), "2h 10m");
+        assert_eq!(countdown(20), "1m");
+        let now = jiff::Timestamp::now().as_second();
+        let mut limits = PlanLimits::default();
+        limits.update(&hv_agents::statusline::StatusLine {
+            five_hour: Some(hv_agents::statusline::Limit {
+                used_percentage: 23.5,
+                resets_at: now + 2 * 3600 + 630,
+            }),
+            seven_day: Some(hv_agents::statusline::Limit {
+                used_percentage: 41.0,
+                resets_at: now - 10, // already reset: not shown
+            }),
+            ..Default::default()
+        });
+        let lines = limits.lines();
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].starts_with("5-hour limit 24% · resets in 2h 1"),
+            "{}",
+            lines[0]
+        );
+        // A statusline without limits keeps the last ones.
+        limits.update(&hv_agents::statusline::StatusLine::default());
+        assert_eq!(limits.lines().len(), 1);
+    }
 
     #[test]
     fn session_totals_sum_tokens_and_keep_the_newest_model() {

@@ -15,6 +15,7 @@ mod keymap;
 mod menu_mac;
 mod model;
 mod saved;
+mod statusline;
 mod usage_cli;
 mod workspace;
 mod worktree;
@@ -57,6 +58,11 @@ OPTIONS:
                          Add hivetty's hooks to Claude Code's settings (shows the changes first)
     agents uninstall-hooks [--dry-run]
                          Remove them again
+    agents install-statusline [--dry-run]
+                         Use hivetty's statusline in Claude Code (context use, plan limits)
+    agents uninstall-statusline [--dry-run]
+                         Remove it again
+    statusline           The statusline command itself (reads Claude Code's JSON on stdin)
     hook --agent <ID> --event <NAME>
                          Forward an agent hook (stdin) to the running hivetty; always exits 0
     -V, --version        Print version
@@ -201,6 +207,16 @@ fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some("hook") {
         hook::run(&args[1..]);
         // Exit right away: a helper thread may still be blocked on stdin or a pipe.
+        std::process::exit(0);
+    }
+    // Claude Code's statusline: print the line, exit 0, never block (F4-32).
+    if args.first().map(String::as_str) == Some("statusline") {
+        let line = statusline::run();
+        if !line.is_empty() {
+            use std::io::Write;
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "{line}").and_then(|()| out.flush());
+        }
         std::process::exit(0);
     }
     env_logger::Builder::from_env(

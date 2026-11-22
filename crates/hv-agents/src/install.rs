@@ -150,6 +150,66 @@ pub fn plan_uninstall(text: &str) -> Result<Plan, String> {
     })
 }
 
+/// The `statusLine` command hivetty installs (F4-32).
+pub fn statusline_command(exe: &Path) -> String {
+    // The same quoting as the hook commands, without the hook arguments.
+    let hook = hook_command(exe, "");
+    let quoted = &hook[..hook.len() - MARKER.len()];
+    format!("{quoted}{STATUSLINE_MARKER}")
+}
+
+/// What identifies hivetty's statusline command.
+const STATUSLINE_MARKER: &str = " statusline";
+
+fn is_our_statusline(value: &Value) -> bool {
+    value
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|c| c.ends_with(&format!("'{STATUSLINE_MARKER}")))
+}
+
+/// Sets hivetty's statusline. A statusline the user already has is never replaced.
+pub fn plan_statusline_install(text: &str, exe: &Path) -> Result<Plan, String> {
+    let mut root = parse(text)?;
+    let wanted = statusline_command(exe);
+    let mut changes = Vec::new();
+    match root.get("statusLine") {
+        Some(current) if !is_our_statusline(current) => {
+            return Err(
+                "settings.json already has a statusLine; hivetty leaves it as it is (remove it                  first to use hivetty's)"
+                    .to_owned(),
+            );
+        }
+        Some(current) if current.get("command").and_then(Value::as_str) == Some(&wanted) => {}
+        current => {
+            let sign = if current.is_some() { "~" } else { "+" };
+            changes.push(format!("{sign} statusLine: {wanted}"));
+            root.insert(
+                "statusLine".to_owned(),
+                json!({ "type": "command", "command": wanted }),
+            );
+        }
+    }
+    Ok(Plan {
+        new_text: to_text(&root)?,
+        changes,
+    })
+}
+
+/// Removes hivetty's statusline (only if it is hivetty's).
+pub fn plan_statusline_uninstall(text: &str) -> Result<Plan, String> {
+    let mut root = parse(text)?;
+    let mut changes = Vec::new();
+    if root.get("statusLine").is_some_and(is_our_statusline) {
+        root.remove("statusLine");
+        changes.push("- statusLine".to_owned());
+    }
+    Ok(Plan {
+        new_text: to_text(&root)?,
+        changes,
+    })
+}
+
 fn to_text(root: &Map<String, Value>) -> Result<String, String> {
     serde_json::to_string_pretty(root)
         .map(|t| t + "\n")
@@ -189,6 +249,27 @@ pub fn apply(path: &Path, plan: &Plan) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn statusline_is_added_and_removed_but_never_replaces_the_users() {
+        let exe = Path::new("/opt/hivetty/hivetty");
+        let plan = plan_statusline_install("{\"model\":\"opus\"}", exe).unwrap();
+        assert_eq!(plan.changes.len(), 1);
+        let root: Value = serde_json::from_str(&plan.new_text).unwrap();
+        assert_eq!(
+            root["statusLine"]["command"],
+            "'/opt/hivetty/hivetty' statusline"
+        );
+        assert_eq!(root["model"], "opus");
+        let again = plan_statusline_install(&plan.new_text, exe).unwrap();
+        assert!(again.changes.is_empty());
+        let users = r#"{"statusLine":{"type":"command","command":"~/.claude/mine.sh"}}"#;
+        assert!(plan_statusline_install(users, exe).is_err());
+        assert!(plan_statusline_uninstall(users).unwrap().changes.is_empty());
+        let removed = plan_statusline_uninstall(&plan.new_text).unwrap();
+        assert_eq!(removed.changes, ["- statusLine"]);
+        assert!(!removed.new_text.contains("statusLine"));
+    }
 
     const USER: &str = r#"{
   "model": "opus",

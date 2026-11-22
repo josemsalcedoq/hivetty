@@ -11,6 +11,8 @@ pub(crate) enum AgentsCommand {
     List,
     InstallHooks { dry_run: bool },
     UninstallHooks { dry_run: bool },
+    InstallStatusline { dry_run: bool },
+    UninstallStatusline { dry_run: bool },
 }
 
 impl AgentsCommand {
@@ -20,6 +22,8 @@ impl AgentsCommand {
             None | Some("list") => Ok(Self::List),
             Some("install-hooks") => Ok(Self::InstallHooks { dry_run }),
             Some("uninstall-hooks") => Ok(Self::UninstallHooks { dry_run }),
+            Some("install-statusline") => Ok(Self::InstallStatusline { dry_run }),
+            Some("uninstall-statusline") => Ok(Self::UninstallStatusline { dry_run }),
             Some(other) => Err(format!("unknown agents command '{other}'")),
         }
     }
@@ -66,6 +70,26 @@ pub(crate) fn run(command: &AgentsCommand) -> Result<()> {
             let plan = hv_agents::install::plan_uninstall(&text)
                 .map_err(|e| anyhow::anyhow!("{e} ({})", path.display()))?;
             confirm_and_apply(&path, &plan, *dry_run, "Remove hivetty's Claude Code hooks")
+        }
+        AgentsCommand::InstallStatusline { dry_run } => {
+            let path = settings_path()?;
+            let exe = std::env::current_exe().context("cannot find the hivetty executable")?;
+            let text = read_or_empty(&path)?;
+            let plan = hv_agents::install::plan_statusline_install(&text, &exe)
+                .map_err(|e| anyhow::anyhow!("{e} ({})", path.display()))?;
+            confirm_and_apply(
+                &path,
+                &plan,
+                *dry_run,
+                "Use hivetty's Claude Code statusline",
+            )
+        }
+        AgentsCommand::UninstallStatusline { dry_run } => {
+            let path = settings_path()?;
+            let text = read_or_empty(&path)?;
+            let plan = hv_agents::install::plan_statusline_uninstall(&text)
+                .map_err(|e| anyhow::anyhow!("{e} ({})", path.display()))?;
+            confirm_and_apply(&path, &plan, *dry_run, "Remove hivetty's statusline")
         }
     }
 }

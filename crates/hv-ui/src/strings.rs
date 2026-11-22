@@ -337,3 +337,13 @@ pub fn ago(elapsed: &str) -> String {
 pub fn observed(duration: &str) -> String {
     format!("{duration} seen here")
 }
+/// Hover card: context window used.
+pub const CARD_CONTEXT: &str = "Context";
+/// Plan limits in the usage dashboard (U-65): `5-hour limit 24% · resets in 2h 10m`.
+pub fn plan_limit(window: &str, percent: f64, resets_in: &str) -> String {
+    format!("{window} {percent:.0}% · resets in {resets_in}")
+}
+/// Plan window names.
+pub const FIVE_HOUR_LIMIT: &str = "5-hour limit";
+/// Plan window names.
+pub const WEEKLY_LIMIT: &str = "Weekly limit";

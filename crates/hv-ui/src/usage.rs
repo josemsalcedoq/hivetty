@@ -65,7 +65,12 @@ const HEAT: [Color32; 5] = [
 ];
 
 /// Draws the dashboard filling `area` (points). Returns what the user did.
-pub(crate) fn show(ctx: &egui::Context, area: Rect, view: &UsageView) -> Option<UsageAction> {
+pub(crate) fn show(
+    ctx: &egui::Context,
+    area: Rect,
+    view: &UsageView,
+    limits: &[String],
+) -> Option<UsageAction> {
     let mut action = None;
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         return Some(UsageAction::Close);
@@ -88,7 +93,7 @@ pub(crate) fn show(ctx: &egui::Context, area: Rect, view: &UsageView) -> Option<
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            if let Some(a) = header(ui, view, range) {
+                            if let Some(a) = header(ui, view, range, limits) {
                                 action = Some(a);
                             }
                             ui.add_space(16.0);
@@ -119,7 +124,12 @@ pub(crate) fn show(ctx: &egui::Context, area: Rect, view: &UsageView) -> Option<
     action
 }
 
-fn header(ui: &mut egui::Ui, view: &UsageView, range: UsageRange) -> Option<UsageAction> {
+fn header(
+    ui: &mut egui::Ui,
+    view: &UsageView,
+    range: UsageRange,
+    limits: &[String],
+) -> Option<UsageAction> {
     let mut action = None;
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
@@ -145,6 +155,13 @@ fn header(ui: &mut egui::Ui, view: &UsageView, range: UsageRange) -> Option<Usag
                         }
                     }
                 });
+            }
+            for limit in limits {
+                ui.label(
+                    RichText::new(limit)
+                        .size(12.0)
+                        .color(theme::TEXT_SECONDARY()),
+                );
             }
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
