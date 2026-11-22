@@ -361,3 +361,7 @@ pub const MENU_COLLAPSE: &str = "Collapse";
 pub const MENU_EXPAND: &str = "Expand";
 /// Project context menu.
 pub const MENU_ARCHIVE_FINISHED: &str = "Archive finished sessions";
+/// Plan limit pace: the limit runs out before it resets (U-65).
+pub fn runs_out_in(when: &str) -> String {
+    format!("at this pace, runs out in {when}")
+}

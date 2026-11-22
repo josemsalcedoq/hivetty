@@ -3066,19 +3066,32 @@ impl PlanLimits {
             (hv_ui::strings::WEEKLY_LIMIT, self.seven_day),
         ]
         .into_iter()
-        .filter_map(|(name, limit)| {
+        .zip([5 * 3600, 7 * 86_400])
+        .filter_map(|((name, limit), window)| {
             let limit = limit?;
             let left = u64::try_from(limit.resets_at - now)
                 .ok()
                 .filter(|s| *s > 0)?;
-            Some(hv_ui::strings::plan_limit(
-                name,
-                limit.used_percentage,
-                &countdown(left),
-            ))
+            let mut line =
+                hv_ui::strings::plan_limit(name, limit.used_percentage, &countdown(left));
+            if let Some(out) = runs_out_in(limit.used_percentage, window, left) {
+                line = format!("{line} · {}", hv_ui::strings::runs_out_in(&countdown(out)));
+            }
+            Some(line)
         })
         .collect()
     }
+}
+
+/// Seconds until a plan window reaches 100 % at the pace so far, when that is before it resets.
+/// `window` is its length and `left` the seconds until it resets.
+fn runs_out_in(used: f64, window: u64, left: u64) -> Option<u64> {
+    let elapsed = window.checked_sub(left).filter(|e| *e >= 60)? as f64;
+    if !(used > 0.0 && used < 100.0) {
+        return None;
+    }
+    let out = (100.0 - used) / (used / elapsed);
+    (out < left as f64).then_some(out as u64)
 }
 
 /// `5d 11h`, `2h 10m`, `7m`.
@@ -3612,6 +3625,18 @@ fn translate_key(event: &KeyEvent, mods: Mods) -> Option<TermKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_pace_estimates_when_the_limit_runs_out() {
+        // 50 % used in the first hour of 5: 1 more hour at this pace, 4 h before the reset.
+        assert_eq!(runs_out_in(50.0, 5 * 3600, 4 * 3600), Some(3600));
+        // 10 % in 4 h: would take far longer than the hour left.
+        assert_eq!(runs_out_in(10.0, 5 * 3600, 3600), None);
+        // Too early to tell, nothing used, or already out.
+        assert_eq!(runs_out_in(50.0, 5 * 3600, 5 * 3600 - 10), None);
+        assert_eq!(runs_out_in(0.0, 5 * 3600, 3600), None);
+        assert_eq!(runs_out_in(100.0, 5 * 3600, 3600), None);
+    }
 
     #[test]
     fn plan_limits_count_down_and_expire() {
