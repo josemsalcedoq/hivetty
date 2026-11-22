@@ -36,6 +36,9 @@ pub(crate) struct SavedTab {
 pub(crate) enum SavedNode {
     Pane {
         cwd: Option<PathBuf>,
+        /// The agent that ran there and its own session id, for resuming (F4-21).
+        #[serde(default)]
+        agent: Option<SavedAgent>,
     },
     Split {
         horizontal: bool,
@@ -43,6 +46,22 @@ pub(crate) enum SavedNode {
         a: Box<SavedNode>,
         b: Box<SavedNode>,
     },
+}
+
+/// An agent running in a pane when the layout was saved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SavedAgent {
+    /// Profile id (`claude-code`).
+    pub(crate) id: String,
+    /// The agent's own session id, if it reported one.
+    pub(crate) session: Option<String>,
+}
+
+/// What is saved for one pane.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PaneState {
+    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) agent: Option<SavedAgent>,
 }
 
 /// Window size and position in physical pixels.
@@ -60,14 +79,14 @@ impl SavedLayout {
     pub(crate) fn capture(
         tabs: &Tabs,
         window: Option<SavedWindow>,
-        cwd: impl Fn(PaneId) -> Option<PathBuf>,
+        pane: impl Fn(PaneId) -> PaneState,
     ) -> Self {
         let saved = tabs
             .list
             .iter()
             .map(|tab| SavedTab {
                 title: tab.title_override.clone(),
-                root: save_node(&tab.root, &cwd),
+                root: save_node(&tab.root, &pane),
                 focused: tab
                     .root
                     .panes()
@@ -86,7 +105,10 @@ impl SavedLayout {
 
     /// Rebuilds the tabs, calling `spawn` with each pane's directory; panes that fail to
     /// start are left out. Returns no tabs if nothing could start.
-    pub(crate) fn restore(&self, mut spawn: impl FnMut(Option<&Path>) -> Option<PaneId>) -> Tabs {
+    pub(crate) fn restore(
+        &self,
+        mut spawn: impl FnMut(Option<&Path>, Option<&SavedAgent>) -> Option<PaneId>,
+    ) -> Tabs {
         let mut budget = MAX_PANES;
         let mut out = Tabs::default();
         for saved in &self.tabs {
@@ -136,32 +158,38 @@ impl SavedLayout {
     }
 }
 
-fn save_node(node: &PaneNode, cwd: &impl Fn(PaneId) -> Option<PathBuf>) -> SavedNode {
+fn save_node(node: &PaneNode, pane: &impl Fn(PaneId) -> PaneState) -> SavedNode {
     match node {
-        PaneNode::Leaf(id) => SavedNode::Pane { cwd: cwd(*id) },
+        PaneNode::Leaf(id) => {
+            let state = pane(*id);
+            SavedNode::Pane {
+                cwd: state.cwd,
+                agent: state.agent,
+            }
+        }
         PaneNode::Split { axis, ratio, a, b } => SavedNode::Split {
             horizontal: *axis == Axis::Horizontal,
             ratio: *ratio,
-            a: Box::new(save_node(a, cwd)),
-            b: Box::new(save_node(b, cwd)),
+            a: Box::new(save_node(a, pane)),
+            b: Box::new(save_node(b, pane)),
         },
     }
 }
 
 fn restore_node(
     node: &SavedNode,
-    spawn: &mut impl FnMut(Option<&Path>) -> Option<PaneId>,
+    spawn: &mut impl FnMut(Option<&Path>, Option<&SavedAgent>) -> Option<PaneId>,
     budget: &mut usize,
 ) -> Option<PaneNode> {
     match node {
-        SavedNode::Pane { cwd } => {
+        SavedNode::Pane { cwd, agent } => {
             if *budget == 0 {
                 return None;
             }
             *budget -= 1;
             // A directory that no longer exists falls back to the default one.
             let cwd = cwd.as_deref().filter(|d| d.is_dir());
-            spawn(cwd).map(PaneNode::Leaf)
+            spawn(cwd, agent.as_ref()).map(PaneNode::Leaf)
         }
         SavedNode::Split {
             horizontal,
@@ -218,7 +246,13 @@ mod tests {
     fn layout_round_trips_through_json() {
         let tabs = sample_tabs();
         let dir = std::env::temp_dir();
-        let mut saved = SavedLayout::capture(&tabs, None, |id| (id == 2).then(|| dir.clone()));
+        let mut saved = SavedLayout::capture(&tabs, None, |id| PaneState {
+            cwd: (id == 2).then(|| dir.clone()),
+            agent: (id == 3).then(|| SavedAgent {
+                id: "claude-code".into(),
+                session: Some("abc-123".into()),
+            }),
+        });
         saved.active = tabs.active;
         let json = serde_json::to_string(&saved).unwrap();
         let back: SavedLayout = serde_json::from_str(&json).unwrap();
@@ -226,16 +260,29 @@ mod tests {
 
         let mut next = 10;
         let mut cwds = Vec::new();
-        let restored = back.restore(|cwd| {
+        let mut agents = Vec::new();
+        let restored = back.restore(|cwd, agent| {
             cwds.push(cwd.map(Path::to_path_buf));
+            agents.push(agent.cloned());
             next += 1;
             Some(next)
         });
+        assert_eq!(
+            agents[2].as_ref().unwrap().session.as_deref(),
+            Some("abc-123")
+        );
         assert_eq!(restored.list.len(), 2);
         assert_eq!(restored.list[0].root.panes(), vec![11, 12]);
         assert_eq!(restored.list[0].focused, 12);
         assert_eq!(restored.list[0].title_override.as_deref(), Some("api"));
         assert_eq!(cwds, vec![None, Some(std::env::temp_dir()), None]);
+    }
+
+    #[test]
+    fn layouts_saved_before_agents_existed_still_load() {
+        let old = r#"{"version":1,"tabs":[{"title":null,"root":{"kind":"pane","cwd":null},"focused":0}],"active":0,"window":null}"#;
+        let layout: SavedLayout = serde_json::from_str(old).unwrap();
+        assert_eq!(layout.tabs.len(), 1);
     }
 
     #[test]
@@ -249,8 +296,12 @@ mod tests {
                     ratio: f32::NAN,
                     a: Box::new(SavedNode::Pane {
                         cwd: Some("/definitely/not/here".into()),
+                        agent: None,
                     }),
-                    b: Box::new(SavedNode::Pane { cwd: None }),
+                    b: Box::new(SavedNode::Pane {
+                        cwd: None,
+                        agent: None,
+                    }),
                 },
                 focused: 7,
             }],
@@ -258,7 +309,7 @@ mod tests {
             window: None,
         };
         let mut calls = 0;
-        let tabs = saved.restore(|cwd| {
+        let tabs = saved.restore(|cwd, _| {
             assert!(cwd.is_none());
             calls += 1;
             (calls == 2).then_some(42) // the first pane fails to start
@@ -270,13 +321,19 @@ mod tests {
 
     #[test]
     fn hostile_files_are_bounded() {
-        let mut node = SavedNode::Pane { cwd: None };
+        let mut node = SavedNode::Pane {
+            cwd: None,
+            agent: None,
+        };
         for _ in 0..200 {
             node = SavedNode::Split {
                 horizontal: true,
                 ratio: 0.5,
                 a: Box::new(node),
-                b: Box::new(SavedNode::Pane { cwd: None }),
+                b: Box::new(SavedNode::Pane {
+                    cwd: None,
+                    agent: None,
+                }),
             };
         }
         let saved = SavedLayout {
@@ -290,7 +347,7 @@ mod tests {
             window: None,
         };
         let mut spawned = 0;
-        saved.restore(|_| {
+        saved.restore(|_, _| {
             spawned += 1;
             Some(spawned)
         });
@@ -300,7 +357,7 @@ mod tests {
     #[test]
     fn save_and_load_use_the_file_system() {
         let path = std::env::temp_dir().join(format!("hv-layout-{}.json", std::process::id()));
-        let saved = SavedLayout::capture(&sample_tabs(), None, |_| None);
+        let saved = SavedLayout::capture(&sample_tabs(), None, |_| PaneState::default());
         saved.save(&path).unwrap();
         assert_eq!(SavedLayout::load(&path), Some(saved));
         std::fs::write(&path, "{ not json").unwrap();

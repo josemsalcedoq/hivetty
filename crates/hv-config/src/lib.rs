@@ -25,6 +25,8 @@ pub struct Config {
     pub window: WindowConfig,
     /// Desktop notifications.
     pub notifications: Notifications,
+    /// Agent behaviour.
+    pub agents: Agents,
     /// Shortcut overrides, applied on top of the defaults (docs/keybindings.md).
     pub keybindings: Vec<KeyBinding>,
 }
@@ -132,6 +134,23 @@ impl Default for WindowConfig {
         Self {
             remember_geometry: true,
             restore_layout: true,
+        }
+    }
+}
+
+/// `[agents]`
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Agents {
+    /// What to do with agents that were running when the layout was saved: `"ask"` types the
+    /// resume command and waits for Enter, `"always"` runs it, `"never"` leaves a plain shell.
+    pub restore_on_launch: String,
+}
+
+impl Default for Agents {
+    fn default() -> Self {
+        Self {
+            restore_on_launch: "ask".to_owned(),
         }
     }
 }

@@ -623,16 +623,28 @@ impl App {
         }
         if let Some(layout) = restore {
             let mut spawned = Vec::new();
-            let tabs = layout.restore(|cwd| match self.spawn_pane(&ui, cwd.map(Into::into)) {
-                Ok((id, pane)) => {
-                    spawned.push((id, pane));
-                    Some(id)
-                }
-                Err(err) => {
-                    log::warn!("cannot reopen a pane: {err:#}");
-                    None
-                }
-            });
+            let mode = self.config.agents.restore_on_launch.clone();
+            let profiles = self.profiles.clone();
+            let tabs =
+                layout.restore(
+                    |cwd, agent| match self.spawn_pane(&ui, cwd.map(Into::into)) {
+                        Ok((id, mut pane)) => {
+                            // F4-21: reopen the agent session that ran here.
+                            if let Some(command) =
+                                agent.and_then(|a| resume_command(&profiles, a, &mode))
+                            {
+                                pane.pending_command =
+                                    Some((command, Instant::now() + Duration::from_millis(1500)));
+                            }
+                            spawned.push((id, pane));
+                            Some(id)
+                        }
+                        Err(err) => {
+                            log::warn!("cannot reopen a pane: {err:#}");
+                            None
+                        }
+                    },
+                );
             ui.tabs = tabs;
             ui.panes.extend(spawned);
             if !ui.tabs.list.is_empty() {
@@ -873,7 +885,20 @@ impl App {
             maximized: ui.window.is_maximized(),
         };
         let layout = crate::saved::SavedLayout::capture(&ui.tabs, Some(window), |id| {
-            ui.panes.get(&id).and_then(|p| p.session.cwd())
+            let Some(pane) = ui.panes.get(&id) else {
+                return crate::saved::PaneState::default();
+            };
+            crate::saved::PaneState {
+                cwd: pane.session.cwd(),
+                agent: pane
+                    .info
+                    .agent_id
+                    .clone()
+                    .map(|agent| crate::saved::SavedAgent {
+                        id: agent,
+                        session: pane.info.agent.agent_session().map(str::to_owned),
+                    }),
+            }
         });
         // Off the UI thread; joined because the process is about to exit.
         let path = path.clone();
@@ -2614,6 +2639,38 @@ fn took_text(took: Duration) -> String {
     }
 }
 
+/// The line that resumes a saved agent session, following `[agents] restore_on_launch`:
+/// `"always"` runs it, `"ask"` types it without Enter so the user decides, `"never"` skips it.
+/// Only ids made of letters, digits, `-` and `_` are typed (they come from a file on disk).
+fn resume_command(
+    profiles: &[hv_agents::profile::Profile],
+    agent: &crate::saved::SavedAgent,
+    mode: &str,
+) -> Option<String> {
+    if mode == "never" {
+        return None;
+    }
+    let session = agent.session.as_deref()?;
+    let safe = !session.is_empty()
+        && session.len() <= 128
+        && session
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !safe {
+        return None;
+    }
+    let profile = hv_agents::profile::find(profiles, &agent.id)?;
+    let mut line = profile
+        .resume
+        .as_ref()?
+        .command
+        .replace("{session_id}", session);
+    if mode == "always" {
+        line.push('\r');
+    }
+    Some(line)
+}
+
 /// The user's home directory.
 fn home_dir() -> Option<std::path::PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
@@ -2833,6 +2890,29 @@ mod tests {
         assert_eq!(
             agent_command_line(aider, &request("hi", ""), "bash"),
             "aider\r"
+        );
+    }
+
+    #[test]
+    fn resume_commands_follow_the_mode_and_refuse_odd_ids() {
+        let profiles = hv_agents::profile::builtin();
+        let agent = |session: &str| crate::saved::SavedAgent {
+            id: "claude-code".into(),
+            session: Some(session.into()),
+        };
+        let id = "6f1c0a52-9b9e-4a7e-8f61-2c0e5b8d1a77";
+        assert_eq!(
+            resume_command(&profiles, &agent(id), "always").as_deref(),
+            Some(format!("claude --resume {id}\r").as_str())
+        );
+        assert_eq!(
+            resume_command(&profiles, &agent(id), "ask").as_deref(),
+            Some(format!("claude --resume {id}").as_str())
+        );
+        assert_eq!(resume_command(&profiles, &agent(id), "never"), None);
+        assert_eq!(
+            resume_command(&profiles, &agent("x; rm -rf ~"), "always"),
+            None
         );
     }
 
