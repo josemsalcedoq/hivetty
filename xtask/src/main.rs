@@ -118,8 +118,8 @@ fn ci() -> ExitCode {
         println!("xtask ci: write control characters as escapes (\\x1b, \\0, \\r)");
         return ExitCode::FAILURE;
     }
-    // Code behind cfg(unix) is invisible to clippy on Windows (and vice versa). Check the crates
-    // without native build dependencies for the other OSes too, when their std is installed
+    // Code behind cfg(unix) is invisible to clippy on Windows (and vice versa). Check the
+    // workspace for the other OSes too, when their std is installed
     // (`rustup target add x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc`).
     let installed = Command::new("rustup")
         .args(["target", "list", "--installed"])
@@ -131,14 +131,24 @@ fn ci() -> ExitCode {
         if *os == host || !installed.lines().any(|l| l.trim() == *target) {
             continue;
         }
-        let mut args = vec!["clippy", "--target", target, "--all-targets", "--locked"];
-        for krate in PORTABLE_CRATES {
-            args.extend(["-p", krate]);
-        }
-        args.extend(["--", "-D", "warnings"]);
+        // clippy only type-checks, so no linker or C toolchain for the target is needed, except
+        // for xtask itself (ring builds C code).
+        let args = [
+            "clippy",
+            "--target",
+            target,
+            "--workspace",
+            "--exclude",
+            "xtask",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings",
+        ];
         println!("==> cargo {}", args.join(" "));
         if !Command::new("cargo")
-            .args(&args)
+            .args(args)
             .status()
             .is_ok_and(|s| s.success())
         {
@@ -185,14 +195,4 @@ const CROSS_TARGETS: &[(&str, &str)] = &[
     ("linux", "x86_64-unknown-linux-gnu"),
     ("macos", "aarch64-apple-darwin"),
     ("windows", "x86_64-pc-windows-msvc"),
-];
-
-/// Crates whose dependencies build without a C toolchain for the target.
-const PORTABLE_CRATES: &[&str] = &[
-    "hv-ipc",
-    "hv-platform",
-    "hv-agents",
-    "hv-grid",
-    "hv-config",
-    "hv-usage",
 ];
