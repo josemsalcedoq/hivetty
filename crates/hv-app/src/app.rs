@@ -134,6 +134,9 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
         .map_err(|err| log::warn!("prompt chips disabled: {err}"))
         .ok()
     };
+    app.archive = crate::archive::path()
+        .map(|p| crate::archive::load(&p))
+        .unwrap_or_default();
     app.profiles = hv_agents::profile::builtin();
     app.agent_choices = std::iter::once(hv_ui::AgentChoice {
         id: String::new(),
@@ -210,6 +213,8 @@ struct Ui {
     peek: Option<PaneId>,
     /// Whether hivetty draws the title bar (F1-02).
     title_bar: TitleBarMode,
+    /// A pane waiting for the user to confirm closing it.
+    confirm_close: Option<PaneId>,
     /// Space egui left for the terminals last frame, in physical pixels.
     terminal_area: Option<[f32; 4]>,
     /// Sidebar row index → pane, from the last frame.
@@ -384,6 +389,8 @@ impl Ui {
             usage: None,
             peek: None,
             title_bar: hv_ui::TitleBar::Native,
+            archived: Vec::new(),
+            confirm: None,
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
                 .map(crate::keymap::Chord::pretty)
@@ -456,6 +463,8 @@ struct App {
     last_agent: String,
     /// The usage dashboard (F5).
     usage: UsageState,
+    /// Archived sessions (F4-15).
+    archive: Vec<crate::archive::ArchivedSession>,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -542,6 +551,7 @@ impl App {
             agent_choices: Vec::new(),
             last_agent: "claude-code".to_owned(),
             usage: UsageState::default(),
+            archive: Vec::new(),
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -641,6 +651,7 @@ impl App {
             usage_open: false,
             peek: None,
             title_bar,
+            confirm_close: None,
             terminal_area: None,
             row_panes: Vec::new(),
             repaint_at: None,
@@ -880,6 +891,7 @@ impl App {
             Action::FontSmaller => zoom(ui, -1.0),
             Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
             Action::NextNeedsYou => self.focus_next_needing_you(),
+            Action::ClosePaneById(id) => self.close_pane(id, event_loop),
             Action::ToggleUsage => self.toggle_usage(),
             Action::NewAgentSession => self.open_new_session_dialog(),
             Action::CommandPalette => {
@@ -993,6 +1005,99 @@ impl App {
             }
             (None, _) => hv_ui::UsageView::Loading(self.usage.range),
         })
+    }
+
+    /// A choice in a session row's context menu (S-13).
+    fn on_session_menu(&mut self, row: usize, choice: hv_ui::SessionMenu) {
+        let Some(ui) = &mut self.ui else { return };
+        let Some(&id) = ui.row_panes.get(row) else {
+            return;
+        };
+        match choice {
+            hv_ui::SessionMenu::Focus => {
+                ui.tabs.focus_pane(id);
+                self.focus_changed();
+            }
+            hv_ui::SessionMenu::Peek => ui.peek = Some(id),
+            hv_ui::SessionMenu::Archive => self.archive_pane(id),
+            hv_ui::SessionMenu::CopyId => {
+                if let Some(session) = ui
+                    .panes
+                    .get(&id)
+                    .and_then(|p| p.info.agent.agent_session().map(str::to_owned))
+                    && let Err(err) =
+                        arboard::Clipboard::new().and_then(|mut c| c.set_text(session))
+                {
+                    log::warn!("clipboard write failed: {err}");
+                }
+            }
+            hv_ui::SessionMenu::ShowFolder => {
+                if let Some(dir) = ui.panes.get(&id).and_then(|p| p.session.cwd())
+                    && let Err(err) = opener::open(&dir)
+                {
+                    log::warn!("cannot open {}: {err}", dir.display());
+                }
+            }
+            hv_ui::SessionMenu::Close => ui.confirm_close = Some(id),
+        }
+        if let Some(ui) = &self.ui {
+            ui.window.request_redraw();
+        }
+    }
+
+    /// Keeps a record of a pane (to restore it later) and closes it (F4-15).
+    fn archive_pane(&mut self, id: PaneId) {
+        let Some(pane) = self.ui.as_ref().and_then(|ui| ui.panes.get(&id)) else {
+            return;
+        };
+        let row = crate::model::session_row(&pane.info, None);
+        self.archive.push(crate::archive::ArchivedSession {
+            title: row.title,
+            agent: pane
+                .info
+                .agent_id
+                .clone()
+                .map(|agent| crate::saved::SavedAgent {
+                    id: agent,
+                    session: pane.info.agent.agent_session().map(str::to_owned),
+                }),
+            agent_name: pane.info.agent_name.clone(),
+            cwd: pane.session.cwd(),
+            archived_at: jiff::Timestamp::now().as_second(),
+        });
+        self.save_archive();
+        self.pending_action = Some(Action::ClosePaneById(id));
+    }
+
+    fn save_archive(&self) {
+        if let Some(path) = crate::archive::path() {
+            crate::archive::save(path, &self.archive);
+        }
+    }
+
+    /// Reopens an archived session in a new tab, resuming its agent session when known.
+    fn restore_archived(&mut self, session: &crate::archive::ArchivedSession) {
+        let Some(ui) = self.ui.take() else { return };
+        let cwd = session.cwd.clone().filter(|d| d.is_dir());
+        let spawned = self.spawn_pane(&ui, cwd);
+        let mut ui = ui;
+        match spawned {
+            Ok((id, mut pane)) => {
+                if let Some(agent) = &session.agent
+                    && let Some(command) = resume_command(&self.profiles, agent, "always")
+                {
+                    pane.pending_command =
+                        Some((command, Instant::now() + Duration::from_millis(1500)));
+                    pane.info.agent_id = Some(agent.id.clone());
+                    pane.info.agent_name.clone_from(&session.agent_name);
+                }
+                ui.panes.insert(id, pane);
+                ui.tabs.open(id);
+            }
+            Err(err) => log::error!("cannot restore the session: {err:#}"),
+        }
+        self.ui = Some(ui);
+        self.focus_changed();
     }
 
     /// Opens the New session dialog with the last agent and the focused pane's folder.
@@ -1924,6 +2029,26 @@ impl App {
             egui::CursorIcon::Text
         };
         let usage = self.usage_view();
+        let archived: Vec<hv_ui::ArchivedRow> = self
+            .archive
+            .iter()
+            .rev()
+            .map(|a| {
+                let project = a
+                    .cwd
+                    .as_deref()
+                    .and_then(|d| d.file_name())
+                    .map_or_else(|| "~".to_owned(), |n| n.to_string_lossy().into_owned());
+                let agent = a
+                    .agent_name
+                    .clone()
+                    .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned());
+                hv_ui::ArchivedRow {
+                    title: a.title.clone(),
+                    detail: format!("{agent} · {project}"),
+                }
+            })
+            .collect();
         let Some(ui) = &mut self.ui else { return };
         ui.usage_open = usage.is_some();
         let (mut frame, out) = run_chrome(
@@ -1932,6 +2057,7 @@ impl App {
             &self.keymap,
             &self.agent_choices,
             usage,
+            archived,
             cursor,
         );
         // Clicks in the chrome.
@@ -2047,6 +2173,35 @@ impl App {
             if let Some(ui) = &self.ui {
                 ui.window.request_redraw();
             }
+        }
+        if let Some((row, choice)) = out.session_menu {
+            self.on_session_menu(row, choice);
+        }
+        if let Some(answer) = out.confirmed
+            && let Some(ui) = &mut self.ui
+            && let Some(id) = ui.confirm_close.take()
+        {
+            if answer {
+                self.pending_action = Some(Action::ClosePaneById(id));
+            }
+            if let Some(ui) = &self.ui {
+                ui.window.request_redraw();
+            }
+        }
+        // Archived row indices count from the newest (the list is shown newest first).
+        let newest_first = |i: usize, len: usize| len.checked_sub(i + 1);
+        if let Some(i) = out.archive_restore
+            && let Some(index) = newest_first(i, self.archive.len())
+        {
+            let session = self.archive.remove(index);
+            self.save_archive();
+            self.restore_archived(&session);
+        }
+        if let Some(i) = out.archive_delete
+            && let Some(index) = newest_first(i, self.archive.len())
+        {
+            self.archive.remove(index);
+            self.save_archive();
         }
         match out.usage_action {
             Some(hv_ui::UsageAction::Close) => self.toggle_usage(),
@@ -2182,11 +2337,16 @@ fn run_chrome(
     keymap: &Keymap,
     agents: &[hv_ui::AgentChoice],
     usage: Option<hv_ui::UsageView>,
+    archived: Vec<hv_ui::ArchivedRow>,
     cursor: egui::CursorIcon,
 ) -> (hv_render::UiFrame, hv_ui::ChromeOutput) {
     let input = ui.egui.take_egui_input(&ui.window);
     let mut model = ui.chrome_model(sidebar_visible, keymap, agents);
     model.usage = usage;
+    model.archived = archived;
+    model.confirm = ui
+        .confirm_close
+        .map(|_| hv_ui::strings::CONFIRM_CLOSE.to_owned());
     model.title_bar = match ui.title_bar {
         TitleBarMode::Native => hv_ui::TitleBar::Native,
         TitleBarMode::Custom => hv_ui::TitleBar::Custom {

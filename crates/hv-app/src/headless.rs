@@ -244,6 +244,8 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             usage,
             peek: None,
             // Same title bar as the window would have with the default config.
+            archived: Vec::new(),
+            confirm: None,
             title_bar: if cfg!(windows) {
                 hv_ui::TitleBar::Custom { maximized: false }
             } else if cfg!(target_os = "macos") {

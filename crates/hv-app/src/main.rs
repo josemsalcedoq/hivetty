@@ -5,6 +5,7 @@
 
 mod agents_cli;
 mod app;
+mod archive;
 mod crash;
 mod headless;
 mod hook;

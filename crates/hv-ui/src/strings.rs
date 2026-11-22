@@ -269,3 +269,25 @@ pub fn command_finished(name: &str, exit_code: Option<i32>, took: &str) -> Strin
         _ => format!("{name}: done after {took}"),
     }
 }
+/// Session context menu (S-13).
+pub const MENU_FOCUS: &str = "Focus";
+/// Session context menu.
+pub const MENU_PEEK: &str = "Peek";
+/// Session context menu.
+pub const MENU_ARCHIVE: &str = "Archive";
+/// Session context menu.
+pub const MENU_COPY_ID: &str = "Copy session id";
+/// Session context menu.
+pub const MENU_SHOW_FOLDER: &str = "Show folder";
+/// Session context menu.
+pub const MENU_CLOSE: &str = "Close session…";
+/// Archived section (S-12).
+pub const ARCHIVED: &str = "Archived";
+/// Archived row buttons.
+pub const RESTORE_SESSION: &str = "Restore";
+/// Archived row buttons.
+pub const DELETE: &str = "Delete";
+/// Confirmation before closing a session.
+pub const CONFIRM_CLOSE: &str = "Close this session? Its programs will be stopped.";
+/// Confirmation button.
+pub const CLOSE: &str = "Close";

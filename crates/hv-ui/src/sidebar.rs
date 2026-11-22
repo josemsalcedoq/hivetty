@@ -3,7 +3,7 @@
 
 use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Vec2};
 
-use crate::{RowState, SessionRow, elide, state_color, strings, theme};
+use crate::{ArchivedRow, RowState, SessionMenu, SessionRow, elide, state_color, strings, theme};
 
 /// Height kept free under the list for the agent dock.
 const DOCK_HEIGHT: f32 = 44.0;
@@ -52,8 +52,10 @@ impl Sidebar {
         &mut self,
         ui: &mut egui::Ui,
         sessions: &[SessionRow],
+        archived: &[ArchivedRow],
         new_session_hint: &str,
-    ) -> (Option<usize>, bool, Option<usize>) {
+    ) -> SidebarOutput {
+        let mut out = SidebarOutput::default();
         let mut clicked = None;
         let mut new_session = false;
         let mut peek = None;
@@ -135,6 +137,7 @@ impl Sidebar {
                         match session_row(ui, row) {
                             RowClick::Open => clicked = Some(*index),
                             RowClick::Peek => peek = Some(*index),
+                            RowClick::Menu(choice) => out.menu = Some((*index, choice)),
                             RowClick::None => {}
                         }
                     }
@@ -144,8 +147,46 @@ impl Sidebar {
                 } else if visible.is_empty() {
                     ui.label(RichText::new(strings::NO_MATCHES).color(theme::TEXT_MUTED()));
                 }
+                if !archived.is_empty() {
+                    ui.add_space(10.0);
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!("{} {}", strings::ARCHIVED, archived.len()))
+                            .size(12.0)
+                            .color(theme::TEXT_SECONDARY()),
+                    )
+                    .id_salt("archived")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        for (i, row) in archived.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&row.title).size(12.0));
+                                    ui.label(
+                                        RichText::new(&row.detail)
+                                            .size(11.0)
+                                            .color(theme::TEXT_MUTED()),
+                                    );
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.small_button(strings::DELETE).clicked() {
+                                            out.archive_delete = Some(i);
+                                        }
+                                        if ui.small_button(strings::RESTORE_SESSION).clicked() {
+                                            out.archive_restore = Some(i);
+                                        }
+                                    },
+                                );
+                            });
+                        }
+                    });
+                }
             });
-        (clicked, new_session, peek)
+        out.clicked = clicked;
+        out.new_session = new_session;
+        out.peek = peek;
+        out
     }
 }
 
@@ -155,11 +196,23 @@ fn matches_query(row: &SessionRow, query: &str) -> bool {
         .any(|field| field.to_lowercase().contains(query))
 }
 
+/// What the sidebar produced this frame.
+#[derive(Debug, Default)]
+pub(crate) struct SidebarOutput {
+    pub(crate) clicked: Option<usize>,
+    pub(crate) new_session: bool,
+    pub(crate) peek: Option<usize>,
+    pub(crate) menu: Option<(usize, SessionMenu)>,
+    pub(crate) archive_restore: Option<usize>,
+    pub(crate) archive_delete: Option<usize>,
+}
+
 /// What a click on a row asked for.
 enum RowClick {
     None,
     Open,
     Peek,
+    Menu(SessionMenu),
 }
 
 /// One two-line row: dot, title, elapsed time / state or activity. Waiting rows get a Peek
@@ -253,12 +306,24 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
             click = RowClick::Peek;
         }
     }
-    if matches!(click, RowClick::None) {
-        if response.secondary_clicked() {
-            click = RowClick::Peek;
-        } else if response.clicked() {
-            click = RowClick::Open;
-        }
+    if matches!(click, RowClick::None) && response.clicked() {
+        click = RowClick::Open;
     }
+    // Right click: the session menu (S-13).
+    response.context_menu(|ui| {
+        for (choice, label) in [
+            (SessionMenu::Focus, strings::MENU_FOCUS),
+            (SessionMenu::Peek, strings::MENU_PEEK),
+            (SessionMenu::Archive, strings::MENU_ARCHIVE),
+            (SessionMenu::CopyId, strings::MENU_COPY_ID),
+            (SessionMenu::ShowFolder, strings::MENU_SHOW_FOLDER),
+            (SessionMenu::Close, strings::MENU_CLOSE),
+        ] {
+            if ui.button(label).clicked() {
+                click = RowClick::Menu(choice);
+                ui.close();
+            }
+        }
+    });
     click
 }

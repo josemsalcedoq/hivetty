@@ -39,6 +39,25 @@ pub struct SessionRow {
     pub unseen: bool,
 }
 
+/// An entry of the session context menu (S-13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionMenu {
+    Focus,
+    Peek,
+    Archive,
+    CopyId,
+    ShowFolder,
+    Close,
+}
+
+/// An archived session in the sidebar's Archived section (S-12).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchivedRow {
+    pub title: String,
+    /// Agent and project ("Claude Code · hivetty").
+    pub detail: String,
+}
+
 /// Coarse session state shown in the sidebar (docs/ui-spec.md 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowState {
@@ -76,6 +95,10 @@ pub struct ChromeModel {
     pub peek: Option<PeekView>,
     /// Whether the tab bar is also the window's title bar (F1-02).
     pub title_bar: TitleBar,
+    /// Archived sessions (S-12).
+    pub archived: Vec<ArchivedRow>,
+    /// A question to confirm, if one is pending (shown as a small dialog).
+    pub confirm: Option<String>,
 }
 
 /// What the chrome produced this frame.
@@ -102,6 +125,13 @@ pub struct ChromeOutput {
     pub peek_request: Option<usize>,
     /// Something done in the peek popover.
     pub peek_action: Option<PeekAction>,
+    /// A session menu entry chosen: `(row index, entry)`.
+    pub session_menu: Option<(usize, SessionMenu)>,
+    /// Restore or delete an archived session (index in `archived`).
+    pub archive_restore: Option<usize>,
+    pub archive_delete: Option<usize>,
+    /// The answer to `confirm`: `Some(true)` confirmed, `Some(false)` cancelled.
+    pub confirmed: Option<bool>,
 }
 
 impl std::fmt::Debug for ChromeOutput {
@@ -123,6 +153,8 @@ pub struct Chrome {
     sidebar: sidebar::Sidebar,
     new_session: Option<new_session::Dialog>,
     peek: Option<peek::Peek>,
+    /// A confirmation dialog was shown last frame (it takes the keyboard).
+    confirm_open: bool,
 }
 
 /// Sidebar width in points (docs/ui-spec.md 1: 300 px default; narrower until tabs exist).
@@ -140,6 +172,7 @@ impl Chrome {
             sidebar: sidebar::Sidebar::default(),
             new_session: None,
             peek: None,
+            confirm_open: false,
         }
     }
 
@@ -164,12 +197,17 @@ impl Chrome {
         let mut usage_action = None;
         let mut peek_request = None;
         let mut peek_action = None;
+        let mut session_menu = None;
+        let mut archive_restore = None;
+        let mut archive_delete = None;
+        let mut confirmed = None;
         if model.peek.is_none() {
             self.peek = None;
         } else if self.peek.is_none() {
             self.peek = Some(peek::Peek::opened());
         }
         let peek_state = &mut self.peek;
+        self.confirm_open = model.confirm.is_some();
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 egui::Panel::left("sidebar")
@@ -182,10 +220,18 @@ impl Chrome {
                             .stroke(Stroke::new(1.0, theme::BORDER())),
                     )
                     .show(ui, |ui| {
-                        let out = sidebar_state.show(ui, &model.sessions, &model.new_session_hint);
-                        clicked_session = out.0;
-                        new_session_clicked = out.1;
-                        peek_request = out.2;
+                        let out = sidebar_state.show(
+                            ui,
+                            &model.sessions,
+                            &model.archived,
+                            &model.new_session_hint,
+                        );
+                        clicked_session = out.clicked;
+                        new_session_clicked = out.new_session;
+                        peek_request = out.peek;
+                        session_menu = out.menu;
+                        archive_restore = out.archive_restore;
+                        archive_delete = out.archive_delete;
                         // The dock sits under the list (which leaves room for it).
                         ui.separator();
                         dock_choice = new_session::dock(ui, &model.agents);
@@ -208,6 +254,9 @@ impl Chrome {
             central = ui.available_rect_before_wrap();
             if let Some(view) = &model.usage {
                 usage_action = usage::show(ui.ctx(), central, view);
+            }
+            if let Some(question) = &model.confirm {
+                confirmed = confirm_dialog(ui.ctx(), question);
             }
             if let (Some(view), Some(state)) = (&model.peek, peek_state.as_mut()) {
                 peek_action = state.show(ui.ctx(), view);
@@ -252,6 +301,10 @@ impl Chrome {
             usage_action,
             peek_request,
             peek_action,
+            session_menu,
+            archive_restore,
+            archive_delete,
+            confirmed,
         }
     }
 
@@ -285,6 +338,7 @@ impl Chrome {
         self.palette.is_some()
             || self.new_session.is_some()
             || self.peek.is_some()
+            || self.confirm_open
             || self.tab_bar.editing()
             || self.ctx.egui_wants_keyboard_input()
     }
@@ -308,6 +362,53 @@ fn state_color(state: RowState) -> Color32 {
         RowState::Error => theme::STATE_ERROR(),
         RowState::Idle => theme::TEXT_MUTED(),
     }
+}
+
+/// A small yes/no dialog. Enter confirms, Esc cancels.
+fn confirm_dialog(ctx: &egui::Context, question: &str) -> Option<bool> {
+    let (enter, escape) = ctx.input(|i| {
+        (
+            i.key_pressed(egui::Key::Enter),
+            i.key_pressed(egui::Key::Escape),
+        )
+    });
+    if escape {
+        return Some(false);
+    }
+    if enter {
+        return Some(true);
+    }
+    let mut answer = None;
+    let screen = ctx.content_rect();
+    let width = 380.0_f32.min(screen.width() - 32.0);
+    egui::Area::new(egui::Id::unique("confirm"))
+        .order(egui::Order::Foreground)
+        .fade_in(false)
+        .fixed_pos(egui::pos2(
+            screen.center().x - width / 2.0,
+            screen.top() + 120.0,
+        ))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme::ELEVATED_BG())
+                .stroke(Stroke::new(1.0, theme::BORDER()))
+                .corner_radius(egui::CornerRadius::same(10))
+                .inner_margin(Margin::same(14))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.label(question);
+                    ui.add_space(10.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(strings::CLOSE).clicked() {
+                            answer = Some(true);
+                        }
+                        if ui.button(strings::CANCEL).clicked() {
+                            answer = Some(false);
+                        }
+                    });
+                });
+        });
+    answer
 }
 
 /// Shortens `text` with an ellipsis so it fits in `width` points.
@@ -468,6 +569,8 @@ mod tests {
             usage: None,
             peek: None,
             title_bar: TitleBar::Native,
+            archived: Vec::new(),
+            confirm: None,
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
                 subtitle: "Needs permission: Bash".into(),
@@ -522,6 +625,8 @@ mod tests {
             usage: None,
             peek: None,
             title_bar: TitleBar::Native,
+            archived: Vec::new(),
+            confirm: None,
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),
                 subtitle: "Working".into(),
