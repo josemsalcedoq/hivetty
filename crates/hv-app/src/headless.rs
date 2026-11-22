@@ -96,11 +96,7 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
     if let Some(chrome) = chrome.as_mut() {
         let model = hv_ui::ChromeModel {
             sidebar_visible: true,
-            tabs: vec![hv_ui::TabItem {
-                title: String::new(),
-                state: hv_ui::RowState::Idle,
-                active: true,
-            }],
+            tabs: vec![hv_ui::TabItem::new("", hv_ui::RowState::Idle, true)],
             ..Default::default()
         };
         let out = chrome.run(raw_input(width, height), &model);
@@ -195,10 +191,15 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
         let model = hv_ui::ChromeModel {
             sidebar_visible: true,
             sessions,
-            tabs: vec![hv_ui::TabItem {
-                title,
-                state: hv_ui::RowState::Idle,
-                active: true,
+            tabs: vec![{
+                let main = panes.last().expect("at least one pane");
+                let state = crate::model::session_row(&main.info, None).state;
+                let mut tab = hv_ui::TabItem::new(title, state, true);
+                if let Some((kind, value)) = main.info.progress {
+                    tab.progress = Some(f32::from(value) / 100.0);
+                    tab.progress_error = kind == 2;
+                }
+                tab
             }],
         };
         if opts.palette {

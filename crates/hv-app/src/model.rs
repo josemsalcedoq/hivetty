@@ -18,6 +18,13 @@ pub(crate) struct SessionInfo {
     pub(crate) exited: bool,
     /// Agent state from OSC 7501, hooks and notifications.
     pub(crate) agent: Tracker,
+    /// Something finished or needs the user here while another pane had the focus.
+    pub(crate) unseen: bool,
+    /// The bell rang here while another pane had the focus.
+    pub(crate) bell: bool,
+    /// OSC 9;4 progress: `(state, percent)`; state 1 = normal, 2 = error, 3 = indeterminate,
+    /// 4 = paused.
+    pub(crate) progress: Option<(u8, u8)>,
 }
 
 impl SessionInfo {
@@ -27,6 +34,9 @@ impl SessionInfo {
             started: Instant::now(),
             exited: false,
             agent: Tracker::default(),
+            unseen: false,
+            bell: false,
+            progress: None,
         }
     }
 
@@ -50,8 +60,22 @@ impl SessionInfo {
                 },
                 now,
             ),
+            TermEvent::Progress { state, value } => {
+                let new = (*state != 0).then_some((*state, *value));
+                let changed = new != self.progress;
+                self.progress = new;
+                changed
+            }
             _ => false,
         }
+    }
+
+    /// Whether the current state is one the user should come back for.
+    pub(crate) fn needs_attention(&self) -> bool {
+        matches!(
+            self.agent.state(),
+            Some(AgentState::Done | AgentState::Blocked { .. } | AgentState::Error)
+        )
     }
 
     /// Feeds a hook forwarded by `hivetty hook` (already routed to this pane by its
@@ -150,6 +174,28 @@ mod tests {
             event: event.into(),
             payload: payload.into(),
         }
+    }
+
+    #[test]
+    fn progress_and_attention_follow_terminal_events() {
+        let mut info = SessionInfo::new();
+        assert!(info.on_term_event(&TermEvent::Progress {
+            state: 1,
+            value: 40
+        }));
+        assert_eq!(info.progress, Some((1, 40)));
+        assert!(!info.on_term_event(&TermEvent::Progress {
+            state: 1,
+            value: 40
+        }));
+        assert!(info.on_term_event(&TermEvent::Progress { state: 0, value: 0 }));
+        assert_eq!(info.progress, None);
+        assert!(!info.needs_attention());
+        info.on_term_event(&TermEvent::Notify {
+            title: None,
+            body: "Claude needs your input".into(),
+        });
+        assert!(info.needs_attention());
     }
 
     #[test]

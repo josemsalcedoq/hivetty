@@ -4,6 +4,8 @@ use egui::Color32;
 
 pub(crate) const SIDEBAR_BG: Color32 = Color32::from_rgb(0x11, 0x11, 0x13);
 pub(crate) const ELEVATED_BG: Color32 = Color32::from_rgb(0x18, 0x18, 0x1B);
+/// Progress bars and the unseen dot (`chart.output`).
+pub(crate) const ACCENT: Color32 = Color32::from_rgb(0x4E, 0xA1, 0xFF);
 pub(crate) const SELECTED_BG: Color32 = Color32::from_rgb(0x23, 0x23, 0x27);
 pub(crate) const HOVER_BG: Color32 = Color32::from_rgb(0x1C, 0x1C, 0x20);
 pub(crate) const BORDER: Color32 = Color32::from_rgb(0x26, 0x26, 0x2B);

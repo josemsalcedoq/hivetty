@@ -144,6 +144,8 @@ struct Ui {
     terminal_area: Option<[f32; 4]>,
     /// Sidebar row index → pane, from the last frame.
     row_panes: Vec<PaneId>,
+    /// When egui asked to be painted again (animations such as the tab spinner).
+    repaint_at: Option<Instant>,
 }
 
 impl Ui {
@@ -220,11 +222,30 @@ impl Ui {
                     .filter(|t| !t.trim().is_empty())
                     .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned())
             });
-            tabs.push(hv_ui::TabItem {
-                title,
-                state: most_urgent,
-                active: index == self.tabs.active,
-            });
+            let panes: Vec<&Pane> = tab
+                .root
+                .panes()
+                .iter()
+                .filter_map(|id| self.panes.get(id))
+                .collect();
+            let mut item = hv_ui::TabItem::new(title, most_urgent, index == self.tabs.active);
+            item.unseen = panes.iter().any(|p| p.info.unseen);
+            item.bell = panes.iter().any(|p| p.info.bell);
+            // The focused pane's progress, else any pane's.
+            let progress = self
+                .panes
+                .get(&tab.focused)
+                .and_then(|p| p.info.progress)
+                .or_else(|| panes.iter().find_map(|p| p.info.progress));
+            if let Some((state, value)) = progress {
+                item.progress = Some(if state == 3 {
+                    1.0
+                } else {
+                    f32::from(value) / 100.0
+                });
+                item.progress_error = state == 2;
+            }
+            tabs.push(item);
         }
         hv_ui::ChromeModel {
             sessions,
@@ -413,6 +434,7 @@ impl App {
             layout: Layout::default(),
             terminal_area: None,
             row_panes: Vec::new(),
+            repaint_at: None,
         };
         apply_font(&mut ui, &self.config.font);
         if let Some(layout) = restore {
@@ -672,6 +694,13 @@ impl App {
         }
         self.mouse.hover_link = None;
         if let Some(ui) = &mut self.ui {
+            // Looking at a pane clears its indicators.
+            if let Some(id) = ui.focused_id()
+                && let Some(pane) = ui.panes.get_mut(&id)
+            {
+                pane.info.unseen = false;
+                pane.info.bell = false;
+            }
             let title = ui
                 .focused()
                 .and_then(|p| p.info.title.clone())
@@ -1137,7 +1166,12 @@ impl App {
                         pane.info.title = None;
                     }
                     SessionEvent::Exited => exited.push(*id),
-                    SessionEvent::Bell => bell = true,
+                    SessionEvent::Bell => {
+                        bell = true;
+                        if Some(*id) != focused {
+                            pane.info.bell = true;
+                        }
+                    }
                     SessionEvent::ClipboardStore(text) => {
                         if let Err(err) =
                             arboard::Clipboard::new().and_then(|mut c| c.set_text(text))
@@ -1147,7 +1181,12 @@ impl App {
                     }
                     SessionEvent::Term(term_event) => {
                         log::debug!("terminal event in pane {id}: {term_event:?}");
-                        pane.info.on_term_event(&term_event);
+                        if pane.info.on_term_event(&term_event)
+                            && Some(*id) != focused
+                            && pane.info.needs_attention()
+                        {
+                            pane.info.unseen = true;
+                        }
                     }
                 }
             }
@@ -1282,6 +1321,21 @@ impl App {
                 }
                 self.focus_changed();
             }
+            hv_ui::TabAction::Rename(index, name) => {
+                if let Some(tab) = ui.tabs.list.get_mut(index) {
+                    tab.title_override = (!name.is_empty()).then_some(name);
+                }
+            }
+            hv_ui::TabAction::Move { from, to } => {
+                if from < ui.tabs.list.len() && to < ui.tabs.list.len() {
+                    let active = ui.tabs.list.get(ui.tabs.active).map(|t| t.focused);
+                    let tab = ui.tabs.list.remove(from);
+                    ui.tabs.list.insert(to, tab);
+                    if let Some(pane) = active {
+                        ui.tabs.focus_pane(pane);
+                    }
+                }
+            }
             hv_ui::TabAction::New => {
                 let cwd = ui.focused().and_then(|p| p.session.cwd());
                 let Some(ui) = self.ui.take() else { return };
@@ -1327,14 +1381,17 @@ fn run_chrome(
     }
     let platform = std::mem::take(&mut out.full.platform_output);
     ui.egui.handle_platform_output(&ui.window, platform);
-    if out
+    let delay = out
         .full
         .viewport_output
         .values()
-        .any(|v| v.repaint_delay.is_zero())
-    {
+        .map(|v| v.repaint_delay)
+        .min()
+        .unwrap_or(Duration::MAX);
+    if delay.is_zero() {
         ui.window.request_redraw();
     }
+    ui.repaint_at = (delay < Duration::from_secs(1)).then(|| Instant::now() + delay);
     let shapes = std::mem::take(&mut out.full.shapes);
     let textures = std::mem::take(&mut out.full.textures_delta);
     let frame = hv_render::UiFrame {
@@ -1390,11 +1447,17 @@ impl ApplicationHandler<AppEvent> for App {
                     .session
                     .as_deref()
                     .and_then(|s| s.parse::<PaneId>().ok());
-                if let Some(ui) = &mut self.ui
-                    && let Some(pane) = target.and_then(|id| ui.panes.get_mut(&id))
-                    && pane.info.on_hook(&hook)
-                {
-                    ui.window.request_redraw();
+                if let Some(ui) = &mut self.ui {
+                    let focused = ui.focused_id();
+                    if let Some(id) = target
+                        && let Some(pane) = ui.panes.get_mut(&id)
+                        && pane.info.on_hook(&hook)
+                    {
+                        if Some(id) != focused && pane.info.needs_attention() {
+                            pane.info.unseen = true;
+                        }
+                        ui.window.request_redraw();
+                    }
                 }
             }
             AppEvent::Wakeup => {
@@ -1407,7 +1470,10 @@ impl ApplicationHandler<AppEvent> for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         // egui sees pointer and window events; the keyboard belongs to the terminal unless an
         // egui text field (the command palette) is open.
-        let palette_open = self.ui.as_ref().is_some_and(|ui| ui.chrome.palette_open());
+        let palette_open = self
+            .ui
+            .as_ref()
+            .is_some_and(|ui| ui.chrome.takes_keyboard());
         if let Some(ui) = &mut self.ui
             && !matches!(event, WindowEvent::RedrawRequested)
             && (palette_open
@@ -1496,7 +1562,10 @@ impl ApplicationHandler<AppEvent> for App {
                 crate::model::next_elapsed_change(since, now)
             })
             .min();
-        let deadline = [sync, self.bell_until, tick].into_iter().flatten().min();
+        let deadline = [sync, self.bell_until, tick, ui.repaint_at]
+            .into_iter()
+            .flatten()
+            .min();
         event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 }
