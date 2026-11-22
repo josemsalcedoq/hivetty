@@ -192,6 +192,33 @@ hivetty can also be Claude Code's statusline. It prints the model, the context w
 
 When a session needs you or finishes while you are looking elsewhere, you get a desktop notification. Click it to go to that session (Windows and Linux). Several at once are grouped ("4 sessions need you"). If you close hivetty while agents are running, it offers to resume them the next time it opens (`[agents] restore_on_launch`).
 
+### Agents inside tmux, SSH or WSL
+
+What hivetty can see depends on where the agent runs:
+
+| | State (OSC 7501) | Hooks (current action, permissions) | Guessed state (≈) |
+|---|---|---|---|
+| In a hivetty pane | yes | yes | yes |
+| Inside **tmux** | no: tmux drops it | yes, if tmux passes hivetty's variables (below) | no: the agent runs under the tmux server |
+| Over **SSH** | yes: it travels with the output | no: hooks need the local hivetty | no: locally the pane only runs `ssh` |
+| Inside **WSL** (Windows) | yes | yes, with hooks that run `hivetty.exe` (below) | no: Windows only sees `wsl.exe` |
+
+**tmux.** Make tmux hand hivetty's variables to new windows, in `~/.tmux.conf`:
+
+```
+set -g update-environment "HIVETTY_SESSION_ID HIVETTY_IPC HIVETTY_IPC_TOKEN"
+```
+
+tmux copies them when you attach, so the state shows on the hivetty pane where you attached last.
+
+**WSL.** hivetty adds its variables to `WSLENV`, so a `wsl` started in a pane receives them. Inside WSL, install the agent's hooks so that they run the Windows binary, for example in `~/.claude/settings.json` of your WSL home:
+
+```json
+"command": "'/mnt/c/Program Files/hivetty/hivetty.exe' hook --agent claude-code --event Stop"
+```
+
+(one entry per event, as `hivetty agents install-hooks --dry-run` lists them on Windows).
+
 ## Agent usage dashboard
 
 Press Ctrl+Alt+U (⌥⌘U) to open it. Choose 7 days, 30 days, 90 days or All. Press `esc` to close it. The dashboard shows:

@@ -90,6 +90,8 @@ Con los tres agentes:
 - [ ] Arrastrar el borde derecho de la barra lateral para hacerla más ancha o estrecha.
 - [ ] Cerrar hivetty con agentes trabajando y abrirlo: ofrece reanudarlos.
 
+- [ ] **Windows con WSL:** en un panel, `wsl` y luego `echo $HIVETTY_SESSION_ID` muestra un número (hivetty pasa sus variables a WSL).
+
 ## 6. Nueva sesión y worktrees
 
 - [ ] *New session* (`Ctrl+Shift+A` / `⇧⌘T`): elegir agente, carpeta y un prompt inicial. El agente arranca con ese prompt.

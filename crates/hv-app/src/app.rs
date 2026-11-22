@@ -769,6 +769,14 @@ impl App {
         }
         spec.env
             .push((hv_ipc::ENV_SESSION.to_owned(), id.to_string()));
+        // F4-24: `wsl` started in the pane sees hivetty's variables, and hooks inside WSL that
+        // run `hivetty.exe` hand them back to Windows.
+        if cfg!(windows) {
+            spec.env.push((
+                "WSLENV".to_owned(),
+                wslenv(std::env::var("WSLENV").ok().as_deref()),
+            ));
+        }
         if self.config.shell.integration
             && let Some(scripts) = &self.shell_dir
         {
@@ -3531,6 +3539,20 @@ fn open_in_editor(command: &str, dir: std::path::PathBuf) {
         });
 }
 
+/// `WSLENV` with hivetty's variables added (no flags: they cross both ways), keeping the
+/// user's own entries.
+fn wslenv(current: Option<&str>) -> String {
+    let ours = [hv_ipc::ENV_ENDPOINT, hv_ipc::ENV_TOKEN, hv_ipc::ENV_SESSION];
+    let mut parts: Vec<&str> = current
+        .unwrap_or_default()
+        .split(':')
+        .filter(|p| !p.is_empty())
+        .filter(|p| !ours.contains(&p.split('/').next().unwrap_or(p)))
+        .collect();
+    parts.extend(ours);
+    parts.join(":")
+}
+
 /// A desktop notification with its sound and click action, also forwarded to the phone when
 /// configured (F4-33).
 fn notify_with(
@@ -4100,6 +4122,18 @@ fn translate_key(event: &KeyEvent, mods: Mods) -> Option<TermKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wslenv_keeps_the_users_entries_once() {
+        assert_eq!(
+            wslenv(None),
+            "HIVETTY_IPC:HIVETTY_IPC_TOKEN:HIVETTY_SESSION_ID"
+        );
+        assert_eq!(
+            wslenv(Some("GOPATH/l:HIVETTY_IPC/u")),
+            "GOPATH/l:HIVETTY_IPC:HIVETTY_IPC_TOKEN:HIVETTY_SESSION_ID"
+        );
+    }
 
     #[test]
     fn plan_pace_estimates_when_the_limit_runs_out() {
