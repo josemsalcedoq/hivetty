@@ -111,6 +111,12 @@ fn quote_exe_powershell(exe: &Path) -> String {
     format!("'{exe}'")
 }
 
+/// The PowerShell form of `target`'s hook command (`& 'program' args`), whatever the
+/// platform: for agents that keep a separate Windows command (Codex's `commandWindows`).
+pub fn powershell_command(target: &HookTarget, exe: &Path, event: &str) -> String {
+    format!("& {}{}{event}", quote_exe_powershell(exe), target.marker())
+}
+
 /// What an install or uninstall would do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {

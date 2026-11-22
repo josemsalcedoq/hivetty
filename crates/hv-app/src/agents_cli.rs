@@ -36,9 +36,9 @@ impl AgentsCommand {
                 .ok_or("--agent needs an agent id")?,
             None => "claude-code".to_owned(),
         };
-        if hv_agents::install::HookTarget::for_agent(&agent).is_none() {
+        if hv_agents::install::HookTarget::for_agent(&agent).is_none() && agent != "codex" {
             return Err(format!(
-                "hivetty cannot install hooks for '{agent}' (only claude-code and gemini-cli)"
+                "hivetty cannot install hooks for '{agent}' (only claude-code, codex and gemini-cli)"
             ));
         }
         match args.first().map(String::as_str) {
@@ -73,6 +73,25 @@ pub(crate) fn run(command: &AgentsCommand) -> Result<()> {
                 println!("  {:<14} {:<12} {status}{note}", profile.id, profile.name);
             }
             Ok(())
+        }
+        AgentsCommand::InstallHooks { dry_run, agent } if agent == "codex" => {
+            let path = hv_agents::codex::config_path(&home()?);
+            let exe = std::env::current_exe().context("cannot find the hivetty executable")?;
+            let text = read_or_empty(&path)?;
+            let plan = hv_agents::codex::plan_install(&text, &exe)
+                .map_err(|e| anyhow::anyhow!("{e} ({})", path.display()))?;
+            confirm_and_apply(&path, &plan, *dry_run, "Install hivetty's Codex hooks")?;
+            if !*dry_run && !plan.changes.is_empty() {
+                println!("Codex asks you to trust new hooks: open it once and approve them.");
+            }
+            Ok(())
+        }
+        AgentsCommand::UninstallHooks { dry_run, agent } if agent == "codex" => {
+            let path = hv_agents::codex::config_path(&home()?);
+            let text = read_or_empty(&path)?;
+            let plan = hv_agents::codex::plan_uninstall(&text)
+                .map_err(|e| anyhow::anyhow!("{e} ({})", path.display()))?;
+            confirm_and_apply(&path, &plan, *dry_run, "Remove hivetty's Codex hooks")
         }
         AgentsCommand::InstallHooks { dry_run, agent } => {
             let (target, path, name) = hook_target(agent)?;

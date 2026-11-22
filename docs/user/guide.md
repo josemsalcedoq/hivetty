@@ -176,7 +176,7 @@ The state of each session (working, waiting, done) comes from three sources:
    hivetty agents install-hooks             # shows the changes and asks before writing
    ```
 
-   For Gemini CLI, add `--agent gemini-cli`: the entries go to `~/.gemini/settings.json`, and its sessions show their state and current action the same way.
+   For Gemini CLI, add `--agent gemini-cli` (the entries go to `~/.gemini/settings.json`). For Codex, add `--agent codex` (they go to `[hooks]` in `~/.codex/config.toml`, keeping your comments); Codex then asks you once to trust them. Their sessions show their state and current action the same way.
 
    This adds entries to `~/.claude/settings.json` and keeps a backup next to it. Your own hooks are never touched. `hivetty agents uninstall-hooks` removes only hivetty's entries. The hook command does nothing outside hivetty and always exits immediately.
 3. **Notifications and the window title** that the agent sends.

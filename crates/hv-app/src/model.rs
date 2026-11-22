@@ -206,6 +206,11 @@ impl SessionInfo {
                 "claude-code",
                 "Claude Code",
             ),
+            "codex" => (
+                hv_agents::codex::from_hook(&hook.event, &hook.payload),
+                "codex",
+                "Codex",
+            ),
             "gemini" | "gemini-cli" => (
                 hv_agents::gemini::from_hook(&hook.event, &hook.payload),
                 "gemini-cli",
