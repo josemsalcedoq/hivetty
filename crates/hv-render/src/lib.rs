@@ -87,6 +87,9 @@ pub struct Renderer {
     /// Scrollback search bar text (`None` = hidden) and its laid-out label.
     search_text: Option<String>,
     search_label: Buffer,
+    /// IME composition text drawn at the cursor (F1-36), and its laid-out label.
+    preedit_text: Option<String>,
+    preedit_label: Buffer,
     /// Visual bell flash in progress.
     flash: bool,
     /// Where the grid goes, `[x, y, w, h]` in physical pixels; `None` = the whole surface.
@@ -239,6 +242,7 @@ impl Renderer {
 
         let (cell_w, cell_h) = measure_cell(&mut font_system, &font_family, font_size * scale);
         let search_label = Buffer::new(&mut font_system, Metrics::new(font_size * scale, cell_h));
+        let preedit_label = Buffer::new(&mut font_system, Metrics::new(font_size * scale, cell_h));
         let mut pill_label = Buffer::new(&mut font_system, Metrics::new(font_size * scale, cell_h));
         pill_label.set_size(Some(cell_w * 40.0), Some(cell_h));
         pill_label.set_text(
@@ -271,6 +275,8 @@ impl Renderer {
             pill_rect: None,
             search_text: None,
             search_label,
+            preedit_text: None,
+            preedit_label,
             flash: false,
             area: None,
             egui,
@@ -543,6 +549,7 @@ impl Renderer {
         self.update_rows(snap);
         let pill = self.layout_pill(snap, &mut over);
         let search = self.layout_search(&mut over);
+        let preedit = self.layout_preedit(snap, &mut over);
         if self.flash {
             let (w, h) = (self.config.width as f32, self.config.height as f32);
             over.push(Rect::with_alpha(0.0, 0.0, w, h, snap.foreground, 0.12));
@@ -606,6 +613,15 @@ impl Renderer {
             default_color: to_text_color(snap.foreground),
             custom_glyphs: &[],
         });
+        let preedit_area = preedit.map(|(x, y)| TextArea {
+            buffer: &self.preedit_label,
+            left: x,
+            top: y,
+            scale: 1.0,
+            bounds,
+            default_color: to_text_color(snap.foreground),
+            custom_glyphs: &[],
+        });
         self.ui_text
             .prepare(
                 &self.device,
@@ -613,7 +629,7 @@ impl Renderer {
                 &mut self.font_system,
                 &mut self.atlas,
                 &self.viewport,
-                pill_area.into_iter().chain(search_area),
+                pill_area.into_iter().chain(search_area).chain(preedit_area),
                 &mut self.swash_cache,
             )
             .map_err(|e| anyhow!("label prepare failed: {e}"))?;
@@ -723,6 +739,54 @@ impl Renderer {
             self.search_label
                 .shape_until_scroll(&mut self.font_system, false);
         }
+    }
+
+    /// Shows the IME composition text at the cursor, or hides it with `None` or `""`.
+    pub fn set_preedit(&mut self, text: Option<&str>) {
+        let text = text.filter(|t| !t.is_empty());
+        if self.preedit_text.as_deref() == text {
+            return;
+        }
+        self.preedit_text = text.map(str::to_owned);
+        if let Some(text) = text {
+            let attrs = Attrs::new().family(Family::Name(&self.font_family));
+            self.preedit_label
+                .set_metrics(Metrics::new(self.font_size * self.scale, self.cell_h));
+            self.preedit_label
+                .set_size(Some(self.cell_w * 400.0), Some(self.cell_h));
+            self.preedit_label
+                .set_text(text, &attrs, Shaping::Advanced, None);
+            self.preedit_label
+                .shape_until_scroll(&mut self.font_system, false);
+        }
+    }
+
+    /// Covers the cells under the cursor with the composition text, underlined like other
+    /// terminals do. Returns where its label goes.
+    fn layout_preedit(&mut self, snap: &Snapshot, over: &mut Vec<Rect>) -> Option<(f32, f32)> {
+        self.preedit_text.as_ref()?;
+        let cursor = snap.cursor?;
+        let (x, y, _, ch) = self.cell_rect(cursor.row, cursor.col);
+        let width = self
+            .preedit_label
+            .layout_runs()
+            .map(|run| run.line_w)
+            .fold(0.0f32, f32::max)
+            .max(self.cell_w)
+            .ceil();
+        // Keep it inside the grid area: shift left when it would overflow the right edge.
+        let [ax, _, aw, _] = self.area();
+        let x = x.min(ax + aw - width).max(ax).round();
+        let thickness = self.scale.round().max(1.0);
+        over.push(Rect::new(x, y, width, ch, snap.background));
+        over.push(Rect::new(
+            x,
+            y + ch - thickness,
+            width,
+            thickness,
+            snap.foreground,
+        ));
+        Some((x, y))
     }
 
     /// Adds the search bar (top right). Returns where its label goes.

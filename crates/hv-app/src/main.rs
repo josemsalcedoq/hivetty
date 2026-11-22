@@ -33,6 +33,7 @@ OPTIONS:
     --record <FILE>      Record all terminal output to an asciicast v2 file (debugging)
     --ui                 With --screenshot, also draw the window chrome (sidebar)
     --find <PATTERN>     With --screenshot, search the scrollback (regex) and show the result
+    --preedit <TEXT>     With --screenshot, draw TEXT as input-method composition at the cursor
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
     hook --agent <ID> --event <NAME>
@@ -58,6 +59,7 @@ enum Command {
         scroll: i32,
         find: Option<String>,
         ui: bool,
+        preedit: Option<String>,
     },
     Doctor,
     Usage {
@@ -75,6 +77,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut scroll = 0;
     let mut find = None;
     let mut ui = false;
+    let mut preedit = None;
     let mut record: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
@@ -121,6 +124,10 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 find = Some(value(i)?.clone());
                 i += 1;
             }
+            "--preedit" => {
+                preedit = Some(value(i)?.clone());
+                i += 1;
+            }
             "--scroll" => {
                 scroll = value(i)?.parse().map_err(|_| "invalid --scroll")?;
                 i += 1;
@@ -145,6 +152,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             scroll,
             find,
             ui,
+            preedit,
         },
         None => Command::Run(spec, record),
     })
@@ -203,6 +211,7 @@ fn main() -> ExitCode {
             scroll,
             find,
             ui,
+            preedit,
         } => {
             let opts = headless::Capture {
                 cols,
@@ -212,6 +221,7 @@ fn main() -> ExitCode {
                 scroll_up: scroll,
                 find,
                 ui,
+                preedit,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))

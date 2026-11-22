@@ -26,6 +26,8 @@ pub(crate) struct Capture {
     pub(crate) find: Option<String>,
     /// Draw the egui chrome (sidebar) too.
     pub(crate) ui: bool,
+    /// Draw this as IME composition text at the cursor.
+    pub(crate) preedit: Option<String>,
 }
 
 impl Default for Capture {
@@ -39,6 +41,7 @@ impl Default for Capture {
             scroll_up: 0,
             find: None,
             ui: false,
+            preedit: None,
         }
     }
 }
@@ -119,6 +122,7 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
     if opts.scroll_up > 0 {
         session.scroll(opts.scroll_up);
     }
+    renderer.set_preedit(opts.preedit.as_deref());
     if let Some(pattern) = &opts.find {
         let status = match session.search(pattern) {
             Ok(true) => "",

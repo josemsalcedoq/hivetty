@@ -402,16 +402,29 @@ impl App {
 
     fn on_ime(&mut self, ime: Ime) {
         match ime {
-            Ime::Preedit(text, _) => self.ime_composing = !text.is_empty(),
+            Ime::Preedit(text, _) => {
+                self.ime_composing = !text.is_empty();
+                if let Some(ui) = &mut self.ui {
+                    ui.renderer.set_preedit(Some(&text));
+                    ui.window.request_redraw();
+                }
+            }
             Ime::Commit(text) => {
                 self.ime_composing = false;
-                if let Some(ui) = &self.ui {
+                if let Some(ui) = &mut self.ui {
+                    ui.renderer.set_preedit(None);
                     ui.session.select_clear();
                     ui.session.scroll_to_bottom();
                     ui.session.write(text.as_bytes());
                 }
             }
-            Ime::Enabled | Ime::Disabled => self.ime_composing = false,
+            Ime::Enabled | Ime::Disabled => {
+                self.ime_composing = false;
+                if let Some(ui) = &mut self.ui {
+                    ui.renderer.set_preedit(None);
+                    ui.window.request_redraw();
+                }
+            }
         }
     }
 
