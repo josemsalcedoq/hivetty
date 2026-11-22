@@ -49,6 +49,8 @@ pub struct UsageRecord {
     pub cache_read_tokens: u64,
     /// Input tokens written to the prompt cache.
     pub cache_write_tokens: u64,
+    /// Reasoning ("thinking") tokens, already counted in `output_tokens` (F5-18).
+    pub reasoning_tokens: u64,
 }
 
 impl UsageRecord {

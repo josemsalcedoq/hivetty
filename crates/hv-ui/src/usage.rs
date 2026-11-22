@@ -229,7 +229,17 @@ fn body(ui: &mut egui::Ui, d: &Dashboard) -> Option<UsageAction> {
         (
             strings::KPI_OUTPUT,
             compact(d.output),
-            format!("{} {}", compact(d.output_per_turn), strings::PER_TURN),
+            if d.reasoning > 0 {
+                format!(
+                    "{} {} · {} {}",
+                    compact(d.output_per_turn),
+                    strings::PER_TURN,
+                    compact(d.reasoning),
+                    strings::REASONING
+                )
+            } else {
+                format!("{} {}", compact(d.output_per_turn), strings::PER_TURN)
+            },
             d.delta_output,
             d.daily.iter().map(|x| x.output).collect(),
         ),

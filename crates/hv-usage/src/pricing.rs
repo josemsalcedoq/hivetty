@@ -97,6 +97,7 @@ cache_read = 1.5
             output_tokens: 100_000,
             cache_read_tokens: 2_000_000,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
         }
     }
 

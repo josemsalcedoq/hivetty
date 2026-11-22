@@ -13,8 +13,8 @@ use crate::{FileContext, Task, UsageRecord};
 
 /// Bump when the stored format or what counts as a task changes; older caches are discarded
 /// and rebuilt. 2: subagent prompts and interruptions are no longer tasks. 3: Codex and Gemini
-/// CLI logs, with a context per file.
-const VERSION: u32 = 3;
+/// CLI logs, with a context per file. 4: reasoning tokens.
+const VERSION: u32 = 4;
 /// A cache larger than this is not ours (or is corrupt): rebuild instead of reading it.
 const MAX_CACHE: u64 = 512 << 20;
 
@@ -38,6 +38,7 @@ struct StoredRecord {
     output: u64,
     cache_read: u64,
     cache_write: u64,
+    reasoning: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,6 +188,7 @@ impl Store {
                     output: r.output_tokens,
                     cache_read: r.cache_read_tokens,
                     cache_write: r.cache_write_tokens,
+                    reasoning: r.reasoning_tokens,
                 }));
             self.inner
                 .tasks
@@ -215,6 +217,7 @@ impl Store {
                 output_tokens: r.output,
                 cache_read_tokens: r.cache_read,
                 cache_write_tokens: r.cache_write,
+                reasoning_tokens: r.reasoning,
             })
             .collect()
     }

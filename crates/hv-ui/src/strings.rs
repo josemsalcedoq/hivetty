@@ -418,3 +418,5 @@ pub const REMOVE: &str = "Remove";
 pub const WORKTREE_NOT_REMOVED: &str = "The worktree was not removed";
 /// Notification when part of the first-run setup failed.
 pub const SETUP_PROBLEM: &str = "Part of the setup was not applied";
+/// Output card: the reasoning part (F5-18).
+pub const REASONING: &str = "reasoning";

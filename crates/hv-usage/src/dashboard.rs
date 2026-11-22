@@ -60,6 +60,8 @@ pub struct Dashboard {
     pub turns: u64,
     /// Output per turn (U-11).
     pub output_per_turn: u64,
+    /// The part of the output that was reasoning (F5-18), for agents that report it.
+    pub reasoning: u64,
     /// TASKS (U-12).
     pub tasks: u64,
     /// AGENT TIME in seconds and the most sessions active at once (U-13).
@@ -183,6 +185,7 @@ pub fn build(
 
     let mut input = 0;
     let mut output = 0;
+    let mut reasoning = 0;
     let mut cache_read = 0;
     let mut turns = 0;
     let (mut prev_input, mut prev_output) = (0, 0);
@@ -200,6 +203,7 @@ pub fn build(
         }
         input += r.total_input();
         output += r.output_tokens;
+        reasoning += r.reasoning_tokens;
         cache_read += r.cache_read_tokens;
         turns += 1;
         let day = by_day.entry(*date).or_insert(Day {
@@ -391,6 +395,7 @@ pub fn build(
         output,
         turns,
         output_per_turn: output.checked_div(turns).unwrap_or(0),
+        reasoning,
         tasks: task_count,
         agent_seconds: total_agent_seconds,
         max_concurrency,
@@ -489,6 +494,7 @@ mod tests {
             output_tokens: output,
             cache_read_tokens: cache,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
         }
     }
 

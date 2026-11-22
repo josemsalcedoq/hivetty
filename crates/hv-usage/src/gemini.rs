@@ -138,6 +138,7 @@ pub fn parse_activity(
                     output_tokens: tokens.output + tokens.thoughts,
                     cache_read_tokens: cached,
                     cache_write_tokens: 0,
+                    reasoning_tokens: tokens.thoughts,
                 });
             }
             Some("user")
@@ -181,6 +182,7 @@ mod tests {
         assert_eq!((first.agent, first.provider), ("gemini-cli", "google"));
         assert_eq!(first.model, "gemini-3.5-flash-lite");
         assert_eq!((first.input_tokens, first.output_tokens), (8412, 18 + 437));
+        assert_eq!(first.reasoning_tokens, 437);
         let second = &records[1];
         assert_eq!(
             (second.input_tokens, second.cache_read_tokens),

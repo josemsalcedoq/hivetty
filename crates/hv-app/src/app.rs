@@ -3928,6 +3928,7 @@ mod tests {
             output_tokens: 10,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
         };
         let records = [
             rec("a", "2026-11-20T10:00:00Z", "model-old", 100),

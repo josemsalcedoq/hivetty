@@ -39,6 +39,8 @@ struct Usage {
     cache_write_input_tokens: u64,
     #[serde(default)]
     output_tokens: u64,
+    #[serde(default)]
+    reasoning_output_tokens: u64,
 }
 
 /// `~/.codex/sessions` (or `$CODEX_HOME/sessions`), if it exists.
@@ -185,6 +187,7 @@ pub fn parse_activity(
                     output_tokens: usage.output_tokens,
                     cache_read_tokens: cached,
                     cache_write_tokens: write,
+                    reasoning_tokens: usage.reasoning_output_tokens.min(usage.output_tokens),
                 });
             }
             "response_item" => {

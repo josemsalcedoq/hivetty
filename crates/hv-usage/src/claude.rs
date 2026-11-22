@@ -187,6 +187,7 @@ pub fn parse_activity(
             output_tokens: usage.output_tokens,
             cache_read_tokens: usage.cache_read_input_tokens,
             cache_write_tokens: usage.cache_creation_input_tokens,
+            reasoning_tokens: 0,
         });
     }
     (out, tasks)
