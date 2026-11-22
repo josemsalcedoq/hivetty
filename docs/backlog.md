@@ -245,6 +245,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 **Estado (2026-11-22):**
 - 🟡 F6-01: tema claro y oscuro en todo (paleta del terminal con ANSI más oscuros para contraste sobre blanco, colores del renderer y tokens de la interfaz). `[theme] name = "system"` (por defecto) sigue al SO en vivo; `hivetty-dark` y `hivetty-light` lo fuerzan. Faltan alto contraste e importar temas de iTerm2 y Alacritty.
+- 🟡 F5-13: coste estimado con la tabla de precios del usuario (`pricing.toml`, prefijo más largo; caché sin precio propio se cobra como entrada). La tarjeta de entrada muestra "≈ $X API equivalent" y avisa si hay modelos sin precio. hivetty no trae precios. Falta el coste en la CLI y por modelo.
 - ✅ F6-04: todos los textos de la interfaz están en `hv-ui/src/strings.rs`. `hv-agents` ya no escribe texto: devuelve `Subtitle::Text` (palabras del propio agente) o `Subtitle::Activity` (datos que la app redacta). La barra de búsqueda, la píldora "Jump to bottom" y las notificaciones salen de ahí. Los textos de la CLI siguen en sus módulos.
 - 🟡 F6-15: `cargo xtask notices` escribe `THIRD_PARTY_NOTICES.md` con los crates que entran en el binario (sin los de solo desarrollo), su versión, licencia y repositorio; el workflow de paquetes lo regenera y lo incluye. Faltan SBOM (CycloneDX) y atestaciones.
 - ✅ F6-14: un panic escribe `crash-<fecha>.txt` (versión, SO, hilo, mensaje y backtrace) en el directorio de datos; se guardan los 10 últimos y `--doctor` muestra el más reciente. No se envía nada.

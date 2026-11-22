@@ -85,6 +85,9 @@ pub struct Dashboard {
     pub providers: Vec<(String, f64)>,
     /// Agents by input, largest first (U-50).
     pub agents: Vec<AgentRow>,
+    /// Estimated API-equivalent cost in USD of the turns whose model has a price (U-60), and
+    /// the share of input tokens that had one.
+    pub cost: Option<(f64, f64)>,
 }
 
 /// A timestamp in local time: day, Monday-based weekday index and hour.
@@ -400,7 +403,38 @@ pub fn build(
         models,
         providers,
         agents,
+        cost: None,
     }
+}
+
+/// Adds the estimated cost of the range to a built dashboard (U-60).
+pub fn with_cost(
+    mut dashboard: Dashboard,
+    records: &[UsageRecord],
+    pricing: &crate::pricing::Pricing,
+    tz: &TimeZone,
+) -> Dashboard {
+    if pricing.is_empty() {
+        return dashboard;
+    }
+    let (mut usd, mut priced_input, mut all_input) = (0.0, 0u64, 0u64);
+    for r in records {
+        let Some((date, ..)) = local(&r.timestamp, tz) else {
+            continue;
+        };
+        if date < dashboard.first_day || date > dashboard.last_day {
+            continue;
+        }
+        all_input += r.total_input();
+        if let Some(cost) = pricing.cost(r) {
+            usd += cost;
+            priced_input += r.total_input();
+        }
+    }
+    if priced_input > 0 {
+        dashboard.cost = Some((usd, priced_input as f64 / all_input.max(1) as f64));
+    }
+    dashboard
 }
 
 /// The 5 intensity levels of the heatmap (U-31): 0 for empty cells, 1–4 by quartiles of the

@@ -162,6 +162,18 @@ Press Ctrl+Alt+U (⌥⌘U) to open it. Choose 7 days, 30 days, 90 days or All. P
 
 Everything comes from the logs your agents already write on your machine: Claude Code for now, in `~/.claude/projects`. Nothing is uploaded anywhere. hivetty keeps a small cache, so it reads only the new lines each time.
 
+To see an estimated cost, write your own price table in `pricing.toml`, next to `config.toml`. hivetty ships no prices because they change. Prices are in USD per million tokens; a key matches every model whose name starts with it, and the longest match wins. Cache tokens without their own price are charged as input.
+
+```toml
+[models."claude-opus"]
+input = 15.0
+output = 75.0
+cache_read = 1.5
+cache_write = 18.75
+```
+
+The input card then shows "≈ $X API equivalent", and says so when some models have no price.
+
 The same data is available on the command line:
 
 ```sh

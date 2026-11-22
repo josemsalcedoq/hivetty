@@ -190,7 +190,22 @@ fn body(ui: &mut egui::Ui, d: &Dashboard) -> Option<UsageAction> {
         (
             strings::KPI_INPUT,
             compact(d.input),
-            format!("{:.0}% {}", d.cache_share * 100.0, strings::FROM_CACHE),
+            match d.cost {
+                Some((usd, share)) if share > 0.995 => format!(
+                    "{:.0}% {} · {}",
+                    d.cache_share * 100.0,
+                    strings::FROM_CACHE,
+                    strings::api_equivalent(usd)
+                ),
+                Some((usd, _)) => format!(
+                    "{:.0}% {} · {} ({})",
+                    d.cache_share * 100.0,
+                    strings::FROM_CACHE,
+                    strings::api_equivalent(usd),
+                    strings::PARTIAL
+                ),
+                None => format!("{:.0}% {}", d.cache_share * 100.0, strings::FROM_CACHE),
+            },
             d.delta_input,
             d.daily.iter().map(|x| x.input).collect::<Vec<_>>(),
         ),

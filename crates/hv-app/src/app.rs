@@ -2784,6 +2784,8 @@ impl App {
 pub(crate) struct UsageData {
     records: Vec<hv_usage::UsageRecord>,
     tasks: Vec<hv_usage::Task>,
+    /// The user's price table, read with the logs (U-60).
+    pricing: hv_usage::pricing::Pricing,
     read_at: Option<Instant>,
 }
 
@@ -2809,6 +2811,7 @@ impl UsageData {
         Self {
             records: store.records(),
             tasks: store.tasks(),
+            pricing: load_pricing(),
             read_at: Some(Instant::now()),
         }
     }
@@ -2826,10 +2829,14 @@ impl UsageData {
     ) -> hv_usage::dashboard::Dashboard {
         let tz = jiff::tz::TimeZone::system();
         let today = jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date();
+        let pricing = &self.pricing;
         let mut dash = match agent {
-            None => {
-                hv_usage::dashboard::build(&self.records, &self.tasks, range.days(), today, &tz)
-            }
+            None => hv_usage::dashboard::with_cost(
+                hv_usage::dashboard::build(&self.records, &self.tasks, range.days(), today, &tz),
+                &self.records,
+                pricing,
+                &tz,
+            ),
             Some(id) => {
                 let records: Vec<_> = self
                     .records
@@ -2843,7 +2850,12 @@ impl UsageData {
                     .filter(|t| t.agent == id)
                     .cloned()
                     .collect();
-                hv_usage::dashboard::build(&records, &tasks, range.days(), today, &tz)
+                hv_usage::dashboard::with_cost(
+                    hv_usage::dashboard::build(&records, &tasks, range.days(), today, &tz),
+                    &records,
+                    pricing,
+                    &tz,
+                )
             }
         };
         // Agent ids to display names ("claude-code" -> "Claude Code").
@@ -2880,6 +2892,20 @@ impl Default for UsageState {
             filter: None,
         }
     }
+}
+
+/// The user's price table (`pricing.toml` next to `config.toml`), or none. Blocking.
+fn load_pricing() -> hv_usage::pricing::Pricing {
+    let Some(path) = hv_config::default_path().map(|p| p.with_file_name("pricing.toml")) else {
+        return hv_usage::pricing::Pricing::default();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return hv_usage::pricing::Pricing::default();
+    };
+    hv_usage::pricing::Pricing::parse(&text).unwrap_or_else(|err| {
+        log::warn!("{}: {err}", path.display());
+        hv_usage::pricing::Pricing::default()
+    })
 }
 
 /// Usage logs older than this are read again when the dashboard opens.

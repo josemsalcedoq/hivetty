@@ -299,3 +299,13 @@ pub const CREATE_WORKTREE: &str = "create a git worktree";
 pub const BRANCH_HINT: &str = "branch (default agent/<prompt>)";
 /// Notification when the worktree could not be created.
 pub const WORKTREE_FAILED: &str = "Cannot create the worktree";
+/// Estimated cost with the user's `pricing.toml` (U-60).
+pub fn api_equivalent(usd: f64) -> String {
+    if usd >= 100.0 {
+        format!("≈ ${usd:.0} API equivalent")
+    } else {
+        format!("≈ ${usd:.2} API equivalent")
+    }
+}
+/// When only some models have a price.
+pub const PARTIAL: &str = "some models unpriced";
