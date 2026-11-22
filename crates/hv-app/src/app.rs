@@ -3012,12 +3012,43 @@ impl ApplicationHandler<AppEvent> for App {
             );
         }
         let mut deadline: Option<Instant> = self.notify_group.deadline(group_window);
+        let quiet = Duration::from_secs(self.config.agents.waiting_idle_seconds.max(1));
         for id in self.window_ids() {
             if !self.activate(id) {
                 continue;
             }
             if let Some(action) = self.pending_action.take() {
                 self.run_action(action, event_loop);
+            }
+            // F4-09: guessed states for agents that do not report their own.
+            let mut guessed = false;
+            if let Some(ui) = &mut self.ui {
+                let now = Instant::now();
+                let focused = ui.focused_id();
+                for (pane_id, pane) in &mut ui.panes {
+                    let (output, input) = pane.session.activity();
+                    if pane.info.estimate(output, input, now, quiet) {
+                        guessed = true;
+                        if Some(*pane_id) != focused && pane.info.needs_attention() {
+                            pane.info.unseen = true;
+                        }
+                    }
+                    record_interval(pane.info.working_interval(false));
+                    if let Some(at) = pane.info.estimate_deadline(quiet) {
+                        deadline = Some(deadline.map_or(at, |d| d.min(at)));
+                    }
+                }
+                if guessed {
+                    ui.window.request_redraw();
+                }
+            }
+            if guessed {
+                let window_focused = self
+                    .ui
+                    .as_ref()
+                    .is_some_and(|ui| self.focused_window == Some(ui.window.id()));
+                let notes = self.notify_candidates(window_focused);
+                self.send_agent_notifications(notes);
             }
             if let Some(ui) = &mut self.ui {
                 let now = Instant::now();
@@ -3441,6 +3472,9 @@ fn session_card(pane: &Pane, usage: Option<&UsageData>) -> Vec<(String, String)>
         s::CARD_STARTED.to_owned(),
         s::ago(&hv_ui::format_elapsed(started.elapsed().as_secs())),
     ));
+    if pane.info.agent.estimated() {
+        card.push((s::CARD_STATE.to_owned(), s::ESTIMATED_DETAIL.to_owned()));
+    }
     if let Some(percent) = pane.info.context_percent {
         card.push((s::CARD_CONTEXT.to_owned(), format!("{percent:.0}%")));
     }

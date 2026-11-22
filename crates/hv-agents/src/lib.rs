@@ -116,6 +116,8 @@ pub struct Tracker {
     last_seen: [Option<Instant>; SOURCES],
     /// When the current state was set.
     since: Option<Instant>,
+    /// The source that set the current state.
+    source: Option<Source>,
 }
 
 impl Tracker {
@@ -141,16 +143,23 @@ impl Tracker {
         }
         if let Some(state) = update.state
             && !outranked
-            && self.state.as_ref() != Some(&state)
         {
-            // A new state without its own subtitle drops the old one, except the current action
-            // while still working.
-            if !matches!(state, AgentState::Working { .. }) && !changed {
-                self.subtitle = None;
+            if self.state.as_ref() != Some(&state) {
+                // A new state without its own subtitle drops the old one, except the current
+                // action while still working.
+                if !matches!(state, AgentState::Working { .. }) && !changed {
+                    self.subtitle = None;
+                }
+                self.state = Some(state);
+                self.since = Some(now);
+                changed = true;
             }
-            self.state = Some(state);
-            self.since = Some(now);
-            changed = true;
+            // The same state confirmed by another source: a guess may have become a fact.
+            if self.source != Some(source) {
+                let was_estimated = self.estimated();
+                self.source = Some(source);
+                changed |= was_estimated != self.estimated();
+            }
         }
         changed
     }
@@ -168,6 +177,22 @@ impl Tracker {
     /// When the current state started.
     pub fn since(&self) -> Option<Instant> {
         self.since
+    }
+
+    /// Whether the current state is a guess (from output activity, the title or a bell) rather
+    /// than something the agent reported (A-19: shown with "≈").
+    pub fn estimated(&self) -> bool {
+        matches!(
+            self.source,
+            Some(Source::Heuristic | Source::Title | Source::Bell)
+        )
+    }
+
+    /// Whether the agent ever reported its state itself (OSC 7501 or hooks). Then guesses are
+    /// not needed for this session.
+    pub fn reliable(&self) -> bool {
+        self.last_seen[Source::Osc7501 as usize].is_some()
+            || self.last_seen[Source::Hook as usize].is_some()
     }
 
     /// The agent's own session id, once known.
@@ -208,6 +233,19 @@ pub fn from_program_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guesses_are_marked_and_reliable_sources_are_remembered() {
+        let t0 = Instant::now();
+        let mut tracker = Tracker::default();
+        assert!(tracker.apply(Source::Heuristic, working(), t0));
+        assert!(tracker.estimated());
+        assert!(!tracker.reliable());
+        // The hook confirms the same state: no longer a guess.
+        assert!(tracker.apply(Source::Hook, working(), t0));
+        assert!(!tracker.estimated());
+        assert!(tracker.reliable());
+    }
 
     fn working() -> Update {
         Update {

@@ -420,3 +420,9 @@ pub const WORKTREE_NOT_REMOVED: &str = "The worktree was not removed";
 pub const SETUP_PROBLEM: &str = "Part of the setup was not applied";
 /// Output card: the reasoning part (F5-18).
 pub const REASONING: &str = "reasoning";
+/// Marks a state guessed from the agent's output (A-19).
+pub const ESTIMATED: &str = "≈";
+/// Hover card: why the state is marked as a guess.
+pub const CARD_STATE: &str = "State";
+/// Hover card.
+pub const ESTIMATED_DETAIL: &str = "estimated from its output (install its hooks for exact states)";

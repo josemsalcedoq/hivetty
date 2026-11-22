@@ -87,6 +87,8 @@ struct TermState {
     term_events: Receiver<Event>,
     /// Shell prompt marks (OSC 133) by scrollback line.
     marks: Marks,
+    /// When the program last wrote something (agent activity heuristic, F4-09).
+    last_output: Option<std::time::Instant>,
 }
 
 /// A running terminal session.
@@ -97,6 +99,9 @@ pub struct Session {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pty: Mutex<Pty>,
     events: Receiver<SessionEvent>,
+    /// When hivetty last sent the program input or resized it (its output right after that is
+    /// an echo or a redraw, not work).
+    last_input: Mutex<Option<std::time::Instant>>,
 }
 
 impl fmt::Debug for Session {
@@ -142,6 +147,7 @@ impl Session {
             interceptor: Interceptor::new(),
             marks: Marks::default(),
             term_events: term_rx,
+            last_output: None,
         }));
         let writer = Arc::new(Mutex::new(io.writer));
         let (events_tx, events_rx) = mpsc::channel();
@@ -195,11 +201,13 @@ impl Session {
             writer,
             pty: Mutex::new(pty),
             events: events_rx,
+            last_input: Mutex::new(None),
         })
     }
 
     /// Sends bytes to the program (keystrokes, paste).
     pub fn write(&self, bytes: &[u8]) {
+        *lock(&self.last_input) = Some(std::time::Instant::now());
         let mut writer = lock(&self.writer);
         let _ = writer.write_all(bytes).and_then(|()| writer.flush());
     }
@@ -344,6 +352,8 @@ impl Session {
 
     /// Resizes the emulator and the PTY.
     pub fn resize(&self, size: GridSize) {
+        // A resize makes full-screen programs redraw: not activity of their own.
+        *lock(&self.last_input) = Some(std::time::Instant::now());
         {
             let mut state = lock(&self.state);
             let dims = Dims {
@@ -425,6 +435,11 @@ impl Session {
         let text = state.term.bounds_to_string(first, last);
         let text = text.trim_end().to_owned();
         (!text.is_empty()).then_some(text)
+    }
+
+    /// When the program last wrote output, and when hivetty last sent it input or resized it.
+    pub fn activity(&self) -> (Option<std::time::Instant>, Option<std::time::Instant>) {
+        (lock(&self.state).last_output, *lock(&self.last_input))
     }
 
     /// Modes that affect key encoding.
@@ -582,9 +597,11 @@ fn reader_loop(
                 interceptor,
                 term_events,
                 marks,
+                last_output,
                 ..
             } = &mut *guard;
             feed(term, processor, interceptor, marks, bytes, &mut out);
+            *last_output = Some(std::time::Instant::now());
             for event in term_events.try_iter() {
                 match event {
                     // Answers to queries (DA, DSR/CSI 6n, colors…). ConPTY blocks until it gets

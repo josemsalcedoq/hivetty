@@ -209,6 +209,13 @@
           "description": "What to do with agents that were running when the layout was saved: `\"ask\"` types the\nresume command and waits for Enter, `\"always\"` runs it, `\"never\"` leaves a plain shell.",
           "type": "string",
           "default": "ask"
+        },
+        "waiting_idle_seconds": {
+          "description": "Agents that do not report their state (no hooks or OSC 7501): seconds without output\nafter working before the session counts as done (F4-09).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 5
         }
       },
       "additionalProperties": false

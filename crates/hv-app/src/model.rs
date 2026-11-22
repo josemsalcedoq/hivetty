@@ -1,7 +1,7 @@
 //! Builds what the chrome shows from the session state (shared by the window and `--screenshot`).
 
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use hv_agents::{AgentState, Source, Tracker};
 use hv_term::osc::TermEvent;
@@ -43,6 +43,9 @@ pub(crate) struct SessionInfo {
     /// and the monotonic clock for its length (which skips a suspended machine on macOS and
     /// Linux).
     pub(crate) working_since: Option<(i64, Instant)>,
+    /// The last output that looked like work, and when the current stretch of it began (F4-09).
+    pub(crate) last_activity: Option<Instant>,
+    pub(crate) work_started: Option<Instant>,
     /// The last tool the agent used, worded for the hover card (S-15).
     pub(crate) last_tool: Option<String>,
     /// The attention state last notified ("waiting", "done", "error"), so a state is announced
@@ -67,6 +70,8 @@ impl SessionInfo {
             agent_id: None,
             agent_name: None,
             last_tool: None,
+            last_activity: None,
+            work_started: None,
             working_since: None,
             context_percent: None,
             notified: None,
@@ -154,6 +159,64 @@ impl SessionInfo {
         Some((kind, title, body))
     }
 
+    /// Guesses the state of an agent that does not report it (F4-09, A-19) from when the
+    /// program last wrote output and when hivetty last sent it input. Output right after input
+    /// is an echo or a redraw. Recent output means working; `quiet` without output after a
+    /// real stretch of work means done (a short burst goes back to idle, without a
+    /// notification). Returns true if the sidebar changed.
+    pub(crate) fn estimate(
+        &mut self,
+        output: Option<Instant>,
+        input: Option<Instant>,
+        now: Instant,
+        quiet: Duration,
+    ) -> bool {
+        if self.exited || self.agent_id.is_none() || self.agent.reliable() {
+            return false;
+        }
+        if let Some(out) = output
+            && self.last_activity.is_none_or(|last| out > last)
+            && input.is_none_or(|i| out < i || out.duration_since(i) > ECHO)
+        {
+            self.last_activity = Some(out);
+        }
+        let Some(last) = self.last_activity else {
+            return false;
+        };
+        let working = matches!(self.agent.state(), Some(AgentState::Working { .. }));
+        let quiet_for = now.saturating_duration_since(last);
+        let state = if quiet_for < ACTIVE {
+            if !working {
+                self.work_started = Some(last);
+            }
+            AgentState::Working { progress: None }
+        } else if quiet_for >= quiet && working && self.agent.estimated() {
+            let worked = last.saturating_duration_since(self.work_started.unwrap_or(last));
+            if worked >= MIN_WORK {
+                AgentState::Done
+            } else {
+                AgentState::Idle
+            }
+        } else {
+            return false;
+        };
+        let update = hv_agents::Update {
+            state: Some(state),
+            ..Default::default()
+        };
+        self.agent.apply(Source::Heuristic, update, now)
+    }
+
+    /// When [`Self::estimate`] next needs to run although nothing new arrived: the end of the
+    /// quiet period of a guessed working state.
+    pub(crate) fn estimate_deadline(&self, quiet: Duration) -> Option<Instant> {
+        let guessing = self.agent.estimated()
+            && matches!(self.agent.state(), Some(AgentState::Working { .. }));
+        guessing
+            .then(|| self.last_activity.map(|t| t + quiet))
+            .flatten()
+    }
+
     /// Whether the current state is one the user should come back for.
     pub(crate) fn needs_attention(&self) -> bool {
         matches!(
@@ -232,6 +295,13 @@ impl SessionInfo {
     }
 }
 
+/// Output this soon after input is its echo or a redraw, not work (F4-09).
+const ECHO: Duration = Duration::from_millis(500);
+/// Output this recent means the agent is working.
+const ACTIVE: Duration = Duration::from_secs(2);
+/// A stretch of work at least this long ends as done; a shorter burst goes back to idle.
+const MIN_WORK: Duration = Duration::from_secs(3);
+
 /// The sidebar wording of a subtitle: the agent's own text as is, activities from
 /// `strings.rs`.
 pub(crate) fn subtitle_text(subtitle: &hv_agents::Subtitle) -> String {
@@ -303,6 +373,12 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         (false, Some(detail)) if state == RowState::Waiting => format!("{label}: {detail}"),
         (false, Some(detail)) => detail,
         _ => label.to_owned(),
+    };
+    // A guessed state says so (A-19).
+    let subtitle = if info.agent.estimated() && !info.exited {
+        format!("{} {subtitle}", strings::ESTIMATED)
+    } else {
+        subtitle
     };
     let started = info
         .agent
@@ -428,6 +504,46 @@ mod tests {
         assert!(!changed);
         assert_eq!(info.agent.state().cloned(), state);
         assert_eq!(info.context_percent, Some(42.0));
+    }
+
+    #[test]
+    fn states_are_guessed_from_output_without_hooks() {
+        let quiet = Duration::from_secs(5);
+        let t0 = Instant::now();
+        let at = |s: u64| t0 + Duration::from_millis(s);
+        let mut info = SessionInfo::new();
+        // No agent: no guesses.
+        assert!(!info.estimate(Some(at(0)), None, at(10), quiet));
+        info.agent_id = Some("aider".into());
+        // Output 100 ms after a key press is its echo.
+        assert!(!info.estimate(Some(at(100)), Some(at(0)), at(200), quiet));
+        assert_eq!(info.agent.state(), None);
+        // Output well after the input: working, marked as a guess.
+        assert!(info.estimate(Some(at(1_000)), Some(at(0)), at(1_100), quiet));
+        assert_eq!(
+            info.agent.state(),
+            Some(&AgentState::Working { progress: None })
+        );
+        assert!(
+            session_row(&info, None)
+                .subtitle
+                .starts_with(strings::ESTIMATED)
+        );
+        // Keeps working for 4 s, then 5 s of quiet: done.
+        assert!(!info.estimate(Some(at(5_000)), Some(at(0)), at(5_100), quiet));
+        assert_eq!(info.estimate_deadline(quiet), Some(at(10_000)));
+        assert!(!info.estimate(Some(at(5_000)), Some(at(0)), at(8_000), quiet));
+        assert!(info.estimate(Some(at(5_000)), Some(at(0)), at(10_000), quiet));
+        assert_eq!(info.agent.state(), Some(&AgentState::Done));
+        assert!(info.needs_attention());
+        // A short burst afterwards (a redraw) ends as idle, not done.
+        assert!(info.estimate(Some(at(20_000)), Some(at(0)), at(20_100), quiet));
+        assert!(info.estimate(Some(at(20_500)), Some(at(0)), at(26_000), quiet));
+        assert_eq!(info.agent.state(), Some(&AgentState::Idle));
+        // Once hooks report the state, no more guesses.
+        info.on_hook(&hook("UserPromptSubmit", "{}"));
+        assert!(!info.estimate(Some(at(40_000)), None, at(40_100), quiet));
+        assert!(!info.agent.estimated());
     }
 
     #[test]

@@ -181,6 +181,8 @@ The state of each session (working, waiting, done) comes from three sources:
    This adds entries to `~/.claude/settings.json` and keeps a backup next to it. Your own hooks are never touched. `hivetty agents uninstall-hooks` removes only hivetty's entries. The hook command does nothing outside hivetty and always exits immediately.
 3. **Notifications and the window title** that the agent sends.
 
+Agents with none of these (Aider, opencode, Cursor CLI, or one whose hooks are not installed) still get a state, guessed from their output: recent output means *working*, and a few seconds of quiet after real work means *done*. Guessed states show with **≈** (for example "≈ Working"). `[agents] waiting_idle_seconds` (5 by default) sets how much quiet counts as done.
+
 hivetty can also be Claude Code's statusline. It prints the model, the context window in use and your plan's limits under Claude Code's prompt (`Opus · ctx 8% · 5h 24% · 7d 41%`), and passes the same numbers to hivetty: the context shows in the session's hover card, and the 5-hour and weekly limits with their reset countdown in the usage dashboard. `hivetty agents install-statusline` sets it up the same way as the hooks (it shows the change and asks). If you already have a statusline, hivetty leaves it alone.
 
 When a session needs you or finishes while you are looking elsewhere, you get a desktop notification. Several at once are grouped ("4 sessions need you"). If you close hivetty while agents are running, it offers to resume them the next time it opens (`[agents] restore_on_launch`).

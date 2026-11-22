@@ -294,12 +294,16 @@ pub struct Agents {
     /// What to do with agents that were running when the layout was saved: `"ask"` types the
     /// resume command and waits for Enter, `"always"` runs it, `"never"` leaves a plain shell.
     pub restore_on_launch: String,
+    /// Agents that do not report their state (no hooks or OSC 7501): seconds without output
+    /// after working before the session counts as done (F4-09).
+    pub waiting_idle_seconds: u64,
 }
 
 impl Default for Agents {
     fn default() -> Self {
         Self {
             restore_on_launch: "ask".to_owned(),
+            waiting_idle_seconds: 5,
         }
     }
 }
