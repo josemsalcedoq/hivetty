@@ -239,7 +239,7 @@ cache_read = 1.5
 cache_write = 18.75
 ```
 
-The input card then shows "≈ $X API equivalent", and says so when some models have no price.
+The input card then shows "≈ $X API equivalent" (and says so when some models have no price), the models table shows each model's cost, and `hivetty usage` adds a cost column.
 
 The same data is available on the command line:
 

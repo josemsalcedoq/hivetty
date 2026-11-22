@@ -28,6 +28,8 @@ pub struct ModelRow {
     pub model: String,
     pub input: u64,
     pub output: u64,
+    /// Estimated cost in cents, when `pricing.toml` has a price for the model (U-60).
+    pub cost_cents: Option<u64>,
 }
 
 /// A row of the agents table.
@@ -223,6 +225,7 @@ pub fn build(
                 model: r.model.clone(),
                 input: 0,
                 output: 0,
+                cost_cents: None,
             });
         model.input += r.total_input();
         model.output += r.output_tokens;
@@ -426,6 +429,7 @@ pub fn with_cost(
         return dashboard;
     }
     let (mut usd, mut priced_input, mut all_input) = (0.0, 0u64, 0u64);
+    let mut by_model: BTreeMap<(&str, &str), f64> = BTreeMap::new();
     for r in records {
         let Some((date, ..)) = local(&r.timestamp, tz) else {
             continue;
@@ -437,6 +441,12 @@ pub fn with_cost(
         if let Some(cost) = pricing.cost(r) {
             usd += cost;
             priced_input += r.total_input();
+            *by_model.entry((r.provider, r.model.as_str())).or_default() += cost;
+        }
+    }
+    for row in &mut dashboard.models {
+        if let Some(cost) = by_model.get(&(row.provider.as_str(), row.model.as_str())) {
+            row.cost_cents = Some((cost * 100.0).round().max(0.0) as u64);
         }
     }
     if priced_input > 0 {
@@ -474,6 +484,49 @@ pub fn heat_levels(heat: &[[u64; 24]; 7]) -> [[u8; 24]; 7] {
 mod tests {
     use super::*;
     use jiff::civil::date;
+
+    #[test]
+    fn cost_per_model_uses_the_users_prices() {
+        let tz = TimeZone::UTC;
+        let today = jiff::civil::date(2026, 11, 22);
+        let records = [
+            rec(
+                "2026-11-22T10:00:00Z",
+                "claude-opus-5-5",
+                "anthropic",
+                1_000_000,
+                0,
+                0,
+            ),
+            rec(
+                "2026-11-22T11:00:00Z",
+                "gpt-6.2-sol",
+                "openai",
+                1_000_000,
+                0,
+                0,
+            ),
+        ];
+        let pricing = crate::pricing::Pricing::parse(
+            "[models.\"claude-opus\"]\ninput = 15.0\noutput = 75.0\n",
+        )
+        .unwrap();
+        let dash = with_cost(
+            build(&records, &[], Some(7), today, &tz),
+            &records,
+            &pricing,
+            &tz,
+        );
+        let cost = |m: &str| {
+            dash.models
+                .iter()
+                .find(|r| r.model == m)
+                .unwrap()
+                .cost_cents
+        };
+        assert_eq!(cost("claude-opus-5-5"), Some(1500));
+        assert_eq!(cost("gpt-6.2-sol"), None, "no price: no cost");
+    }
 
     fn rec(
         ts: &str,

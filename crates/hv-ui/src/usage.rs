@@ -635,7 +635,7 @@ fn models(ui: &mut egui::Ui, d: &Dashboard) {
             m.input,
             max,
             m.output,
-            None,
+            m.cost_cents.map(strings::usd_cents),
         );
     }
     if d.models.len() > shown {
@@ -654,7 +654,7 @@ fn models(ui: &mut egui::Ui, d: &Dashboard) {
                     m.input,
                     max,
                     m.output,
-                    None,
+                    m.cost_cents.map(strings::usd_cents),
                 );
             }
         });

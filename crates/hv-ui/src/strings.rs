@@ -439,3 +439,11 @@ pub const EDITOR_FAILED: &str = "Cannot start the editor (set [editor] command i
 pub const RECENT: &str = "Recent";
 /// The button of a notification that brings its session forward (Linux shows it).
 pub const NOTIFY_FOCUS: &str = "Focus";
+/// A cost in the models table: `$12.34`, or whole dollars from $1000 (`$1234`).
+pub fn usd_cents(cents: u64) -> String {
+    if cents >= 100_000 {
+        format!("${}", cents / 100)
+    } else {
+        format!("${}.{:02}", cents / 100, cents % 100)
+    }
+}
