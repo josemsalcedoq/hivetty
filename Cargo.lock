@@ -1725,6 +1725,8 @@ dependencies = [
  "opener",
  "png",
  "pollster",
+ "serde",
+ "serde_json",
  "winit",
 ]
 

@@ -8,6 +8,7 @@ mod headless;
 mod hook;
 mod keymap;
 mod model;
+mod saved;
 mod workspace;
 
 use std::path::PathBuf;

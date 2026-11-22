@@ -66,6 +66,7 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
         log::warn!("{err}");
     }
     // An explicit `-e PROGRAM` wins over the configured shell.
+    let explicit_program = spec.program.is_some();
     let mut spec = spec;
     if spec.program.is_none() && config.shell.program.is_some() {
         spec.program = config.shell.program.clone();
@@ -92,7 +93,15 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
         Ok(server) => spec.env.extend(server.endpoint().env()),
         Err(err) => log::warn!("agent hooks disabled: cannot start IPC: {err}"),
     }
+    // Restore and save the layout only for a plain launch (not `hivetty -e program`).
     let mut app = App::new(spec, proxy);
+    if !explicit_program {
+        app.layout_path = crate::saved::layout_path();
+        app.restore = app
+            .layout_path
+            .as_deref()
+            .and_then(crate::saved::SavedLayout::load);
+    }
     app.keymap = keymap_from(&config);
     app.config = config;
     app.config_path = config_path;
@@ -264,6 +273,10 @@ struct App {
     /// An action chosen in the chrome (palette, tabs) during a frame, run afterwards where the
     /// event loop is available.
     pending_action: Option<Action>,
+    /// Layout to reopen at start (F2-08).
+    restore: Option<crate::saved::SavedLayout>,
+    /// Where the layout is saved on close; `None` for `hivetty -e program`.
+    layout_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -333,15 +346,35 @@ impl App {
             bell_until: None,
             sidebar_visible: true,
             pending_action: None,
+            restore: None,
+            layout_path: None,
         }
     }
 
     fn create_ui(&mut self, event_loop: &ActiveEventLoop) -> Result<Ui> {
-        let attrs = Window::default_attributes()
+        let restore = self
+            .restore
+            .take()
+            .filter(|_| self.config.window.restore_layout);
+        let geometry = restore
+            .as_ref()
+            .and_then(|l| l.window)
+            .filter(|_| self.config.window.remember_geometry);
+        let mut attrs = Window::default_attributes()
             .with_title(APP_TITLE)
             .with_inner_size(LogicalSize::new(1000.0, 640.0))
             // AccessKit must be attached before the window is first shown.
             .with_visible(false);
+        if let Some(g) = geometry {
+            attrs = attrs
+                .with_inner_size(PhysicalSize::new(g.width.max(320), g.height.max(200)))
+                .with_maximized(g.maximized);
+            if let (Some(x), Some(y)) = (g.x, g.y)
+                && on_some_monitor(event_loop, x, y)
+            {
+                attrs = attrs.with_position(PhysicalPosition::new(x, y));
+            }
+        }
         let window = Arc::new(
             event_loop
                 .create_window(attrs)
@@ -382,6 +415,24 @@ impl App {
             row_panes: Vec::new(),
         };
         apply_font(&mut ui, &self.config.font);
+        if let Some(layout) = restore {
+            let mut spawned = Vec::new();
+            let tabs = layout.restore(|cwd| match self.spawn_pane(&ui, cwd.map(Into::into)) {
+                Ok((id, pane)) => {
+                    spawned.push((id, pane));
+                    Some(id)
+                }
+                Err(err) => {
+                    log::warn!("cannot reopen a pane: {err:#}");
+                    None
+                }
+            });
+            ui.tabs = tabs;
+            ui.panes.extend(spawned);
+            if !ui.tabs.list.is_empty() {
+                return Ok(ui);
+            }
+        }
         let first = self.spawn_pane(&ui, None)?;
         if let Some(path) = self.record.take() {
             first
@@ -563,6 +614,33 @@ impl App {
         }
         if let Some(ui) = &self.ui {
             ui.window.request_redraw();
+        }
+    }
+
+    /// Writes the current layout for the next launch.
+    fn save_layout(&self) {
+        let (Some(ui), Some(path)) = (&self.ui, &self.layout_path) else {
+            return;
+        };
+        let size = ui.window.inner_size();
+        let position = ui.window.outer_position().ok();
+        let window = crate::saved::SavedWindow {
+            width: size.width,
+            height: size.height,
+            x: position.map(|p| p.x),
+            y: position.map(|p| p.y),
+            maximized: ui.window.is_maximized(),
+        };
+        let layout = crate::saved::SavedLayout::capture(&ui.tabs, Some(window), |id| {
+            ui.panes.get(&id).and_then(|p| p.session.cwd())
+        });
+        // Off the UI thread; joined because the process is about to exit.
+        let path = path.clone();
+        let writer = std::thread::spawn(move || layout.save(&path));
+        match writer.join() {
+            Ok(Err(err)) => log::warn!("cannot save the layout: {err}"),
+            Err(_) => log::warn!("cannot save the layout"),
+            Ok(Ok(())) => {}
         }
     }
 
@@ -1351,6 +1429,7 @@ impl ApplicationHandler<AppEvent> for App {
         }
         match event {
             WindowEvent::CloseRequested => {
+                self.save_layout();
                 if let Some(ui) = &self.ui {
                     for pane in ui.panes.values() {
                         pane.session.kill();
@@ -1420,6 +1499,15 @@ impl ApplicationHandler<AppEvent> for App {
         let deadline = [sync, self.bell_until, tick].into_iter().flatten().min();
         event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
+}
+
+/// Whether a saved window position is still on a connected monitor (it may have been
+/// unplugged since).
+fn on_some_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32) -> bool {
+    event_loop.available_monitors().any(|m| {
+        let (pos, size) = (m.position(), m.size());
+        x >= pos.x && y >= pos.y && x < pos.x + size.width as i32 && y < pos.y + size.height as i32
+    })
 }
 
 /// The chord a key press makes, for the keymap. Uses the key without modifiers so that

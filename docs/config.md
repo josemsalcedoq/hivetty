@@ -19,6 +19,7 @@ telemetry = false              # nunca se envía nada sin opt-in
 [window]
 startup_size = { cols = 160, rows = 45 }
 remember_geometry = true
+restore_layout = true          # reabrir pestañas, divisiones y carpetas de la última vez
 decorations = "auto"           # "auto" | "full" | "none"
 opacity = 1.0
 blur = false                   # macOS / Windows 11

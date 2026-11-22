@@ -34,6 +34,8 @@ log = "0.4.35"
 opener = "0.9.0"
 png = "0.18.1"
 pollster = "1.0.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 winit = "0.30"
 
 # Packaging with cargo-packager (SP-7, docs/spikes/SP-7.md). Paths are relative to this

@@ -21,6 +21,8 @@ pub struct Config {
     pub shell: Shell,
     /// Terminal behaviour.
     pub terminal: Terminal,
+    /// Window behaviour.
+    pub window: WindowConfig,
     /// Shortcut overrides, applied on top of the defaults (docs/keybindings.md).
     pub keybindings: Vec<KeyBinding>,
 }
@@ -96,6 +98,25 @@ impl Default for Terminal {
     }
 }
 
+/// `[window]`
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowConfig {
+    /// Reopen the window with the size and position it had.
+    pub remember_geometry: bool,
+    /// Reopen the tabs, splits and directories of the last session.
+    pub restore_layout: bool,
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            remember_geometry: true,
+            restore_layout: true,
+        }
+    }
+}
+
 /// Where the config file lives on this platform.
 ///
 /// - Windows: `%APPDATA%\hivetty\config.toml`
@@ -118,6 +139,30 @@ pub fn default_path() -> Option<PathBuf> {
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?
     };
     Some(base.join("hivetty").join("config.toml"))
+}
+
+/// Where hivetty keeps its state (layout, later the usage database).
+///
+/// - Windows: `%LOCALAPPDATA%\hivetty`
+/// - macOS: `~/Library/Application Support/hivetty`
+/// - Linux: `$XDG_DATA_HOME/hivetty` (default `~/.local/share`)
+///
+/// `HIVETTY_DATA_DIR` overrides it.
+pub fn data_dir() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("HIVETTY_DATA_DIR") {
+        return Some(PathBuf::from(path));
+    }
+    let base = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+    } else if cfg!(target_os = "macos") {
+        PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support")
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?
+    };
+    Some(base.join("hivetty"))
 }
 
 /// Parses config text. On error returns the defaults plus a readable message.
