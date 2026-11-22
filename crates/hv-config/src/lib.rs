@@ -146,6 +146,10 @@ pub struct Notifications {
     pub only_when_unfocused: bool,
     /// Notify when a shell command that ran at least this long finishes; 0 disables it.
     pub long_command_seconds: u64,
+    /// Agent states that notify: any of "waiting", "done", "error".
+    pub on: Vec<String>,
+    /// More than three notifications in this many seconds are merged into one.
+    pub group_window_seconds: u64,
 }
 
 impl Default for Notifications {
@@ -154,6 +158,8 @@ impl Default for Notifications {
             enabled: true,
             only_when_unfocused: true,
             long_command_seconds: 30,
+            on: vec!["waiting".into(), "done".into(), "error".into()],
+            group_window_seconds: 10,
         }
     }
 }

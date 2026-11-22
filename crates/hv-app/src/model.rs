@@ -31,6 +31,9 @@ pub(crate) struct SessionInfo {
     pub(crate) agent_id: Option<String>,
     /// Its display name.
     pub(crate) agent_name: Option<String>,
+    /// The attention state last notified ("waiting", "done", "error"), so a state is announced
+    /// once.
+    pub(crate) notified: Option<&'static str>,
 }
 
 impl SessionInfo {
@@ -46,6 +49,7 @@ impl SessionInfo {
             command_started: None,
             agent_id: None,
             agent_name: None,
+            notified: None,
         }
     }
 
@@ -100,6 +104,32 @@ impl SessionInfo {
                 .map(|start| (now.saturating_duration_since(start), *exit_code)),
             _ => None,
         }
+    }
+
+    /// The notification for the current state, once per state (docs/ui-spec.md §7):
+    /// `(kind, title, body)` with title `<Agent> · <project>` and body `<title>: <reason>`.
+    pub(crate) fn take_notification(
+        &mut self,
+        project: &str,
+    ) -> Option<(&'static str, String, String)> {
+        let kind = match self.agent.state() {
+            Some(AgentState::Blocked { .. }) => "waiting",
+            Some(AgentState::Done) => "done",
+            Some(AgentState::Error) => "error",
+            _ => {
+                self.notified = None;
+                return None;
+            }
+        };
+        if self.notified == Some(kind) {
+            return None;
+        }
+        self.notified = Some(kind);
+        let agent = self.agent_name.as_deref().unwrap_or("hivetty");
+        let row = session_row(self, None);
+        let title = format!("{agent} · {project}");
+        let body = format!("{}: {}", row.title, row.subtitle);
+        Some((kind, title, body))
     }
 
     /// Whether the current state is one the user should come back for.
@@ -260,6 +290,31 @@ mod tests {
             event: event.into(),
             payload: payload.into(),
         }
+    }
+
+    #[test]
+    fn each_attention_state_is_notified_once() {
+        let mut info = SessionInfo::new();
+        info.agent_name = Some("Claude Code".into());
+        let hook = |event: &str, payload: &str| hv_ipc::HookEvent {
+            session: Some("1".into()),
+            agent: "claude-code".into(),
+            event: event.into(),
+            payload: payload.into(),
+        };
+        info.on_hook(&hook("UserPromptSubmit", "{}"));
+        assert_eq!(info.take_notification("hivetty"), None);
+        info.on_hook(&hook(
+            "Notification",
+            r#"{"message":"Bash(cargo test)","notification_type":"permission_prompt"}"#,
+        ));
+        let (kind, title, body) = info.take_notification("hivetty").unwrap();
+        assert_eq!(kind, "waiting");
+        assert_eq!(title, "Claude Code · hivetty");
+        assert_eq!(body, "Claude Code: Needs permission: Bash(cargo test)");
+        assert_eq!(info.take_notification("hivetty"), None, "only once");
+        info.on_hook(&hook("Stop", "{}"));
+        assert_eq!(info.take_notification("hivetty").unwrap().0, "done");
     }
 
     #[test]

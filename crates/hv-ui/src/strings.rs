@@ -28,6 +28,12 @@ pub const STATE_ERROR: &str = "Error";
 pub const NOTIFY_COMMAND_DONE: &str = "Command finished";
 /// Notification title when a long shell command fails.
 pub const NOTIFY_COMMAND_FAILED: &str = "Command failed";
+/// Merged notification when several sessions changed at once.
+pub fn sessions_need_you(count: u32) -> String {
+    format!("{count} sessions need you")
+}
+/// Body of the merged notification.
+pub const NOTIFY_OPEN_HIVETTY: &str = "Open hivetty to see them";
 /// Title used when the program set none.
 pub const DEFAULT_TITLE: &str = "Shell";
 /// Tooltip and accessible name of the `+` button in the tab bar.

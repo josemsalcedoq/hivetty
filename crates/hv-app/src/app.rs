@@ -409,6 +409,8 @@ struct App {
     profiles: Vec<hv_agents::profile::Profile>,
     /// Watches pane process trees for agents started by hand (F4-03).
     agent_watch: Option<hv_agents::watch::ProcessWatcher>,
+    /// Groups bursts of agent notifications (F4-18).
+    notify_group: NotifyGroup,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -489,6 +491,7 @@ impl App {
             chip_service: None,
             profiles: Vec::new(),
             agent_watch: None,
+            notify_group: NotifyGroup::default(),
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -833,6 +836,53 @@ impl App {
             Ok(Err(err)) => log::warn!("cannot save the layout: {err}"),
             Err(_) => log::warn!("cannot save the layout"),
             Ok(Ok(())) => {}
+        }
+    }
+
+    /// Agent notifications due in the active window (F4-18): one per new attention state,
+    /// skipping the pane the user is looking at.
+    fn notify_candidates(&mut self, window_focused: bool) -> Vec<(&'static str, String, String)> {
+        let Some(ui) = &mut self.ui else {
+            return Vec::new();
+        };
+        let focused = ui.focused_id();
+        let mut out = Vec::new();
+        for (id, pane) in &mut ui.panes {
+            let project = pane
+                .chips
+                .values()
+                .next_back()
+                .and_then(|i| i.root.clone())
+                .or_else(|| pane.session.cwd())
+                .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| "~".to_owned());
+            if let Some(note) = pane.info.take_notification(&project) {
+                // Never for the pane the user is looking at.
+                if !(window_focused && Some(*id) == focused) {
+                    out.push(note);
+                }
+            }
+        }
+        if !out.is_empty() && !window_focused {
+            ui.window
+                .request_user_attention(Some(winit::window::UserAttentionType::Informational));
+        }
+        out
+    }
+
+    fn send_agent_notifications(&mut self, notes: Vec<(&'static str, String, String)>) {
+        let config = &self.config.notifications;
+        if !config.enabled {
+            return;
+        }
+        let window = Duration::from_secs(config.group_window_seconds.max(1));
+        for (kind, title, body) in notes {
+            if !config.on.iter().any(|k| k == kind) {
+                continue;
+            }
+            if self.notify_group.admit(Instant::now(), window) {
+                hv_platform::notify(&title, &body);
+            }
         }
     }
 
@@ -1588,6 +1638,9 @@ impl App {
                 }
             }
         }
+        let notes = self.notify_candidates(window_focused);
+        self.send_agent_notifications(notes);
+        let Some(ui) = &mut self.ui else { return };
         if bell {
             ui.window
                 .request_user_attention(Some(winit::window::UserAttentionType::Informational));
@@ -1908,6 +1961,9 @@ impl ApplicationHandler<AppEvent> for App {
                         }
                         ui.window.request_redraw();
                     }
+                    let window_focused = self.focused_window == Some(ui.window.id());
+                    let notes = self.notify_candidates(window_focused);
+                    self.send_agent_notifications(notes);
                 }
             }
             AppEvent::Agent { pane, agent } => {
@@ -2044,7 +2100,15 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.sync_watched_panes();
-        let mut deadline: Option<Instant> = None;
+        let group_window =
+            Duration::from_secs(self.config.notifications.group_window_seconds.max(1));
+        if let Some(count) = self.notify_group.due_summary(Instant::now(), group_window) {
+            hv_platform::notify(
+                &hv_ui::strings::sessions_need_you(count),
+                hv_ui::strings::NOTIFY_OPEN_HIVETTY,
+            );
+        }
+        let mut deadline: Option<Instant> = self.notify_group.deadline(group_window);
         for id in self.window_ids() {
             if !self.activate(id) {
                 continue;
@@ -2097,6 +2161,46 @@ impl App {
             .into_iter()
             .flatten()
             .min()
+    }
+}
+
+/// Merges bursts of notifications: up to three per window of time go out as they are, the rest
+/// become one "N sessions need you" when the window ends (docs/ui-spec.md §7).
+#[derive(Debug, Default)]
+struct NotifyGroup {
+    started: Option<Instant>,
+    sent: u32,
+    held: u32,
+}
+
+impl NotifyGroup {
+    /// Whether to send this one now (otherwise it is counted for the summary).
+    fn admit(&mut self, now: Instant, window: Duration) -> bool {
+        if self.started.is_none_or(|s| now.duration_since(s) >= window) {
+            self.started = Some(now);
+            self.sent = 0;
+        }
+        if self.sent < 3 {
+            self.sent += 1;
+            true
+        } else {
+            self.held += 1;
+            false
+        }
+    }
+
+    /// The summary to send once the window is over, if anything was held back.
+    fn due_summary(&mut self, now: Instant, window: Duration) -> Option<u32> {
+        let started = self.started?;
+        (self.held > 0 && now.duration_since(started) >= window).then(|| {
+            let held = std::mem::take(&mut self.held);
+            self.started = None;
+            held
+        })
+    }
+
+    fn deadline(&self, window: Duration) -> Option<Instant> {
+        self.started.filter(|_| self.held > 0).map(|s| s + window)
     }
 }
 
@@ -2314,4 +2418,32 @@ fn translate_key(event: &KeyEvent, mods: Mods) -> Option<TermKey> {
         _ => TermKey::Text(event.text.as_ref()?.to_string()),
     };
     Some(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bursts_of_notifications_are_merged() {
+        let window = Duration::from_secs(10);
+        let t0 = Instant::now();
+        let mut group = NotifyGroup::default();
+        let sent: Vec<bool> = (0..5)
+            .map(|i| group.admit(t0 + Duration::from_secs(i), window))
+            .collect();
+        assert_eq!(sent, [true, true, true, false, false]);
+        assert_eq!(group.due_summary(t0 + Duration::from_secs(5), window), None);
+        assert_eq!(group.deadline(window), Some(t0 + window));
+        assert_eq!(group.due_summary(t0 + window, window), Some(2));
+        // A new window starts fresh.
+        assert!(group.admit(t0 + Duration::from_secs(30), window));
+    }
+
+    #[test]
+    fn durations_read_naturally() {
+        assert_eq!(took_text(Duration::from_secs(45)), "45s");
+        assert_eq!(took_text(Duration::from_secs(200)), "3m 20s");
+        assert_eq!(took_text(Duration::from_secs(3900)), "1h 5m");
+    }
 }
