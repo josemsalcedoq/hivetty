@@ -1,0 +1,8 @@
+{
+  "session_id": "3e6613f3-a913-443f-9489-f461867e8e70",
+  "transcript_path": "/home/me/.gemini/tmp/agent-probe/chats/session-2026-11-22T13-47-3e6613f3.jsonl",
+  "cwd": "/home/me/proj",
+  "hook_event_name": "SessionStart",
+  "timestamp": "2026-11-22T13:47:34.900Z",
+  "source": "startup"
+}

@@ -59,9 +59,9 @@ OPTIONS:
     usage [--json|--csv] [--project NAME] [--days N]
                          Print token usage per day from the agents' local logs
     agents [list]        List the coding agents hivetty knows and which are installed
-    agents install-hooks [--dry-run]
-                         Add hivetty's hooks to Claude Code's settings (shows the changes first)
-    agents uninstall-hooks [--dry-run]
+    agents install-hooks [--agent claude-code|gemini-cli] [--dry-run]
+                         Add hivetty's hooks to the agent's settings (shows the changes first)
+    agents uninstall-hooks [--agent claude-code|gemini-cli] [--dry-run]
                          Remove them again
     agents install-statusline [--dry-run]
                          Use hivetty's statusline in Claude Code (context use, plan limits)

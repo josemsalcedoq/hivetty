@@ -18,8 +18,76 @@ pub const CLAUDE_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// Text that identifies a hivetty hook command (in both installs and uninstalls).
-const MARKER: &str = " hook --agent claude-code --event ";
+/// Events hivetty listens to in Gemini CLI (its hooks mirror Claude Code's).
+pub const GEMINI_EVENTS: &[&str] = &[
+    "SessionStart",
+    "BeforeAgent",
+    "BeforeTool",
+    "AfterTool",
+    "Notification",
+    "AfterAgent",
+    "SessionEnd",
+];
+
+/// An agent whose settings file takes hivetty's hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HookTarget {
+    /// Profile id, as passed to `hivetty hook --agent`.
+    pub agent: &'static str,
+    pub events: &'static [&'static str],
+    /// Events that take a tool `matcher`.
+    pub tool_events: &'static [&'static str],
+    /// The `timeout` written with each hook, in the agent's unit (seconds or milliseconds).
+    pub timeout: u64,
+}
+
+/// Claude Code: `~/.claude/settings.json`, timeouts in seconds.
+pub const CLAUDE: HookTarget = HookTarget {
+    agent: "claude-code",
+    events: CLAUDE_EVENTS,
+    tool_events: &["PreToolUse", "PostToolUse"],
+    timeout: 5,
+};
+
+/// Gemini CLI: `~/.gemini/settings.json`, timeouts in milliseconds.
+pub const GEMINI: HookTarget = HookTarget {
+    agent: "gemini-cli",
+    events: GEMINI_EVENTS,
+    tool_events: &["BeforeTool", "AfterTool"],
+    timeout: 5000,
+};
+
+impl HookTarget {
+    /// The target for a profile id, if hivetty can install hooks there.
+    pub fn for_agent(agent: &str) -> Option<Self> {
+        [CLAUDE, GEMINI].into_iter().find(|t| t.agent == agent)
+    }
+
+    /// Text that identifies hivetty's hook commands for this agent.
+    fn marker(&self) -> String {
+        format!(" hook --agent {} --event ", self.agent)
+    }
+
+    /// The command the agent runs for `event`.
+    pub fn command(&self, exe: &Path, event: &str) -> String {
+        format!("{}{}{event}", quote_exe(exe), self.marker())
+    }
+
+    fn is_ours(&self, command: &str) -> bool {
+        command.contains(&self.marker())
+    }
+}
+
+/// The hivetty binary in single quotes, with forward slashes. Forward slashes work in every
+/// shell the agents use, including bash on Windows; single quotes keep `$`, backticks and `\`
+/// literal for the shell.
+fn quote_exe(exe: &Path) -> String {
+    let exe = exe
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('\'', r"'\''");
+    format!("'{exe}'")
+}
 
 /// What an install or uninstall would do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,19 +98,9 @@ pub struct Plan {
     pub changes: Vec<String>,
 }
 
-/// The command Claude Code runs for `event`. Forward slashes work in every shell Claude Code
-/// uses, including bash on Windows; single quotes keep `$`, backticks and `\\` in the path
-/// literal for the shell.
+/// The command Claude Code runs for `event`.
 pub fn hook_command(exe: &Path, event: &str) -> String {
-    let exe = exe
-        .to_string_lossy()
-        .replace('\\', "/")
-        .replace('\'', r"'\''");
-    format!("'{exe}'{MARKER}{event}")
-}
-
-fn is_ours(command: &str) -> bool {
-    command.contains(MARKER)
+    CLAUDE.command(exe, event)
 }
 
 /// Parses settings text (empty = no file yet). Errors on invalid JSON or a non-object root.
@@ -57,9 +115,19 @@ fn parse(text: &str) -> Result<Map<String, Value>, String> {
     }
 }
 
-/// Adds the missing hivetty hooks. Entries hivetty added before with another binary path are
-/// updated; everything else is left as it is.
+/// Adds the missing Claude Code hooks (see [`plan_install_for`]).
 pub fn plan_install(text: &str, exe: &Path) -> Result<Plan, String> {
+    plan_install_for(CLAUDE, text, exe)
+}
+
+/// Removes every hivetty hook from Claude Code's settings (see [`plan_uninstall_for`]).
+pub fn plan_uninstall(text: &str) -> Result<Plan, String> {
+    plan_uninstall_for(CLAUDE, text)
+}
+
+/// Adds the missing hivetty hooks for `target`. Entries hivetty added before with another
+/// binary path are updated; everything else is left as it is.
+pub fn plan_install_for(target: HookTarget, text: &str, exe: &Path) -> Result<Plan, String> {
     let mut root = parse(text)?;
     let hooks = root
         .entry("hooks")
@@ -68,8 +136,8 @@ pub fn plan_install(text: &str, exe: &Path) -> Result<Plan, String> {
         return Err("\"hooks\" in settings.json is not an object".to_owned());
     };
     let mut changes = Vec::new();
-    for event in CLAUDE_EVENTS {
-        let wanted = hook_command(exe, event);
+    for event in target.events {
+        let wanted = target.command(exe, event);
         let list = hooks
             .entry(*event)
             .or_insert_with(|| Value::Array(Vec::new()));
@@ -85,7 +153,7 @@ pub fn plan_install(text: &str, exe: &Path) -> Result<Plan, String> {
                 let Some(command) = hook.get("command").and_then(Value::as_str) else {
                     continue;
                 };
-                if is_ours(command) {
+                if target.is_ours(command) {
                     found = true;
                     if command != wanted {
                         changes.push(format!("~ {event}: {wanted}"));
@@ -96,9 +164,9 @@ pub fn plan_install(text: &str, exe: &Path) -> Result<Plan, String> {
         }
         if !found {
             let mut group = json!({
-                "hooks": [{ "type": "command", "command": wanted, "timeout": 5 }]
+                "hooks": [{ "type": "command", "command": wanted, "timeout": target.timeout }]
             });
-            if matches!(*event, "PreToolUse" | "PostToolUse") {
+            if target.tool_events.contains(event) {
                 group["matcher"] = Value::String("*".to_owned());
             }
             list.push(group);
@@ -111,8 +179,8 @@ pub fn plan_install(text: &str, exe: &Path) -> Result<Plan, String> {
     })
 }
 
-/// Removes every hivetty hook (and any group or event list left empty by that).
-pub fn plan_uninstall(text: &str) -> Result<Plan, String> {
+/// Removes every hivetty hook for `target` (and any group or event list left empty by that).
+pub fn plan_uninstall_for(target: HookTarget, text: &str) -> Result<Plan, String> {
     let mut root = parse(text)?;
     let mut changes = Vec::new();
     if let Some(Value::Object(hooks)) = root.get_mut("hooks") {
@@ -124,7 +192,7 @@ pub fn plan_uninstall(text: &str) -> Result<Plan, String> {
                         let ours = hook
                             .get("command")
                             .and_then(Value::as_str)
-                            .is_some_and(is_ours);
+                            .is_some_and(|c| target.is_ours(c));
                         if ours {
                             changes.push(format!("- {event}"));
                         }
@@ -152,10 +220,7 @@ pub fn plan_uninstall(text: &str) -> Result<Plan, String> {
 
 /// The `statusLine` command hivetty installs (F4-32).
 pub fn statusline_command(exe: &Path) -> String {
-    // The same quoting as the hook commands, without the hook arguments.
-    let hook = hook_command(exe, "");
-    let quoted = &hook[..hook.len() - MARKER.len()];
-    format!("{quoted}{STATUSLINE_MARKER}")
+    format!("{}{STATUSLINE_MARKER}", quote_exe(exe))
 }
 
 /// What identifies hivetty's statusline command.
@@ -183,7 +248,7 @@ pub fn plan_statusline_install(text: &str, exe: &Path) -> Result<Plan, String> {
     match root.get("statusLine") {
         Some(current) if !is_our_statusline(current) => {
             return Err(
-                "settings.json already has a statusLine; hivetty leaves it as it is (remove it                  first to use hivetty's)"
+                "settings.json already has a statusLine; hivetty leaves it as it is (remove it first to use hivetty's)"
                     .to_owned(),
             );
         }
@@ -223,6 +288,11 @@ fn to_text(root: &Map<String, Value>) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// `~/.gemini/settings.json`.
+pub fn gemini_settings_path(home: &Path) -> PathBuf {
+    home.join(".gemini").join("settings.json")
+}
+
 /// `~/.claude/settings.json`.
 pub fn claude_settings_path(home: &Path) -> PathBuf {
     home.join(".claude").join("settings.json")
@@ -256,6 +326,32 @@ pub fn apply(path: &Path, plan: &Plan) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gemini_hooks_use_milliseconds_and_their_own_events() {
+        let exe = Path::new("/opt/hivetty/hivetty");
+        let plan = plan_install_for(GEMINI, "{}", exe).unwrap();
+        assert_eq!(plan.changes.len(), GEMINI_EVENTS.len());
+        let root: Value = serde_json::from_str(&plan.new_text).unwrap();
+        let tool = &root["hooks"]["BeforeTool"][0];
+        assert_eq!(tool["matcher"], "*");
+        assert_eq!(tool["hooks"][0]["timeout"], 5000);
+        assert_eq!(
+            tool["hooks"][0]["command"],
+            "'/opt/hivetty/hivetty' hook --agent gemini-cli --event BeforeTool"
+        );
+        // Claude Code's entries are not Gemini's, and the other way round.
+        assert!(
+            plan_uninstall_for(CLAUDE, &plan.new_text)
+                .unwrap()
+                .changes
+                .is_empty()
+        );
+        let removed = plan_uninstall_for(GEMINI, &plan.new_text).unwrap();
+        assert_eq!(removed.changes.len(), GEMINI_EVENTS.len());
+        assert_eq!(HookTarget::for_agent("gemini-cli"), Some(GEMINI));
+        assert_eq!(HookTarget::for_agent("codex"), None);
+    }
 
     #[test]
     fn statusline_is_added_and_removed_but_never_replaces_the_users() {

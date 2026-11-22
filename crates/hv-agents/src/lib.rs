@@ -4,6 +4,7 @@
 //! (2.2) and the interpreters for Claude Code hooks and OSC 7501.
 
 pub mod claude;
+pub mod gemini;
 pub mod install;
 pub mod profile;
 pub mod statusline;

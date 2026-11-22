@@ -200,13 +200,22 @@ impl SessionInfo {
             }
             return false;
         }
-        let update = match hook.agent.as_str() {
-            "claude" | "claude-code" => hv_agents::claude::from_hook(&hook.event, &hook.payload),
+        let (update, id, name) = match hook.agent.as_str() {
+            "claude" | "claude-code" => (
+                hv_agents::claude::from_hook(&hook.event, &hook.payload),
+                "claude-code",
+                "Claude Code",
+            ),
+            "gemini" | "gemini-cli" => (
+                hv_agents::gemini::from_hook(&hook.event, &hook.payload),
+                "gemini-cli",
+                "Gemini CLI",
+            ),
             _ => return false,
         };
         if self.agent_id.is_none() {
-            self.agent_id = Some("claude-code".to_owned());
-            self.agent_name = Some("Claude Code".to_owned());
+            self.agent_id = Some(id.to_owned());
+            self.agent_name = Some(name.to_owned());
         }
         let changed = self.agent.apply(Source::Hook, update, Instant::now());
         if let Some(hv_agents::Subtitle::Activity(activity)) = self.agent.subtitle()
@@ -378,6 +387,28 @@ mod tests {
             event: event.into(),
             payload: payload.into(),
         }
+    }
+
+    #[test]
+    fn gemini_hooks_name_the_agent_and_set_its_state() {
+        let mut info = SessionInfo::new();
+        let gemini = |event: &str, payload: &str| hv_ipc::HookEvent {
+            session: Some("1".into()),
+            agent: "gemini-cli".into(),
+            event: event.into(),
+            payload: payload.into(),
+        };
+        assert!(info.on_hook(&gemini(
+            "BeforeTool",
+            r#"{"hook_event_name":"BeforeTool","session_id":"s","tool_name":"run_shell_command","tool_input":{"command":"cargo test"}}"#,
+        )));
+        assert_eq!(info.agent_id.as_deref(), Some("gemini-cli"));
+        assert_eq!(info.agent_name.as_deref(), Some("Gemini CLI"));
+        assert_eq!(
+            info.agent.state(),
+            Some(&AgentState::Working { progress: None })
+        );
+        assert_eq!(info.last_tool.as_deref(), Some("Running cargo test"));
     }
 
     #[test]

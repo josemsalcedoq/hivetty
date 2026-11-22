@@ -9,19 +9,42 @@ use anyhow::{Context, Result, bail};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AgentsCommand {
     List,
-    InstallHooks { dry_run: bool },
-    UninstallHooks { dry_run: bool },
-    InstallStatusline { dry_run: bool },
-    UninstallStatusline { dry_run: bool },
+    /// For `agent` (`claude-code` by default, or `gemini-cli`).
+    InstallHooks {
+        dry_run: bool,
+        agent: String,
+    },
+    UninstallHooks {
+        dry_run: bool,
+        agent: String,
+    },
+    InstallStatusline {
+        dry_run: bool,
+    },
+    UninstallStatusline {
+        dry_run: bool,
+    },
 }
 
 impl AgentsCommand {
     pub(crate) fn parse(args: &[String]) -> Result<Self, String> {
         let dry_run = args.iter().any(|a| a == "--dry-run");
+        let agent = match args.iter().position(|a| a == "--agent") {
+            Some(i) => args
+                .get(i + 1)
+                .cloned()
+                .ok_or("--agent needs an agent id")?,
+            None => "claude-code".to_owned(),
+        };
+        if hv_agents::install::HookTarget::for_agent(&agent).is_none() {
+            return Err(format!(
+                "hivetty cannot install hooks for '{agent}' (only claude-code and gemini-cli)"
+            ));
+        }
         match args.first().map(String::as_str) {
             None | Some("list") => Ok(Self::List),
-            Some("install-hooks") => Ok(Self::InstallHooks { dry_run }),
-            Some("uninstall-hooks") => Ok(Self::UninstallHooks { dry_run }),
+            Some("install-hooks") => Ok(Self::InstallHooks { dry_run, agent }),
+            Some("uninstall-hooks") => Ok(Self::UninstallHooks { dry_run, agent }),
             Some("install-statusline") => Ok(Self::InstallStatusline { dry_run }),
             Some("uninstall-statusline") => Ok(Self::UninstallStatusline { dry_run }),
             Some(other) => Err(format!("unknown agents command '{other}'")),
@@ -51,25 +74,30 @@ pub(crate) fn run(command: &AgentsCommand) -> Result<()> {
             }
             Ok(())
         }
-        AgentsCommand::InstallHooks { dry_run } => {
-            let path = settings_path()?;
+        AgentsCommand::InstallHooks { dry_run, agent } => {
+            let (target, path, name) = hook_target(agent)?;
             let exe = std::env::current_exe().context("cannot find the hivetty executable")?;
             let text = read_or_empty(&path)?;
-            let plan = hv_agents::install::plan_install(&text, &exe)
+            let plan = hv_agents::install::plan_install_for(target, &text, &exe)
                 .map_err(|e| anyhow::anyhow!("{e} ({})", path.display()))?;
             confirm_and_apply(
                 &path,
                 &plan,
                 *dry_run,
-                "Install hivetty's Claude Code hooks",
+                &format!("Install hivetty's {name} hooks"),
             )
         }
-        AgentsCommand::UninstallHooks { dry_run } => {
-            let path = settings_path()?;
+        AgentsCommand::UninstallHooks { dry_run, agent } => {
+            let (target, path, name) = hook_target(agent)?;
             let text = read_or_empty(&path)?;
-            let plan = hv_agents::install::plan_uninstall(&text)
+            let plan = hv_agents::install::plan_uninstall_for(target, &text)
                 .map_err(|e| anyhow::anyhow!("{e} ({})", path.display()))?;
-            confirm_and_apply(&path, &plan, *dry_run, "Remove hivetty's Claude Code hooks")
+            confirm_and_apply(
+                &path,
+                &plan,
+                *dry_run,
+                &format!("Remove hivetty's {name} hooks"),
+            )
         }
         AgentsCommand::InstallStatusline { dry_run } => {
             let path = settings_path()?;
@@ -95,13 +123,33 @@ pub(crate) fn run(command: &AgentsCommand) -> Result<()> {
 }
 
 pub(crate) fn settings_path() -> Result<std::path::PathBuf> {
-    let home = std::env::var_os("USERPROFILE")
+    Ok(hv_agents::install::claude_settings_path(&home()?))
+}
+
+fn home() -> Result<std::path::PathBuf> {
+    std::env::var_os("USERPROFILE")
         .filter(|_| cfg!(windows))
         .or_else(|| std::env::var_os("HOME"))
-        .context("cannot find the home directory")?;
-    Ok(hv_agents::install::claude_settings_path(
-        std::path::Path::new(&home),
-    ))
+        .map(std::path::PathBuf::from)
+        .context("cannot find the home directory")
+}
+
+/// Where an agent's hooks go, and its display name.
+fn hook_target(
+    agent: &str,
+) -> Result<(
+    hv_agents::install::HookTarget,
+    std::path::PathBuf,
+    &'static str,
+)> {
+    match agent {
+        "gemini-cli" => Ok((
+            hv_agents::install::GEMINI,
+            hv_agents::install::gemini_settings_path(&home()?),
+            "Gemini CLI",
+        )),
+        _ => Ok((hv_agents::install::CLAUDE, settings_path()?, "Claude Code")),
+    }
 }
 
 fn read_or_empty(path: &std::path::Path) -> Result<String> {
@@ -153,7 +201,10 @@ mod tests {
         assert_eq!(AgentsCommand::parse(&[]), Ok(AgentsCommand::List));
         assert_eq!(
             AgentsCommand::parse(&args("install-hooks --dry-run")),
-            Ok(AgentsCommand::InstallHooks { dry_run: true })
+            Ok(AgentsCommand::InstallHooks {
+                dry_run: true,
+                agent: "claude-code".into()
+            })
         );
         assert!(AgentsCommand::parse(&args("explode")).is_err());
     }

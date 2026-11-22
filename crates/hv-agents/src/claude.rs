@@ -88,7 +88,7 @@ fn tool_action(tool: &str, input: Option<&Value>) -> Option<Subtitle> {
 }
 
 /// Keeps the free text of a subtitle to one short line.
-fn shorten(subtitle: Subtitle) -> Subtitle {
+pub(crate) fn shorten(subtitle: Subtitle) -> Subtitle {
     match subtitle {
         Subtitle::Text(t) => Subtitle::Text(truncate(&t)),
         Subtitle::Activity(a) => Subtitle::Activity(match a {
@@ -103,7 +103,7 @@ fn shorten(subtitle: Subtitle) -> Subtitle {
 }
 
 /// The last two components of a path, which is what fits in a sidebar row.
-fn short_path(path: &str) -> String {
+pub(crate) fn short_path(path: &str) -> String {
     let parts: Vec<&str> = path.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
     let start = parts.len().saturating_sub(2);
     parts[start..].join("/")
