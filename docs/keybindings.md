@@ -24,6 +24,7 @@ Principios:
 | Mostrar u ocultar la barra lateral | `⌘B` | `Ctrl+Shift+B` |
 | Enfocar la búsqueda de agentes | `/` (con la barra lateral enfocada) | `/` |
 | **Ir a la siguiente sesión que te necesita** | `⌘J` | `Ctrl+Shift+J` |
+| Buscar sesiones (S-03; Enter abre la primera, Esc vuelve al terminal) | `⇧⌘S` | `Ctrl+Shift+S` |
 | Ir a una sesión por nombre | `⌘O` | `Ctrl+Shift+O` |
 | Paleta de comandos | `⇧⌘P` | `Ctrl+Shift+P` |
 | Panel de uso | `⌥⌘U` | `Ctrl+Alt+U` |

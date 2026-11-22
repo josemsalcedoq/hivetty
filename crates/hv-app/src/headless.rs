@@ -263,6 +263,7 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             },
             agents,
             new_session_hint,
+            search_hint: String::new(),
             menu,
             sessions,
             tabs: vec![{

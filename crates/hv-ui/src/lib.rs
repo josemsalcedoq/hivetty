@@ -105,6 +105,8 @@ pub struct ChromeModel {
     pub agents: Vec<AgentChoice>,
     /// Shortcut shown on the New session button ("Ctrl+Shift+A").
     pub new_session_hint: String,
+    /// Shortcut of the session search field, shown in it (S-03).
+    pub search_hint: String,
     /// The usage dashboard, drawn over the terminals when open (F5).
     pub usage: Option<UsageView>,
     /// A session being peeked at (S-20).
@@ -281,6 +283,7 @@ impl Chrome {
                             &model.sessions,
                             &model.archived,
                             &model.new_session_hint,
+                            &model.search_hint,
                         );
                         clicked_session = out.clicked;
                         new_session_clicked = out.new_session;
@@ -407,6 +410,11 @@ impl Chrome {
     }
 
     /// Opens the New session dialog with an agent (profile id) and folder preselected.
+    /// Puts the keyboard in the sidebar's search field (S-03).
+    pub fn focus_search(&mut self) {
+        self.sidebar.focus_search = true;
+    }
+
     /// Shows the first-run wizard (F6-03).
     pub fn open_welcome(&mut self, info: WelcomeInfo) {
         self.welcome = Some(welcome::Welcome::new(info));
@@ -729,6 +737,7 @@ mod tests {
             menu: Vec::new(),
             agents: Vec::new(),
             new_session_hint: String::new(),
+            search_hint: String::new(),
             usage: None,
             peek: None,
             title_bar: TitleBar::Native,
@@ -790,6 +799,7 @@ mod tests {
             menu: Vec::new(),
             agents: Vec::new(),
             new_session_hint: String::new(),
+            search_hint: String::new(),
             usage: None,
             peek: None,
             title_bar: TitleBar::Native,

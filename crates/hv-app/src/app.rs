@@ -419,6 +419,10 @@ impl Ui {
                 .chord_for(&Action::NewAgentSession)
                 .map(crate::keymap::Chord::pretty)
                 .unwrap_or_default(),
+            search_hint: keymap
+                .chord_for(&Action::SearchSessions)
+                .map(crate::keymap::Chord::pretty)
+                .unwrap_or_default(),
         }
     }
 }
@@ -929,6 +933,13 @@ impl App {
             Action::FontSmaller => zoom(ui, -1.0),
             Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
             Action::NextNeedsYou => self.focus_next_needing_you(),
+            Action::SearchSessions => {
+                self.sidebar_visible = true;
+                if let Some(ui) = &mut self.ui {
+                    ui.chrome.focus_search();
+                    ui.window.request_redraw();
+                }
+            }
             Action::ClosePanesById(ids) => {
                 for id in ids {
                     self.close_pane(id, event_loop);

@@ -40,6 +40,8 @@ pub(crate) enum Action {
     CommandPalette,
     /// Focus the next session waiting for the user, then the next finished-but-unseen one.
     NextNeedsYou,
+    /// Put the keyboard in the sidebar's search field (S-03).
+    SearchSessions,
     /// Write this text to the focused terminal (`action = { send_text = "…" }`).
     SendText(String),
     /// Close several panes (archiving a project's finished sessions).
@@ -85,6 +87,7 @@ impl Action {
             "font_reset" => Self::FontReset,
             "command_palette" => Self::CommandPalette,
             "next_needs_you" => Self::NextNeedsYou,
+            "search_sessions" => Self::SearchSessions,
             "none" => Self::None,
             other => {
                 let n: usize = other.strip_prefix("go_to_tab_")?.parse().ok()?;
@@ -342,6 +345,7 @@ pub(crate) const PALETTE_ACTIONS: &[&str] = &[
     "font_smaller",
     "font_reset",
     "next_needs_you",
+    "search_sessions",
     "command_palette",
 ];
 
@@ -367,7 +371,7 @@ pub(crate) const MENU_SECTIONS: &[&[&str]] = &[
         "font_reset",
     ],
     &["next_tab", "previous_tab"],
-    &["next_needs_you", "command_palette"],
+    &["next_needs_you", "search_sessions", "command_palette"],
 ];
 
 /// The palette / menu entry for an action name: its id is the index in [`PALETTE_ACTIONS`].
@@ -527,6 +531,7 @@ const MAC: &[(&str, &str)] = &[
     ("cmd+0", "font_reset"),
     ("shift+cmd+p", "command_palette"),
     ("cmd+j", "next_needs_you"),
+    ("shift+cmd+s", "search_sessions"),
 ];
 
 const OTHERS: &[(&str, &str)] = &[
@@ -561,6 +566,7 @@ const OTHERS: &[(&str, &str)] = &[
     ("ctrl+0", "font_reset"),
     ("ctrl+shift+p", "command_palette"),
     ("ctrl+shift+j", "next_needs_you"),
+    ("ctrl+shift+s", "search_sessions"),
 ];
 
 #[cfg(test)]

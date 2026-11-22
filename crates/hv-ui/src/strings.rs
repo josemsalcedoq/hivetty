@@ -90,6 +90,7 @@ pub fn action_label(name: &str) -> Option<&'static str> {
         "font_reset" => "Reset font size",
         "command_palette" => "Command palette",
         "next_needs_you" => "Go to next session that needs you",
+        "search_sessions" => "Search sessions",
         _ => return None,
     })
 }

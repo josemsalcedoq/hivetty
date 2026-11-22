@@ -47,6 +47,8 @@ pub(crate) struct Sidebar {
     filter: Filter,
     /// Projects whose sessions are hidden (S-14).
     collapsed: std::collections::HashSet<String>,
+    /// Put the keyboard in the search field next frame (S-03).
+    pub(crate) focus_search: bool,
 }
 
 impl Sidebar {
@@ -58,6 +60,7 @@ impl Sidebar {
         sessions: &[SessionRow],
         archived: &[ArchivedRow],
         new_session_hint: &str,
+        search_hint: &str,
     ) -> SidebarOutput {
         let mut out = SidebarOutput::default();
         let mut clicked = None;
@@ -79,10 +82,20 @@ impl Sidebar {
             });
         });
         ui.add_space(6.0);
+        let hint = if search_hint.is_empty() {
+            strings::SEARCH_SESSIONS.to_owned()
+        } else {
+            format!("{}  {search_hint}", strings::SEARCH_SESSIONS)
+        };
         let search = egui::TextEdit::singleline(&mut self.query)
-            .hint_text(strings::SEARCH_SESSIONS)
+            .hint_text(hint)
             .desired_width(f32::INFINITY);
-        ui.add(search);
+        let search = ui.add(search);
+        if std::mem::take(&mut self.focus_search) {
+            search.request_focus();
+        }
+        // Enter opens the first session that matches; Esc gives the keyboard back.
+        let open_first = search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -247,6 +260,16 @@ impl Sidebar {
                     });
                 }
             });
+        if open_first && clicked.is_none() {
+            let query = self.query.trim().to_lowercase();
+            clicked = sessions
+                .iter()
+                .enumerate()
+                .find(|(_, s)| {
+                    self.filter.keeps(s.state) && (query.is_empty() || matches_query(s, &query))
+                })
+                .map(|(i, _)| i);
+        }
         out.clicked = clicked;
         out.new_session = new_session;
         out.peek = peek;

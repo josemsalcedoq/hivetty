@@ -54,6 +54,7 @@ macOS uses ⌘; Windows and Linux use Ctrl+Shift, so the shortcuts never take Ct
 | Next / previous tab | ⇧⌘] / ⇧⌘[ | Ctrl+Tab / Ctrl+Shift+Tab |
 | Go to tab 1–9 | ⌘1…9 | Alt+1…9 |
 | Go to the next session that needs you | ⌘J | Ctrl+Shift+J |
+| Search sessions (Enter opens the first match, Esc goes back) | ⇧⌘S | Ctrl+Shift+S |
 | Command palette | ⇧⌘P | Ctrl+Shift+P |
 | Agent usage dashboard | ⌥⌘U | Ctrl+Alt+U |
 | Show or hide the sidebar | ⌘B | Ctrl+Shift+B |
