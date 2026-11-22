@@ -7,10 +7,12 @@ mod sidebar;
 pub mod strings;
 mod tabs;
 mod theme;
+mod usage;
 
 pub use new_session::{AgentChoice, NewSession};
 pub use palette::PaletteItem;
 pub use tabs::{TAB_BAR_HEIGHT, TabAction, TabItem};
+pub use usage::{UsageAction, UsageRange, UsageView};
 
 use egui::{Color32, Margin, Stroke};
 
@@ -66,6 +68,8 @@ pub struct ChromeModel {
     pub agents: Vec<AgentChoice>,
     /// Shortcut shown on the New session button ("Ctrl+Shift+A").
     pub new_session_hint: String,
+    /// The usage dashboard, drawn over the terminals when open (F5).
+    pub usage: Option<UsageView>,
 }
 
 /// What the chrome produced this frame.
@@ -86,6 +90,8 @@ pub struct ChromeOutput {
     pub new_session: Option<NewSession>,
     /// An agent in the dock was clicked (profile id).
     pub dock_choice: Option<String>,
+    /// Something done in the usage dashboard.
+    pub usage_action: Option<UsageAction>,
 }
 
 impl std::fmt::Debug for ChromeOutput {
@@ -143,6 +149,7 @@ impl Chrome {
         let mut new_session_clicked = false;
         let mut new_session = None;
         let mut dock_choice = None;
+        let mut usage_action = None;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 egui::Panel::left("sidebar")
@@ -180,6 +187,9 @@ impl Chrome {
                     });
             }
             central = ui.available_rect_before_wrap();
+            if let Some(view) = &model.usage {
+                usage_action = usage::show(ui.ctx(), central, view);
+            }
             if let Some(open) = dialog.as_mut() {
                 match open.show(ui.ctx()) {
                     new_session::Outcome::Open => {}
@@ -217,6 +227,7 @@ impl Chrome {
             new_session_clicked,
             new_session,
             dock_choice,
+            usage_action,
         }
     }
 
@@ -381,6 +392,7 @@ mod tests {
             menu: Vec::new(),
             agents: Vec::new(),
             new_session_hint: String::new(),
+            usage: None,
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
                 subtitle: "Needs permission: Bash".into(),
@@ -432,6 +444,7 @@ mod tests {
             menu: Vec::new(),
             agents: Vec::new(),
             new_session_hint: String::new(),
+            usage: None,
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),
                 subtitle: "Working".into(),

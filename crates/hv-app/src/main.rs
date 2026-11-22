@@ -42,6 +42,7 @@ OPTIONS:
     --preedit <TEXT>     With --screenshot, draw TEXT as input-method composition at the cursor
     --split              With --screenshot, run the program in two panes side by side
     --palette            With --screenshot --ui, show the command palette
+    --usage              With --screenshot --ui, show the usage dashboard (this machine's logs)
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
     agents [list]        List the coding agents hivetty knows and which are installed
@@ -75,6 +76,7 @@ enum Command {
         preedit: Option<String>,
         split: bool,
         palette: bool,
+        usage: bool,
     },
     Doctor,
     Usage {
@@ -96,6 +98,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut preedit = None;
     let mut split = false;
     let mut palette = false;
+    let mut usage_flag = false;
     let mut record: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
@@ -147,6 +150,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             }
             "--split" => split = true,
             "--palette" => palette = true,
+            "--usage" => usage_flag = true,
             "--preedit" => {
                 preedit = Some(value(i)?.clone());
                 i += 1;
@@ -178,6 +182,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             preedit,
             split,
             palette,
+            usage: usage_flag,
         },
         None => Command::Run(spec, record),
     })
@@ -240,6 +245,7 @@ fn main() -> ExitCode {
             preedit,
             split,
             palette,
+            usage,
         } => {
             let opts = headless::Capture {
                 cols,
@@ -252,6 +258,7 @@ fn main() -> ExitCode {
                 preedit,
                 split,
                 palette,
+                usage,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))

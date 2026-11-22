@@ -202,6 +202,12 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 ## F5 — Panel de uso
 
+**Estado (2026-11-22):**
+- ✅ F5-02: el parser de Claude Code también cuenta las tareas (prompts del usuario; no los resultados de herramientas, mensajes meta ni comandos locales).
+- ✅ F5-06: `hv_usage::dashboard::build`, pura y con tests de las fórmulas U-*: 30 días contando hoy, deltas frente al periodo anterior (tope visual +999 %), tokens por día con días vacíos, días activos y media, mapa de calor 7×24 en hora local (lunes primero) con 5 niveles por cuartiles, modelos con cuota de proveedor por input, agentes.
+- ✅ F5-07…F5-12: panel "Agent usage" (`Ctrl+Alt+U` / `⌥⌘U`, paleta y menú) sobre los paneles: tarjetas KPI con delta y sparkline, tokens por día (input arriba y output abajo con su escala, tooltip, eje primer día / centro / today, "N of M days with agents · X/day"), mapa de calor con leyenda y "most active", modelos (barra por proveedor, 6 filas y "N more") y agentes; selector 7/30/90/All y `esc`; estados de carga y vacío; números compactos y con miles. Probado con los datos reales de este equipo (`--screenshot --ui --usage`).
+- ⏳ Pendiente: SQLite con ingesta incremental (F5-01, F5-04: ahora se leen los logs en un hilo al abrir, con caché de 60 s), tiempo de agente (F4-23), otros agentes (F5-03), coste (F5-13), exportar y filtrar por proyecto (F5-14), filtro al pulsar un agente (U-51), límites del plan (F5-19).
+
 | ID | Tarea | Req | Depende | Tam. |
 |---|---|---|---|---|
 | F5-01 | `hv-usage`: esquema SQLite, migraciones (`rusqlite_migration`) y cursores de ingesta | — | F0 | M |

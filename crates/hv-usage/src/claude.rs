@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::UsageRecord;
+use crate::{Task, UsageRecord};
 
 /// Lines longer than this are skipped (docs/security.md 2.6).
 const MAX_LINE: usize = 16 * 1024 * 1024;
@@ -26,6 +26,8 @@ struct Line {
     #[serde(rename = "requestId")]
     request_id: Option<String>,
     cwd: Option<String>,
+    #[serde(rename = "isMeta")]
+    is_meta: Option<bool>,
     message: Option<Message>,
 }
 
@@ -34,6 +36,35 @@ struct Message {
     id: Option<String>,
     model: Option<String>,
     usage: Option<Usage>,
+    content: Option<serde_json::Value>,
+}
+
+/// Whether a user message is a prompt the user typed (a task), not a tool result, a meta
+/// message or the output of a local command.
+fn is_prompt(content: &serde_json::Value) -> bool {
+    match content {
+        serde_json::Value::String(text) => {
+            let text = text.trim_start();
+            !text.is_empty() && !text.starts_with('<')
+        }
+        serde_json::Value::Array(items) => {
+            let kind = |item: &serde_json::Value| {
+                item.get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            };
+            items
+                .iter()
+                .all(|i| kind(i).as_deref() != Some("tool_result"))
+                && items.iter().any(|i| {
+                    kind(i).as_deref() == Some("text")
+                        && i.get("text")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|t| !t.trim_start().starts_with('<'))
+                })
+        }
+        _ => false,
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -81,15 +112,40 @@ pub fn transcript_files(root: &Path) -> Vec<PathBuf> {
 
 /// Parses one transcript, skipping records whose key is already in `seen`.
 pub fn parse_reader(reader: impl BufRead, seen: &mut HashSet<String>) -> Vec<UsageRecord> {
+    parse_activity(reader, seen).0
+}
+
+/// Like [`parse_reader`], also returning the tasks (prompts the user sent).
+pub fn parse_activity(
+    reader: impl BufRead,
+    seen: &mut HashSet<String>,
+) -> (Vec<UsageRecord>, Vec<Task>) {
     let mut out = Vec::new();
+    let mut tasks = Vec::new();
     for line in reader.lines() {
         let Ok(line) = line else { continue };
-        if line.len() > MAX_LINE || !line.contains("\"usage\"") {
+        let user = line.contains("\"type\":\"user\"");
+        if line.len() > MAX_LINE || !(user || line.contains("\"usage\"")) {
             continue;
         }
         let Ok(parsed) = serde_json::from_str::<Line>(&line) else {
             continue;
         };
+        if parsed.kind.as_deref() == Some("user") {
+            let prompt = parsed
+                .message
+                .as_ref()
+                .and_then(|m| m.content.as_ref())
+                .is_some_and(is_prompt);
+            if prompt && parsed.is_meta != Some(true) {
+                tasks.push(Task {
+                    agent: "claude-code",
+                    timestamp: parsed.timestamp.unwrap_or_default(),
+                    session_id: parsed.session_id,
+                });
+            }
+            continue;
+        }
         if parsed.kind.as_deref() != Some("assistant") {
             continue;
         }
@@ -120,7 +176,21 @@ pub fn parse_reader(reader: impl BufRead, seen: &mut HashSet<String>) -> Vec<Usa
             cache_write_tokens: usage.cache_creation_input_tokens,
         });
     }
-    out
+    (out, tasks)
+}
+
+/// Parses every transcript under `root`: usage records (de-duplicated across files) and tasks.
+pub fn scan_activity(root: &Path) -> (Vec<UsageRecord>, Vec<Task>) {
+    let mut seen = HashSet::new();
+    let (mut records, mut tasks) = (Vec::new(), Vec::new());
+    for path in transcript_files(root) {
+        if let Ok(file) = File::open(&path) {
+            let (r, t) = parse_activity(BufReader::new(file), &mut seen);
+            records.extend(r);
+            tasks.extend(t);
+        }
+    }
+    (records, tasks)
 }
 
 /// Parses every transcript under `root`, de-duplicated across files.

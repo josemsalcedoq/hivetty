@@ -35,6 +35,8 @@ pub(crate) struct Capture {
     pub(crate) split: bool,
     /// Show the command palette (with `ui`).
     pub(crate) palette: bool,
+    /// Show the usage dashboard with this machine's real data (with `ui`).
+    pub(crate) usage: bool,
 }
 
 impl Default for Capture {
@@ -51,6 +53,7 @@ impl Default for Capture {
             preedit: None,
             split: false,
             palette: false,
+            usage: false,
         }
     }
 }
@@ -220,8 +223,16 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             .chord_for(&crate::keymap::Action::NewAgentSession)
             .map(crate::keymap::Chord::pretty)
             .unwrap_or_default();
+        let usage = opts.usage.then(|| {
+            let data = crate::app::UsageData::read();
+            hv_ui::UsageView::Ready(
+                hv_ui::UsageRange::Month,
+                std::sync::Arc::new(data.dashboard(hv_ui::UsageRange::Month)),
+            )
+        });
         let model = hv_ui::ChromeModel {
             sidebar_visible: true,
+            usage,
             agents,
             new_session_hint,
             menu,
@@ -237,6 +248,11 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
                 tab
             }],
         };
+        if opts.usage {
+            // Areas are measured on their first frame and drawn from the second.
+            let warm = chrome.run(raw_input(width, height), &model);
+            pending_textures.append(warm.full.textures_delta);
+        }
         if opts.palette {
             let keymap = crate::keymap::Keymap::defaults();
             let items = crate::keymap::PALETTE_ACTIONS

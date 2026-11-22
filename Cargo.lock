@@ -1740,6 +1740,7 @@ dependencies = [
  "hv-term",
  "hv-ui",
  "hv-usage",
+ "jiff",
  "log",
  "muda",
  "opener",
@@ -1839,6 +1840,7 @@ name = "hv-ui"
 version = "0.0.0"
 dependencies = [
  "egui",
+ "hv-usage",
 ]
 
 [[package]]

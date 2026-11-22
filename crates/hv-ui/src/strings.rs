@@ -78,6 +78,7 @@ pub fn action_label(name: &str) -> Option<&'static str> {
         "next_tab" => "Next tab",
         "previous_tab" => "Previous tab",
         "toggle_sidebar" => "Show or hide sidebar",
+        "toggle_usage" => "Agent usage",
         "find" => "Find in scrollback",
         "previous_prompt" => "Jump to previous prompt",
         "next_prompt" => "Jump to next prompt",
@@ -128,3 +129,64 @@ pub const CREATE: &str = "Create";
 pub const CANCEL: &str = "Cancel";
 /// Shown when the folder does not exist.
 pub const FOLDER_MISSING: &str = "That folder does not exist";
+/// Usage dashboard (docs/ui-spec.md §6).
+pub const USAGE_TITLE: &str = "Agent usage";
+/// Range selector.
+pub const RANGE_7: &str = "7 days";
+/// Range selector.
+pub const RANGE_30: &str = "30 days";
+/// Range selector.
+pub const RANGE_90: &str = "90 days";
+/// Range selector.
+pub const RANGE_ALL: &str = "All";
+/// End of the date range and of the X axis.
+pub const TODAY: &str = "today";
+/// Close button of the dashboard.
+pub const ESC: &str = "esc";
+/// While the logs are read.
+pub const USAGE_LOADING: &str = "Reading usage…";
+/// Empty state.
+pub const USAGE_EMPTY: &str =
+    "No usage data yet. hivetty reads usage from: Claude Code (~/.claude/projects)";
+/// KPI card labels.
+pub const KPI_INPUT: &str = "INPUT TOKENS";
+/// KPI card labels.
+pub const KPI_OUTPUT: &str = "OUTPUT TOKENS";
+/// KPI card labels.
+pub const KPI_TASKS: &str = "TASKS";
+/// KPI card labels.
+pub const KPI_AGENT_TIME: &str = "AGENT TIME";
+/// KPI subtitles.
+pub const FROM_CACHE: &str = "from cache";
+/// KPI subtitles.
+pub const PER_TURN: &str = "per turn";
+/// KPI subtitles.
+pub const TURNS: &str = "turns";
+/// Agent time is measured from the states hivetty observes; shown once that is recorded.
+pub const AGENT_TIME_SOON: &str = "measured by hivetty (coming soon)";
+/// Chart titles.
+pub const TOKENS_BY_DAY: &str = "TOKENS BY DAY";
+/// Chart titles.
+pub const WHEN_THEY_WORK: &str = "WHEN THEY WORK";
+/// Chart titles.
+pub const MODELS: &str = "MODELS";
+/// Chart titles.
+pub const AGENTS: &str = "AGENTS";
+/// Axis and summary words.
+pub const INPUT: &str = "input";
+/// Axis and summary words.
+pub const OUTPUT: &str = "output";
+/// "29 of 30 days with agents".
+pub const DAYS_WITH_AGENTS: &str = "days with agents";
+/// "402M/day".
+pub const DAY: &str = "day";
+/// Heatmap rows, Monday first.
+pub const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+/// Heatmap legend.
+pub const LESS: &str = "less";
+/// Heatmap legend.
+pub const MORE: &str = "more";
+/// "most active Sat 10 h".
+pub const MOST_ACTIVE: &str = "most active";
+/// "10 more" rows.
+pub const MORE_ROWS: &str = "more";

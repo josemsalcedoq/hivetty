@@ -13,3 +13,4 @@ workspace = true
 
 [dependencies]
 egui = { version = "0.37", features = ["default_fonts"] }
+hv-usage = { version = "0.0.0", path = "../hv-usage" }

@@ -2,6 +2,7 @@
 
 use egui::Color32;
 
+pub(crate) const WINDOW_BG: Color32 = Color32::from_rgb(0x0A, 0x0A, 0x0B);
 pub(crate) const SIDEBAR_BG: Color32 = Color32::from_rgb(0x11, 0x11, 0x13);
 pub(crate) const ELEVATED_BG: Color32 = Color32::from_rgb(0x18, 0x18, 0x1B);
 /// Progress bars and the unseen dot (`chart.output`).

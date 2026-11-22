@@ -26,6 +26,8 @@ pub(crate) enum Action {
     /// 0-based.
     GoToTab(usize),
     ToggleSidebar,
+    /// Show or hide the usage dashboard (F5).
+    ToggleUsage,
     Find,
     /// Scroll to the previous (`true`) or next shell prompt.
     JumpToPrompt(bool),
@@ -69,6 +71,7 @@ impl Action {
             "next_tab" => Self::NextTab,
             "previous_tab" => Self::PreviousTab,
             "toggle_sidebar" => Self::ToggleSidebar,
+            "toggle_usage" => Self::ToggleUsage,
             "find" => Self::Find,
             "previous_prompt" => Self::JumpToPrompt(true),
             "next_prompt" => Self::JumpToPrompt(false),
@@ -326,6 +329,7 @@ pub(crate) const PALETTE_ACTIONS: &[&str] = &[
     "resize_up",
     "resize_down",
     "toggle_sidebar",
+    "toggle_usage",
     "find",
     "previous_prompt",
     "next_prompt",
@@ -354,6 +358,7 @@ pub(crate) const MENU_SECTIONS: &[&[&str]] = &[
     &["previous_prompt", "next_prompt"],
     &[
         "toggle_sidebar",
+        "toggle_usage",
         "toggle_zoom",
         "font_bigger",
         "font_smaller",
@@ -509,6 +514,7 @@ const MAC: &[(&str, &str)] = &[
     ("shift+cmd+]", "next_tab"),
     ("shift+cmd+[", "previous_tab"),
     ("cmd+b", "toggle_sidebar"),
+    ("alt+cmd+u", "toggle_usage"),
     ("cmd+f", "find"),
     ("cmd+up", "previous_prompt"),
     ("cmd+down", "next_prompt"),
@@ -542,6 +548,7 @@ const OTHERS: &[(&str, &str)] = &[
     ("ctrl+pagedown", "next_tab"),
     ("ctrl+pageup", "previous_tab"),
     ("ctrl+shift+b", "toggle_sidebar"),
+    ("ctrl+alt+u", "toggle_usage"),
     ("ctrl+shift+f", "find"),
     ("ctrl+shift+up", "previous_prompt"),
     ("ctrl+shift+down", "next_prompt"),

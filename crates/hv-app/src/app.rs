@@ -45,6 +45,8 @@ pub(crate) enum AppEvent {
     Hook(hv_ipc::HookEvent),
     /// A screen reader asked for the accessibility tree or an action (SP-3, F4-25).
     AccessKit(egui_winit::accesskit_winit::Event),
+    /// Usage logs were read in the background (F5).
+    UsageLoaded(Arc<UsageData>),
     /// The agent detected in a pane's process tree changed (F4-03).
     Agent { pane: PaneId, agent: Option<String> },
     /// Project chips computed for the prompt at `line` of `pane` (F3-09…F3-12).
@@ -202,6 +204,8 @@ struct Ui {
     tabs: Tabs,
     /// Pane areas and dividers of the active tab, from the last frame.
     layout: Layout,
+    /// The usage dashboard covers the terminals (it takes the pointer and keyboard).
+    usage_open: bool,
     /// Space egui left for the terminals last frame, in physical pixels.
     terminal_area: Option<[f32; 4]>,
     /// Sidebar row index → pane, from the last frame.
@@ -255,8 +259,10 @@ impl Ui {
 
     /// Whether a point (physical pixels) is over the chrome rather than the terminals.
     fn over_chrome(&self, x: f32, y: f32) -> bool {
-        self.terminal_area
-            .is_some_and(|[ax, ay, aw, ah]| x < ax || y < ay || x >= ax + aw || y >= ay + ah)
+        self.usage_open
+            || self
+                .terminal_area
+                .is_some_and(|[ax, ay, aw, ah]| x < ax || y < ay || x >= ax + aw || y >= ay + ah)
     }
 
     /// Width of the line between panes.
@@ -371,6 +377,7 @@ impl Ui {
             tabs,
             menu,
             agents: agents.to_vec(),
+            usage: None,
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
                 .map(crate::keymap::Chord::pretty)
@@ -441,6 +448,8 @@ struct App {
     agent_choices: Vec<hv_ui::AgentChoice>,
     /// The agent last started from the dialog or the dock.
     last_agent: String,
+    /// The usage dashboard (F5).
+    usage: UsageState,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -524,6 +533,7 @@ impl App {
             notify_group: NotifyGroup::default(),
             agent_choices: Vec::new(),
             last_agent: "claude-code".to_owned(),
+            usage: UsageState::default(),
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -597,6 +607,7 @@ impl App {
             panes: HashMap::new(),
             tabs: Tabs::default(),
             layout: Layout::default(),
+            usage_open: false,
             terminal_area: None,
             row_panes: Vec::new(),
             repaint_at: None,
@@ -824,6 +835,7 @@ impl App {
             Action::FontSmaller => zoom(ui, -1.0),
             Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
             Action::NextNeedsYou => self.focus_next_needing_you(),
+            Action::ToggleUsage => self.toggle_usage(),
             Action::NewAgentSession => self.open_new_session_dialog(),
             Action::CommandPalette => {
                 let items = crate::keymap::PALETTE_ACTIONS
@@ -871,6 +883,44 @@ impl App {
             Err(_) => log::warn!("cannot save the layout"),
             Ok(Ok(())) => {}
         }
+    }
+
+    /// Opens or closes the usage dashboard; reading the logs again in the background if they
+    /// are older than a minute.
+    fn toggle_usage(&mut self) {
+        self.usage.open = !self.usage.open;
+        if self.usage.open {
+            let stale = self
+                .usage
+                .data
+                .as_ref()
+                .and_then(|d| d.read_at)
+                .is_none_or(|at| at.elapsed() > USAGE_REFRESH);
+            if stale && !self.usage.loading {
+                self.usage.loading = true;
+                let proxy = self.proxy.clone();
+                let _ = std::thread::Builder::new()
+                    .name("hv-usage-read".into())
+                    .spawn(move || {
+                        let data = UsageData::read();
+                        let _ = proxy.send_event(AppEvent::UsageLoaded(Arc::new(data)));
+                    });
+            }
+        }
+        for ui in self.ui.iter().chain(self.parked.values()) {
+            ui.window.request_redraw();
+        }
+    }
+
+    /// The dashboard to draw this frame, if open.
+    fn usage_view(&self) -> Option<hv_ui::UsageView> {
+        if !self.usage.open {
+            return None;
+        }
+        Some(match (&self.usage.view, self.usage.loading) {
+            (Some(view), _) => hv_ui::UsageView::Ready(self.usage.range, Arc::clone(view)),
+            (None, _) => hv_ui::UsageView::Loading(self.usage.range),
+        })
     }
 
     /// Opens the New session dialog with the last agent and the focused pane's folder.
@@ -1772,12 +1822,15 @@ impl App {
         } else {
             egui::CursorIcon::Text
         };
+        let usage = self.usage_view();
         let Some(ui) = &mut self.ui else { return };
+        ui.usage_open = usage.is_some();
         let (mut frame, out) = run_chrome(
             ui,
             self.sidebar_visible,
             &self.keymap,
             &self.agent_choices,
+            usage,
             cursor,
         );
         // Clicks in the chrome.
@@ -1857,6 +1910,16 @@ impl App {
         }
         if let Some(action) = tab_action {
             self.on_tab_action(action);
+        }
+        match out.usage_action {
+            Some(hv_ui::UsageAction::Close) => self.toggle_usage(),
+            Some(hv_ui::UsageAction::Range(range)) => {
+                self.usage.range = range;
+                if let Some(data) = &self.usage.data {
+                    self.usage.view = Some(Arc::new(data.dashboard(range)));
+                }
+            }
+            None => {}
         }
         if out.new_session_clicked {
             self.open_new_session_dialog();
@@ -1965,10 +2028,12 @@ fn run_chrome(
     sidebar_visible: bool,
     keymap: &Keymap,
     agents: &[hv_ui::AgentChoice],
+    usage: Option<hv_ui::UsageView>,
     cursor: egui::CursorIcon,
 ) -> (hv_render::UiFrame, hv_ui::ChromeOutput) {
     let input = ui.egui.take_egui_input(&ui.window);
-    let model = ui.chrome_model(sidebar_visible, keymap, agents);
+    let mut model = ui.chrome_model(sidebar_visible, keymap, agents);
+    model.usage = usage;
     let mut out = ui.chrome.run(input, &model);
     if ui.terminal_area != Some(out.terminal_area) {
         ui.terminal_area = Some(out.terminal_area);
@@ -2093,6 +2158,14 @@ impl ApplicationHandler<AppEvent> for App {
                     self.send_agent_notifications(notes);
                 }
             }
+            AppEvent::UsageLoaded(data) => {
+                self.usage.loading = false;
+                self.usage.view = Some(Arc::new(data.dashboard(self.usage.range)));
+                self.usage.data = Some(data);
+                for ui in self.ui.iter().chain(self.parked.values()) {
+                    ui.window.request_redraw();
+                }
+            }
             AppEvent::Agent { pane, agent } => {
                 let owner = self
                     .parked
@@ -2158,7 +2231,7 @@ impl ApplicationHandler<AppEvent> for App {
         let palette_open = self
             .ui
             .as_ref()
-            .is_some_and(|ui| ui.chrome.takes_keyboard());
+            .is_some_and(|ui| ui.chrome.takes_keyboard() || ui.usage_open);
         if let Some(ui) = &mut self.ui
             && !matches!(event, WindowEvent::RedrawRequested)
             && (palette_open
@@ -2308,6 +2381,70 @@ impl App {
             .min()
     }
 }
+
+/// Usage records and tasks read from the agents' logs.
+#[derive(Debug, Default)]
+pub(crate) struct UsageData {
+    records: Vec<hv_usage::UsageRecord>,
+    tasks: Vec<hv_usage::Task>,
+    read_at: Option<Instant>,
+}
+
+impl UsageData {
+    /// Reads every supported agent's logs (Claude Code for now). Blocking: call off the UI
+    /// thread.
+    pub(crate) fn read() -> Self {
+        let (records, tasks) = hv_usage::claude::default_root()
+            .map(|root| hv_usage::claude::scan_activity(&root))
+            .unwrap_or_default();
+        Self {
+            records,
+            tasks,
+            read_at: Some(Instant::now()),
+        }
+    }
+
+    /// The dashboard for `range`, ending today in local time.
+    pub(crate) fn dashboard(&self, range: hv_ui::UsageRange) -> hv_usage::dashboard::Dashboard {
+        let tz = jiff::tz::TimeZone::system();
+        let today = jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date();
+        let mut dash =
+            hv_usage::dashboard::build(&self.records, &self.tasks, range.days(), today, &tz);
+        // Agent ids to display names ("claude-code" -> "Claude Code").
+        let profiles = hv_agents::profile::builtin();
+        for row in &mut dash.agents {
+            if let Some(profile) = hv_agents::profile::find(&profiles, &row.agent) {
+                row.agent.clone_from(&profile.name);
+            }
+        }
+        dash
+    }
+}
+
+/// Dashboard state, shared by all windows.
+#[derive(Debug)]
+struct UsageState {
+    open: bool,
+    range: hv_ui::UsageRange,
+    data: Option<Arc<UsageData>>,
+    loading: bool,
+    view: Option<Arc<hv_usage::dashboard::Dashboard>>,
+}
+
+impl Default for UsageState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            range: hv_ui::UsageRange::Month,
+            data: None,
+            loading: false,
+            view: None,
+        }
+    }
+}
+
+/// Usage logs older than this are read again when the dashboard opens.
+const USAGE_REFRESH: Duration = Duration::from_secs(60);
 
 /// Merges bursts of notifications: up to three per window of time go out as they are, the rest
 /// become one "N sessions need you" when the window ends (docs/ui-spec.md §7).

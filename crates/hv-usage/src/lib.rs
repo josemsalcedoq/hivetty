@@ -4,6 +4,7 @@
 //! comes from hivetty's observed state intervals (phase F4).
 
 pub mod claude;
+pub mod dashboard;
 
 use std::collections::BTreeMap;
 
@@ -47,6 +48,17 @@ impl UsageRecord {
         let ts: Timestamp = self.timestamp.parse().ok()?;
         Some(ts.to_zoned_datetime(TimeZone::system()).date())
     }
+}
+
+/// One task: a prompt the user sent to an agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Task {
+    /// Agent id.
+    pub agent: &'static str,
+    /// RFC 3339 timestamp (UTC).
+    pub timestamp: String,
+    /// Agent session id.
+    pub session_id: Option<String>,
 }
 
 /// Token totals.
