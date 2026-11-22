@@ -74,6 +74,8 @@ pub struct PaneView<'a> {
     pub focused: bool,
     /// Project chips to paint on reserved rows (docs/adr/0004).
     pub chips: &'a [ChipRow],
+    /// A colored ring around the pane: it needs the user (S-19).
+    pub ring: Option<Rgb8>,
 }
 
 /// Chips on one visible row of a pane.
@@ -512,6 +514,7 @@ impl Renderer {
             area: self.area(),
             focused: true,
             chips: &[],
+            ring: None,
         }
     }
 
@@ -676,6 +679,14 @@ impl Renderer {
                     Rgb8::hex(0x000000),
                     UNFOCUSED_DIM,
                 ));
+            }
+            if let Some(color) = pane.ring {
+                let [x, y, w, h] = pane.area;
+                let t = (2.0 * self.scale).round().max(2.0);
+                over.push(Rect::new(x, y, w, t, color));
+                over.push(Rect::new(x, y + h - t, w, t, color));
+                over.push(Rect::new(x, y, t, h, color));
+                over.push(Rect::new(x + w - t, y, t, h, color));
             }
         }
         for &[x, y, w, h] in dividers {
@@ -1413,6 +1424,7 @@ mod tests {
                     area: *area,
                     focused: i == 0,
                     chips: &[],
+                    ring: None,
                 })
                 .collect();
             let (extra, encoder) = renderer.encode(&panes, &[], &view, None).unwrap();

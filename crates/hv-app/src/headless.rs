@@ -234,6 +234,7 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
         let model = hv_ui::ChromeModel {
             sidebar_visible: true,
             usage,
+            peek: None,
             agents,
             new_session_hint,
             menu,
@@ -307,6 +308,11 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             area: layout.area(pane.id).unwrap_or(area),
             focused: pane.id == focused,
             chips,
+            ring: matches!(
+                pane.info.agent.state(),
+                Some(hv_agents::AgentState::Blocked { .. })
+            )
+            .then(|| hv_term::Rgb8::hex(0xE3A008)),
         })
         .collect();
     let dividers: Vec<[f32; 4]> = layout.dividers.iter().map(|d| d.rect).collect();

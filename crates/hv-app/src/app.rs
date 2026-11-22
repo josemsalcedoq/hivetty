@@ -206,6 +206,8 @@ struct Ui {
     layout: Layout,
     /// The usage dashboard covers the terminals (it takes the pointer and keyboard).
     usage_open: bool,
+    /// The pane being peeked at from the sidebar (S-20).
+    peek: Option<PaneId>,
     /// Space egui left for the terminals last frame, in physical pixels.
     terminal_area: Option<[f32; 4]>,
     /// Sidebar row index → pane, from the last frame.
@@ -378,6 +380,7 @@ impl Ui {
             menu,
             agents: agents.to_vec(),
             usage: None,
+            peek: None,
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
                 .map(crate::keymap::Chord::pretty)
@@ -608,6 +611,7 @@ impl App {
             tabs: Tabs::default(),
             layout: Layout::default(),
             usage_open: false,
+            peek: None,
             terminal_area: None,
             row_panes: Vec::new(),
             repaint_at: None,
@@ -1916,16 +1920,23 @@ impl App {
                     })
                 })
                 .collect();
-            snapshots.push((*id, *area, snap, chip_rows));
+            // An amber ring while the agent waits for the user (S-19).
+            let ring = matches!(
+                pane.info.agent.state(),
+                Some(hv_agents::AgentState::Blocked { .. })
+            )
+            .then(|| hv_term::Rgb8::hex(0xE3A008));
+            snapshots.push((*id, *area, snap, chip_rows, ring));
         }
         let views: Vec<PaneView<'_>> = snapshots
             .iter()
-            .map(|(id, area, snap, chips)| PaneView {
+            .map(|(id, area, snap, chips, ring)| PaneView {
                 id: *id,
                 snap,
                 area: *area,
                 focused: Some(*id) == focused,
                 chips,
+                ring: *ring,
             })
             .collect();
         let dividers: Vec<[f32; 4]> = ui.layout.dividers.iter().map(|d| d.rect).collect();
@@ -1941,6 +1952,35 @@ impl App {
         }
         if let Some(action) = tab_action {
             self.on_tab_action(action);
+        }
+        if let Some(row) = out.peek_request
+            && let Some(ui) = &mut self.ui
+            && let Some(&id) = ui.row_panes.get(row)
+        {
+            ui.peek = Some(id);
+            ui.window.request_redraw();
+        }
+        if let Some(action) = out.peek_action.clone()
+            && let Some(ui) = &mut self.ui
+            && let Some(id) = ui.peek.take()
+        {
+            match action {
+                hv_ui::PeekAction::Reply(text) => {
+                    if let Some(pane) = ui.panes.get(&id) {
+                        pane.session.scroll_to_bottom();
+                        pane.session.write(text.as_bytes());
+                        pane.session.write(b"\r");
+                    }
+                }
+                hv_ui::PeekAction::GoTo => {
+                    ui.tabs.focus_pane(id);
+                    self.focus_changed();
+                }
+                hv_ui::PeekAction::Close => {}
+            }
+            if let Some(ui) = &self.ui {
+                ui.window.request_redraw();
+            }
         }
         match out.usage_action {
             Some(hv_ui::UsageAction::Close) => self.toggle_usage(),
@@ -2075,6 +2115,23 @@ fn run_chrome(
     let input = ui.egui.take_egui_input(&ui.window);
     let mut model = ui.chrome_model(sidebar_visible, keymap, agents);
     model.usage = usage;
+    model.peek = ui.peek.and_then(|id| ui.panes.get(&id)).map(|pane| {
+        let row = crate::model::session_row(&pane.info, None);
+        // The last lines with text: where agents print their question.
+        let snap = pane.session.snapshot();
+        let mut lines: Vec<String> = (0..snap.rows)
+            .map(|r| snap.row_text(r).trim_end().to_owned())
+            .collect();
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+        let start = lines.len().saturating_sub(14);
+        hv_ui::PeekView {
+            title: row.title,
+            subtitle: row.subtitle,
+            lines: lines.split_off(start),
+        }
+    });
     let mut out = ui.chrome.run(input, &model);
     if ui.terminal_area != Some(out.terminal_area) {
         ui.terminal_area = Some(out.terminal_area);

@@ -5,6 +5,9 @@ use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Vec2};
 
 use crate::{RowState, SessionRow, elide, state_color, strings, theme};
 
+/// Height kept free under the list for the agent dock.
+const DOCK_HEIGHT: f32 = 44.0;
+
 /// Which sessions the list shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Filter {
@@ -50,9 +53,10 @@ impl Sidebar {
         ui: &mut egui::Ui,
         sessions: &[SessionRow],
         new_session_hint: &str,
-    ) -> (Option<usize>, bool) {
+    ) -> (Option<usize>, bool, Option<usize>) {
         let mut clicked = None;
         let mut new_session = false;
+        let mut peek = None;
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(strings::SESSIONS)
@@ -106,8 +110,11 @@ impl Sidebar {
             .filter(|(_, s)| self.filter.keeps(s.state))
             .filter(|(_, s)| query.is_empty() || matches_query(s, &query))
             .collect();
+        // Leave room below for the agent dock.
+        let list_height = (ui.available_height() - DOCK_HEIGHT).max(40.0);
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
+            .max_height(list_height)
             .show(ui, |ui| {
                 // Group by project in order of first appearance.
                 let mut projects: Vec<&str> = Vec::new();
@@ -125,8 +132,10 @@ impl Sidebar {
                             .color(theme::TEXT_SECONDARY),
                     );
                     for (index, row) in visible.iter().filter(|(_, s)| s.project == project) {
-                        if session_row(ui, row) {
-                            clicked = Some(*index);
+                        match session_row(ui, row) {
+                            RowClick::Open => clicked = Some(*index),
+                            RowClick::Peek => peek = Some(*index),
+                            RowClick::None => {}
                         }
                     }
                 }
@@ -136,7 +145,7 @@ impl Sidebar {
                     ui.label(RichText::new(strings::NO_MATCHES).color(theme::TEXT_MUTED));
                 }
             });
-        (clicked, new_session)
+        (clicked, new_session, peek)
     }
 }
 
@@ -146,8 +155,16 @@ fn matches_query(row: &SessionRow, query: &str) -> bool {
         .any(|field| field.to_lowercase().contains(query))
 }
 
-/// One two-line row: dot, title, elapsed time / state or activity.
-fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> bool {
+/// What a click on a row asked for.
+enum RowClick {
+    None,
+    Open,
+    Peek,
+}
+
+/// One two-line row: dot, title, elapsed time / state or activity. Waiting rows get a Peek
+/// button; a right click peeks at any row.
+fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> RowClick {
     let height = 44.0;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
@@ -213,5 +230,35 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> bool {
         small,
         subtitle_color,
     );
-    response.clicked()
+    let mut click = RowClick::None;
+    if row.state == RowState::Waiting && !row.focused {
+        let button_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.right() - 46.0, rect.top() + 24.0),
+            Vec2::new(40.0, 16.0),
+        );
+        let peek = ui.interact(
+            button_rect,
+            ui.scope_id().with(("peek", &row.title, rect.top() as i32)),
+            Sense::click(),
+        );
+        painter.rect_filled(button_rect, CornerRadius::same(4), theme::BORDER);
+        painter.text(
+            button_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            strings::PEEK,
+            egui::FontId::proportional(10.0),
+            theme::TEXT_PRIMARY,
+        );
+        if peek.clicked() {
+            click = RowClick::Peek;
+        }
+    }
+    if matches!(click, RowClick::None) {
+        if response.secondary_clicked() {
+            click = RowClick::Peek;
+        } else if response.clicked() {
+            click = RowClick::Open;
+        }
+    }
+    click
 }

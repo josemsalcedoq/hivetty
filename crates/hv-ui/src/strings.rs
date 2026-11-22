@@ -196,3 +196,11 @@ pub const CLICK_TO_FILTER: &str = "click one to see only its usage";
 pub const SHOW_ALL_AGENTS: &str = "Show all agents";
 /// "10 more" rows.
 pub const MORE_ROWS: &str = "more";
+/// Peek (S-20).
+pub const PEEK: &str = "Peek";
+/// Peek reply box placeholder.
+pub const PEEK_REPLY_HINT: &str = "Reply to this session (Enter sends)";
+/// Peek buttons.
+pub const PEEK_SEND: &str = "Send";
+/// Peek buttons.
+pub const PEEK_GO_TO: &str = "Go to session";

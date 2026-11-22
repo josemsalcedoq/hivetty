@@ -3,6 +3,7 @@
 
 mod new_session;
 mod palette;
+mod peek;
 mod sidebar;
 pub mod strings;
 mod tabs;
@@ -11,6 +12,7 @@ mod usage;
 
 pub use new_session::{AgentChoice, NewSession};
 pub use palette::PaletteItem;
+pub use peek::{PeekAction, PeekView};
 pub use tabs::{TAB_BAR_HEIGHT, TabAction, TabItem};
 pub use usage::{UsageAction, UsageRange, UsageView};
 
@@ -70,6 +72,8 @@ pub struct ChromeModel {
     pub new_session_hint: String,
     /// The usage dashboard, drawn over the terminals when open (F5).
     pub usage: Option<UsageView>,
+    /// A session being peeked at (S-20).
+    pub peek: Option<PeekView>,
 }
 
 /// What the chrome produced this frame.
@@ -92,6 +96,10 @@ pub struct ChromeOutput {
     pub dock_choice: Option<String>,
     /// Something done in the usage dashboard.
     pub usage_action: Option<UsageAction>,
+    /// Index of a session row whose Peek was asked for.
+    pub peek_request: Option<usize>,
+    /// Something done in the peek popover.
+    pub peek_action: Option<PeekAction>,
 }
 
 impl std::fmt::Debug for ChromeOutput {
@@ -112,6 +120,7 @@ pub struct Chrome {
     tab_bar: tabs::TabBar,
     sidebar: sidebar::Sidebar,
     new_session: Option<new_session::Dialog>,
+    peek: Option<peek::Peek>,
 }
 
 /// Sidebar width in points (docs/ui-spec.md 1: 300 px default; narrower until tabs exist).
@@ -128,6 +137,7 @@ impl Chrome {
             tab_bar: tabs::TabBar::default(),
             sidebar: sidebar::Sidebar::default(),
             new_session: None,
+            peek: None,
         }
     }
 
@@ -150,6 +160,14 @@ impl Chrome {
         let mut new_session = None;
         let mut dock_choice = None;
         let mut usage_action = None;
+        let mut peek_request = None;
+        let mut peek_action = None;
+        if model.peek.is_none() {
+            self.peek = None;
+        } else if self.peek.is_none() {
+            self.peek = Some(peek::Peek::opened());
+        }
+        let peek_state = &mut self.peek;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 egui::Panel::left("sidebar")
@@ -162,14 +180,13 @@ impl Chrome {
                             .stroke(Stroke::new(1.0, theme::BORDER)),
                     )
                     .show(ui, |ui| {
-                        egui::Panel::bottom("dock")
-                            .frame(egui::Frame::new().inner_margin(Margin::symmetric(0, 6)))
-                            .show(ui, |ui| {
-                                dock_choice = new_session::dock(ui, &model.agents);
-                            });
                         let out = sidebar_state.show(ui, &model.sessions, &model.new_session_hint);
                         clicked_session = out.0;
                         new_session_clicked = out.1;
+                        peek_request = out.2;
+                        // The dock sits under the list (which leaves room for it).
+                        ui.separator();
+                        dock_choice = new_session::dock(ui, &model.agents);
                     });
             }
             if !model.tabs.is_empty() {
@@ -189,6 +206,9 @@ impl Chrome {
             central = ui.available_rect_before_wrap();
             if let Some(view) = &model.usage {
                 usage_action = usage::show(ui.ctx(), central, view);
+            }
+            if let (Some(view), Some(state)) = (&model.peek, peek_state.as_mut()) {
+                peek_action = state.show(ui.ctx(), view);
             }
             if let Some(open) = dialog.as_mut() {
                 match open.show(ui.ctx()) {
@@ -228,6 +248,8 @@ impl Chrome {
             new_session,
             dock_choice,
             usage_action,
+            peek_request,
+            peek_action,
         }
     }
 
@@ -260,6 +282,7 @@ impl Chrome {
     pub fn takes_keyboard(&self) -> bool {
         self.palette.is_some()
             || self.new_session.is_some()
+            || self.peek.is_some()
             || self.tab_bar.editing()
             || self.ctx.egui_wants_keyboard_input()
     }
@@ -376,6 +399,49 @@ mod tests {
     }
 
     #[test]
+    fn peek_sends_the_typed_reply_on_enter() {
+        let mut chrome = Chrome::new();
+        let model = ChromeModel {
+            peek: Some(PeekView {
+                title: "Fix the login bug".into(),
+                subtitle: "Needs permission: Bash".into(),
+                lines: vec!["Do you want to proceed?".into(), "1. Yes".into()],
+            }),
+            ..ChromeModel::default()
+        };
+        let frame = |chrome: &mut Chrome, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut out = chrome.run(input, &model);
+            out.full.textures_delta.clear();
+            out.peek_action
+        };
+        assert_eq!(frame(&mut chrome, vec![]), None);
+        assert!(chrome.takes_keyboard());
+        assert_eq!(
+            frame(&mut chrome, vec![egui::Event::Text("1".into())]),
+            None
+        );
+        let enter = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        assert_eq!(
+            frame(&mut chrome, vec![enter]),
+            Some(PeekAction::Reply("1".into()))
+        );
+    }
+
+    #[test]
     fn screen_readers_get_each_row_as_a_labelled_button() {
         let mut chrome = Chrome::new();
         chrome.context().enable_accesskit();
@@ -393,6 +459,7 @@ mod tests {
             agents: Vec::new(),
             new_session_hint: String::new(),
             usage: None,
+            peek: None,
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
                 subtitle: "Needs permission: Bash".into(),
@@ -445,6 +512,7 @@ mod tests {
             agents: Vec::new(),
             new_session_hint: String::new(),
             usage: None,
+            peek: None,
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),
                 subtitle: "Working".into(),
