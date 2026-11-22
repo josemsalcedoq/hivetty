@@ -5,6 +5,11 @@
 //! The scripts are embedded in the binary and written to the data directory on first use
 //! ([`install`]); [`integrate`] turns a shell command line into one that loads them.
 
+pub mod detect;
+mod service;
+
+pub use service::ChipService;
+
 use std::io;
 use std::path::{Path, PathBuf};
 

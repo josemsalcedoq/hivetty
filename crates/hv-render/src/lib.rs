@@ -72,7 +72,30 @@ pub struct PaneView<'a> {
     pub area: [f32; 4],
     /// The focused pane gets the search bar, the IME text, the jump pill and no dimming.
     pub focused: bool,
+    /// Project chips to paint on reserved rows (docs/adr/0004).
+    pub chips: &'a [ChipRow],
 }
+
+/// Chips on one visible row of a pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChipRow {
+    /// Visible row (the blank line the shell left above a prompt).
+    pub row: usize,
+    /// In order; painting stops at the first that does not fit.
+    pub chips: Vec<Chip>,
+}
+
+/// One chip: a colored dot and a short label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chip {
+    pub label: String,
+    pub color: Rgb8,
+}
+
+/// Chip background.
+const CHIP_BG: Rgb8 = Rgb8::hex(0x1C1C20);
+/// Chip text.
+const CHIP_TEXT: Rgb8 = Rgb8::hex(0x9A9AA2);
 
 /// Prompt mark colors: command succeeded, failed, still running or unknown.
 const MARK_OK: Rgb8 = Rgb8::hex(0x3FB950);
@@ -113,6 +136,8 @@ pub struct Renderer {
     /// IME composition text drawn at the cursor (F1-36), and its laid-out label.
     preedit_text: Option<String>,
     preedit_label: Buffer,
+    /// Laid-out chip labels with their width, by text (cleared when the font changes).
+    chip_labels: std::collections::HashMap<String, (Buffer, f32)>,
     /// Visual bell flash in progress.
     flash: bool,
     /// Where the grid goes, `[x, y, w, h]` in physical pixels; `None` = the whole surface.
@@ -300,6 +325,7 @@ impl Renderer {
             search_label,
             preedit_text: None,
             preedit_label,
+            chip_labels: std::collections::HashMap::new(),
             flash: false,
             area: None,
             egui,
@@ -377,6 +403,7 @@ impl Renderer {
         self.cell_w = w;
         self.cell_h = h;
         self.rows.clear();
+        self.chip_labels.clear();
         self.pill_label
             .set_metrics(Metrics::new(self.font_size * self.scale, h));
         self.pill_label.set_size(Some(w * 40.0), Some(h));
@@ -484,6 +511,7 @@ impl Renderer {
             snap,
             area: self.area(),
             focused: true,
+            chips: &[],
         }
     }
 
@@ -623,6 +651,7 @@ impl Renderer {
             .copied();
         let mut back = Vec::new();
         let mut over = Vec::new();
+        let mut chip_texts: Vec<(String, f32, f32)> = Vec::new();
         self.rows.retain(|id, _| panes.iter().any(|p| p.id == *id));
         let clear = focused.map_or(Rgb8::hex(0x0C0C0C), |p| p.snap.background);
         for pane in panes {
@@ -635,6 +664,7 @@ impl Renderer {
             let (b, o) = self.build_rects(pane.snap, origin);
             back.extend(b);
             over.extend(o);
+            self.layout_chips(pane, origin, &mut over, &mut chip_texts);
             self.update_rows(pane.id, pane.snap);
             if !pane.focused && panes.len() > 1 {
                 let [x, y, w, h] = pane.area;
@@ -732,6 +762,17 @@ impl Renderer {
         let search_area = search.map(|at| label(&self.search_label, at));
         let pill_area = pill.map(|at| label(&self.pill_label, at));
         let preedit_area = preedit.map(|at| label(&self.preedit_label, at));
+        let chip_areas = chip_texts.iter().filter_map(|(text, x, y)| {
+            self.chip_labels.get(text).map(|(buffer, _)| TextArea {
+                buffer,
+                left: *x,
+                top: *y,
+                scale: 1.0,
+                bounds,
+                default_color: to_text_color(CHIP_TEXT),
+                custom_glyphs: &[],
+            })
+        });
         self.ui_text
             .prepare(
                 &self.device,
@@ -739,7 +780,11 @@ impl Renderer {
                 &mut self.font_system,
                 &mut self.atlas,
                 &self.viewport,
-                pill_area.into_iter().chain(search_area).chain(preedit_area),
+                pill_area
+                    .into_iter()
+                    .chain(search_area)
+                    .chain(preedit_area)
+                    .chain(chip_areas),
                 &mut self.swash_cache,
             )
             .map_err(|e| anyhow!("label prepare failed: {e}"))?;
@@ -902,6 +947,82 @@ impl Renderer {
             snap.foreground,
         ));
         Some((x, y))
+    }
+
+    /// Lays out the chips of a pane: rectangles into `over`, labels into `texts` as
+    /// `(text, x, y)`. A row is used only if it is blank, and chips stop at the first one that
+    /// does not fit in the pane (docs/requirements.md C-05).
+    fn layout_chips(
+        &mut self,
+        pane: &PaneView<'_>,
+        (ox, oy): (f32, f32),
+        over: &mut Vec<Rect>,
+        texts: &mut Vec<(String, f32, f32)>,
+    ) {
+        let snap = pane.snap;
+        let right = pane.area[0] + pane.area[2] - (PADDING * self.scale).round();
+        let (cw, ch) = (self.cell_w, self.cell_h);
+        let gap = (cw * 0.75).round();
+        let inner = (cw * 0.5).round();
+        let dot = (ch * 0.3).round().max(3.0);
+        for chip_row in pane.chips {
+            if chip_row.row >= snap.rows {
+                continue;
+            }
+            let blank = (0..snap.cols).all(|c| {
+                let cell = snap.cell(chip_row.row, c);
+                (cell.ch == ' ' || cell.ch == '\0') && cell.bg == snap.background
+            });
+            if !blank {
+                continue;
+            }
+            let y = oy + chip_row.row as f32 * ch;
+            let mut x = ox;
+            for chip in &chip_row.chips {
+                let text_w = self.chip_label_width(&chip.label);
+                let w = (inner + dot + inner + text_w + inner).ceil();
+                if x + w > right {
+                    break;
+                }
+                over.push(Rect::new(x, y + 1.0, w, ch - 2.0, CHIP_BG));
+                over.push(Rect::new(
+                    x + inner,
+                    y + ((ch - dot) / 2.0).round(),
+                    dot,
+                    dot,
+                    chip.color,
+                ));
+                texts.push((chip.label.clone(), x + inner + dot + inner, y));
+                x += w + gap;
+            }
+        }
+    }
+
+    /// Lays out a chip label once and returns its width.
+    fn chip_label_width(&mut self, text: &str) -> f32 {
+        if let Some((_, w)) = self.chip_labels.get(text) {
+            return *w;
+        }
+        let metrics = Metrics::new(self.font_size * self.scale * 0.9, self.cell_h);
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_size(Some(self.cell_w * 64.0), Some(self.cell_h));
+        buffer.set_text(
+            text,
+            &Attrs::new().family(Family::Name(&self.font_family)),
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut self.font_system, false);
+        let width = buffer
+            .layout_runs()
+            .map(|r| r.line_w)
+            .fold(0.0f32, f32::max)
+            .ceil();
+        if self.chip_labels.len() > 512 {
+            self.chip_labels.clear();
+        }
+        self.chip_labels.insert(text.to_owned(), (buffer, width));
+        width
     }
 
     /// Adds the search bar (top right). Returns where its label goes.
@@ -1291,6 +1412,7 @@ mod tests {
                     snap,
                     area: *area,
                     focused: i == 0,
+                    chips: &[],
                 })
                 .collect();
             let (extra, encoder) = renderer.encode(&panes, &[], &view, None).unwrap();

@@ -32,6 +32,8 @@ function global:prompt {
         $marks += "$esc]7;file://$([Environment]::MachineName)$([Uri]::EscapeUriString($path))$esc\"
         $marks += "$esc]9;9;`"$($location.ProviderPath)`"$esc\"
     }
+    # A blank line above the prompt where hivetty paints the project chips (docs/adr/0004).
+    if ($env:HIVETTY_CHIPS) { $marks += "`n" }
     $marks += "$esc]133;A$esc\"
 
     $text = & $global:__HivettyOriginalPrompt

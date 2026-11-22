@@ -1,6 +1,6 @@
 # ADR 0004 — Chips del prompt como decoraciones ancladas a la rejilla
 
-- **Estado:** propuesto
+- **Estado:** aceptado (implementado en F3, 2026-11-22)
 - **Fecha:** 2026-11-21
 
 ## Contexto
@@ -25,3 +25,8 @@ En la captura, el prompt muestra *chips* con el logo de la tecnología del proye
 
 ## Alternativa descartada
 Calcular los chips en la shell (como hace el terminal de referencia con un script de zsh): obliga a reimplementarlo en cuatro lenguajes de shell y a un protocolo de imágenes.
+
+## Notas de implementación (F3)
+- La shell imprime la línea en blanco reservada justo antes de OSC 133;A cuando `HIVETTY_CHIPS=1` (opción `[shell] chips`). Los chips se pintan en la fila anterior a cada prompt, y solo si esa fila sigue vacía.
+- La detección corre en un hilo (`hv_shell::ChipService`) con caché de 3 s por directorio; los chips de cada prompt se guardan por su línea del scrollback, así que los prompts antiguos conservan los suyos al hacer scroll.
+- Aún sin logos SVG (F3-14): cada chip lleva un punto de color.

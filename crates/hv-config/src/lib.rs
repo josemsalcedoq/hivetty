@@ -83,6 +83,9 @@ pub struct Shell {
     /// Load hivetty's shell integration (prompt marks, current directory) into zsh, bash,
     /// fish and PowerShell without editing their startup files.
     pub integration: bool,
+    /// Show project chips (technology, git branch, versions) above the prompt. Needs the
+    /// integration; the shell then leaves a blank line above each prompt for them.
+    pub chips: bool,
 }
 
 impl Default for Shell {
@@ -91,6 +94,7 @@ impl Default for Shell {
             program: None,
             args: Vec::new(),
             integration: true,
+            chips: true,
         }
     }
 }

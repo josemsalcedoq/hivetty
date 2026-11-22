@@ -108,6 +108,8 @@ pub struct Snapshot {
 pub struct RowMark {
     /// Visible row of the prompt.
     pub row: usize,
+    /// Line of the prompt counted from the top of the scrollback (stable while scrolling).
+    pub line: usize,
     /// Exit code of the command run from this prompt; `None` while it runs or if unknown.
     pub exit_code: Option<i32>,
 }

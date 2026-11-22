@@ -238,14 +238,38 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             pixels_per_point: out.full.pixels_per_point,
         }
     });
+    // Chips for every prompt, from the pane's directory (synchronously: this is a capture).
+    let chip_rows: Vec<Vec<hv_render::ChipRow>> = panes
+        .iter()
+        .zip(&snapshots)
+        .map(|(pane, snap)| {
+            let dir = pane
+                .session
+                .cwd()
+                .or_else(|| spec.cwd.clone())
+                .or_else(|| std::env::current_dir().ok());
+            let Some(dir) = dir else { return Vec::new() };
+            let info = hv_shell::detect::inspect(&dir, None);
+            snap.marks
+                .iter()
+                .filter(|m| m.row >= 1)
+                .map(|m| hv_render::ChipRow {
+                    row: m.row - 1,
+                    chips: crate::model::chips(&info),
+                })
+                .collect()
+        })
+        .collect();
     let views: Vec<PaneView<'_>> = panes
         .iter()
         .zip(&snapshots)
-        .map(|(pane, snap)| PaneView {
+        .zip(&chip_rows)
+        .map(|((pane, snap), chips)| PaneView {
             id: pane.id,
             snap,
             area: layout.area(pane.id).unwrap_or(area),
             focused: pane.id == focused,
+            chips,
         })
         .collect();
     let dividers: Vec<[f32; 4]> = layout.dividers.iter().map(|d| d.rect).collect();

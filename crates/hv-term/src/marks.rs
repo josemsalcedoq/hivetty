@@ -74,9 +74,19 @@ impl Marks {
             .filter(|(line, _)| *line >= top && *line < top + rows)
             .map(|(line, exit_code)| RowMark {
                 row: line - top,
+                line,
                 exit_code,
             })
             .collect()
+    }
+
+    /// Line of the newest prompt.
+    pub(crate) fn last_prompt(&self) -> Option<usize> {
+        self.list
+            .iter()
+            .rev()
+            .find(|m| m.kind == 'A')
+            .map(|m| m.line)
     }
 
     /// The closest prompt line above `line` (or below with `up = false`).
@@ -134,14 +144,17 @@ mod tests {
             vec![
                 RowMark {
                     row: 0,
+                    line: 0,
                     exit_code: Some(0)
                 },
                 RowMark {
                     row: 3,
+                    line: 3,
                     exit_code: Some(1)
                 },
                 RowMark {
                     row: 5,
+                    line: 5,
                     exit_code: None
                 },
             ]
@@ -157,6 +170,7 @@ mod tests {
         assert_eq!(m.prompt_near(0, true), None);
         assert_eq!(m.prompt_near(0, false), Some(3));
         assert_eq!(m.last_output(9), Some((4, 5)));
+        assert_eq!(m.last_prompt(), Some(5));
     }
 
     #[test]

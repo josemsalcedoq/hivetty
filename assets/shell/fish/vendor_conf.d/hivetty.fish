@@ -12,6 +12,8 @@ end
 
 function __hivetty_prompt --on-event fish_prompt
     __hivetty_osc7
+    # A blank line above the prompt where hivetty paints the project chips (docs/adr/0004).
+    set -q HIVETTY_CHIPS; and echo
     printf '\e]133;A\e\\'
 end
 

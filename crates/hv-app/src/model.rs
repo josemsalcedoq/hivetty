@@ -152,6 +152,53 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
     }
 }
 
+/// The chips for a directory, in display order: technology, branch, versions.
+pub(crate) fn chips(info: &hv_shell::detect::ProjectInfo) -> Vec<hv_render::Chip> {
+    use hv_render::Chip;
+    use hv_shell::detect::Tech;
+    use hv_term::Rgb8;
+    let mut out = Vec::new();
+    if let Some(tech) = info.tech {
+        // Language colors as commonly used for these languages (no logos, docs/licensing.md).
+        let color = match tech {
+            Tech::Rust => 0xDEA584,
+            Tech::Python => 0x3572A5,
+            Tech::Bun => 0xFBF0DF,
+            Tech::TypeScript => 0x3178C6,
+            Tech::Node | Tech::JavaScript => 0xF1E05A,
+            Tech::Go => 0x00ADD8,
+            Tech::Flutter | Tech::Dart => 0x00B4AB,
+            Tech::Deno => 0x70FFAF,
+            Tech::Java => 0xB07219,
+            Tech::Kotlin => 0xA97BFF,
+            Tech::DotNet => 0x512BD4,
+            Tech::Ruby => 0x701516,
+            Tech::Php => 0x4F5D95,
+            Tech::Elixir => 0x6E4A7E,
+            Tech::Swift => 0xF05138,
+            Tech::Zig => 0xEC915C,
+            Tech::Cpp => 0xF34B7D,
+        };
+        out.push(Chip {
+            label: tech.name().to_owned(),
+            color: Rgb8::hex(color),
+        });
+    }
+    if let Some(branch) = &info.branch {
+        out.push(Chip {
+            label: branch.clone(),
+            color: Rgb8::hex(0xBC8CFF),
+        });
+    }
+    for (tool, version) in &info.versions {
+        out.push(Chip {
+            label: format!("{tool} {version}"),
+            color: Rgb8::hex(0x6B6B73),
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -45,6 +45,12 @@ pub(crate) enum AppEvent {
     Hook(hv_ipc::HookEvent),
     /// A screen reader asked for the accessibility tree or an action (SP-3, F4-25).
     AccessKit(egui_winit::accesskit_winit::Event),
+    /// Project chips computed for the prompt at `line` of `pane` (F3-09…F3-12).
+    Chips {
+        pane: PaneId,
+        line: usize,
+        info: Arc<hv_shell::detect::ProjectInfo>,
+    },
     /// A menu bar item was chosen (macOS); the id is the action name.
     #[cfg(target_os = "macos")]
     Menu(String),
@@ -111,6 +117,19 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
             .map_err(|err| log::warn!("shell integration unavailable: {err}"))
             .ok()
     });
+    app.chip_service = {
+        let proxy = std::sync::Mutex::new(app.proxy.clone());
+        let home = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(std::path::PathBuf::from);
+        hv_shell::ChipService::start(home, move |(pane, line), info| {
+            if let Ok(proxy) = proxy.lock() {
+                let _ = proxy.send_event(AppEvent::Chips { pane, line, info });
+            }
+        })
+        .map_err(|err| log::warn!("prompt chips disabled: {err}"))
+        .ok()
+    };
     app.config = config;
     app.config_path = config_path;
     app.record = record;
@@ -134,6 +153,8 @@ fn keymap_from(config: &hv_config::Config) -> Keymap {
 struct Pane {
     session: Session,
     info: SessionInfo,
+    /// Project chips by prompt line (scrollback line of the OSC 133;A mark).
+    chips: std::collections::BTreeMap<usize, Arc<hv_shell::detect::ProjectInfo>>,
     /// Where it was laid out last, to resize the PTY only when it changes.
     area: Option<[f32; 4]>,
 }
@@ -358,6 +379,8 @@ struct App {
     layout_path: Option<std::path::PathBuf>,
     /// Installed shell integration scripts (F3-01…F3-04), if available.
     shell_dir: Option<std::path::PathBuf>,
+    /// Reads project files for the prompt chips off the UI thread.
+    chip_service: Option<hv_shell::ChipService<(PaneId, usize)>>,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -435,6 +458,7 @@ impl App {
             restore: None,
             layout_path: None,
             shell_dir: None,
+            chip_service: None,
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -574,6 +598,9 @@ impl App {
                 spec.program = Some(program);
                 spec.args = integration.args;
                 spec.env.extend(integration.env);
+                if self.config.shell.chips {
+                    spec.env.push(("HIVETTY_CHIPS".to_owned(), "1".to_owned()));
+                }
             }
         }
         let proxy = self.proxy.clone();
@@ -598,6 +625,7 @@ impl App {
             Pane {
                 session,
                 info: SessionInfo::new(),
+                chips: std::collections::BTreeMap::new(),
                 area: None,
             },
         ))
@@ -1412,6 +1440,19 @@ impl App {
                     }
                     SessionEvent::Term(term_event) => {
                         log::debug!("terminal event in pane {id}: {term_event:?}");
+                        // A new prompt: work out its chips in the background.
+                        if let hv_term::osc::TermEvent::PromptMark { kind: 'A', .. } = term_event
+                            && self.config.shell.chips
+                            && let Some(service) = &self.chip_service
+                            && let Some(line) = pane.session.last_prompt_line()
+                            && let Some(dir) = pane
+                                .session
+                                .cwd()
+                                .or_else(|| self.spec.cwd.clone())
+                                .or_else(|| std::env::current_dir().ok())
+                        {
+                            service.request((*id, line), dir);
+                        }
                         if pane.info.on_term_event(&term_event)
                             && Some(*id) != focused
                             && pane.info.needs_attention()
@@ -1497,15 +1538,29 @@ impl App {
                 ui.window
                     .set_ime_cursor_area(PhysicalPosition::new(x, y), PhysicalSize::new(w, h));
             }
-            snapshots.push((*id, *area, snap));
+            // Chips go on the blank line the shell left above each prompt.
+            let chip_rows: Vec<hv_render::ChipRow> = snap
+                .marks
+                .iter()
+                .filter(|m| m.row >= 1)
+                .filter_map(|m| {
+                    let info = pane.chips.get(&m.line)?;
+                    Some(hv_render::ChipRow {
+                        row: m.row - 1,
+                        chips: crate::model::chips(info),
+                    })
+                })
+                .collect();
+            snapshots.push((*id, *area, snap, chip_rows));
         }
         let views: Vec<PaneView<'_>> = snapshots
             .iter()
-            .map(|(id, area, snap)| PaneView {
+            .map(|(id, area, snap, chips)| PaneView {
                 id: *id,
                 snap,
                 area: *area,
                 focused: Some(*id) == focused,
+                chips,
             })
             .collect();
         let dividers: Vec<[f32; 4]> = ui.layout.dividers.iter().map(|d| d.rect).collect();
@@ -1728,6 +1783,26 @@ impl ApplicationHandler<AppEvent> for App {
                         }
                         ui.window.request_redraw();
                     }
+                }
+            }
+            AppEvent::Chips { pane, line, info } => {
+                let owner = self
+                    .parked
+                    .iter()
+                    .find(|(_, ui)| ui.panes.contains_key(&pane))
+                    .map(|(w, _)| *w);
+                if let Some(window) = owner {
+                    self.activate(window);
+                }
+                if let Some(ui) = &mut self.ui
+                    && let Some(p) = ui.panes.get_mut(&pane)
+                {
+                    p.chips.insert(line, info);
+                    // Keep the newest few hundred prompts.
+                    while p.chips.len() > 500 {
+                        p.chips.pop_first();
+                    }
+                    ui.window.request_redraw();
                 }
             }
             AppEvent::Wakeup => {

@@ -44,6 +44,8 @@ __hivetty_prompt_command() {
   fi
   __hivetty_first_prompt=
   __hivetty_osc7
+  # A blank line above the prompt where hivetty paints the project chips (docs/adr/0004).
+  [[ -n "$HIVETTY_CHIPS" ]] && printf '\n'
   printf '\e]133;A\e\\'
   if [[ "$PS1" != *'133;B'* ]]; then
     PS1="$PS1"'\[\e]133;B\e\\\]'

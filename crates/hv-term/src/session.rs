@@ -375,6 +375,11 @@ impl Session {
         snap
     }
 
+    /// Scrollback line of the newest shell prompt (OSC 133;A), if the shell reports them.
+    pub fn last_prompt_line(&self) -> Option<usize> {
+        lock(&self.state).marks.last_prompt()
+    }
+
     /// Scrolls so the previous (`up`) or next shell prompt is at the top of the view.
     /// Returns false when there is none in that direction.
     pub fn jump_to_prompt(&self, up: bool) -> bool {
