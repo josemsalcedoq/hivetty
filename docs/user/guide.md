@@ -124,6 +124,7 @@ restore_on_launch = "ask"     # "ask" types the resume command and waits for Ent
 enabled = true
 only_when_unfocused = true
 on = ["waiting", "done", "error"]
+sounds = ["waiting", "error"] # these also play the system sound
 group_window_seconds = 10
 long_command_seconds = 30     # notify when a shell command runs longer than this; 0 = off
 
@@ -189,7 +190,7 @@ Agents with none of these (Aider, opencode, Cursor CLI, or one whose hooks are n
 
 hivetty can also be Claude Code's statusline. It prints the model, the context window in use and your plan's limits under Claude Code's prompt (`Opus · ctx 8% · 5h 24% · 7d 41%`), and passes the same numbers to hivetty: the context shows in the session's hover card, and the 5-hour and weekly limits with their reset countdown in the usage dashboard. `hivetty agents install-statusline` sets it up the same way as the hooks (it shows the change and asks). If you already have a statusline, hivetty leaves it alone.
 
-When a session needs you or finishes while you are looking elsewhere, you get a desktop notification. Several at once are grouped ("4 sessions need you"). If you close hivetty while agents are running, it offers to resume them the next time it opens (`[agents] restore_on_launch`).
+When a session needs you or finishes while you are looking elsewhere, you get a desktop notification. Click it to go to that session (Windows and Linux). Several at once are grouped ("4 sessions need you"). If you close hivetty while agents are running, it offers to resume them the next time it opens (`[agents] restore_on_launch`).
 
 ## Agent usage dashboard
 

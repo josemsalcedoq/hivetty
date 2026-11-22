@@ -340,6 +340,8 @@ pub struct Notifications {
     pub on: Vec<String>,
     /// More than three notifications in this many seconds are merged into one.
     pub group_window_seconds: u64,
+    /// Agent states whose notification plays a sound: any of "waiting", "done", "error".
+    pub sounds: Vec<String>,
     /// Also send them to the phone (F4-33).
     pub forward: Forward,
 }
@@ -365,6 +367,7 @@ impl Default for Notifications {
             long_command_seconds: 30,
             on: vec!["waiting".into(), "done".into(), "error".into()],
             group_window_seconds: 10,
+            sounds: vec!["waiting".into(), "error".into()],
             forward: Forward::default(),
         }
     }

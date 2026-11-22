@@ -102,7 +102,7 @@ show_approximate_badge = true
 enabled = true
 on = ["waiting", "done", "error"]
 only_when_unfocused = true
-sound = { waiting = "default", done = "none", error = "default" }
+sounds = ["waiting", "error"]   # estados cuya notificación suena (sonido del sistema)
 group_window_seconds = 10
 long_command_seconds = 30      # notificar comandos de shell que tardan más que esto
 

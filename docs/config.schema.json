@@ -176,6 +176,17 @@
           "minimum": 0,
           "default": 10
         },
+        "sounds": {
+          "description": "Agent states whose notification plays a sound: any of \"waiting\", \"done\", \"error\".",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "waiting",
+            "error"
+          ]
+        },
         "forward": {
           "description": "Also send them to the phone (F4-33).",
           "$ref": "#/$defs/Forward"

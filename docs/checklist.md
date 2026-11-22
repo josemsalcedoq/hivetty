@@ -80,6 +80,7 @@ Con los tres agentes:
 - [ ] Arrancar cada agente en un panel: la fila muestra su nombre y su estado (*Working*, *Needs permission*, *Done*…). En Claude Code, además, lo que está haciendo ("Editing src/main.rs").
 - [ ] Un permiso pendiente en otro panel: anillo ámbar alrededor de ese panel, notificación del sistema, y `Ctrl+Shift+J` / `⌘J` te lleva a él.
 - [ ] *Peek* en una fila que espera: ver la pregunta y responder sin cambiar de pestaña.
+- [ ] **Windows y Linux:** pulsar una notificación de un agente trae la ventana al frente y enfoca su panel. Las de *waiting* y *error* suenan; las de *done*, no.
 - [ ] 6 sesiones a la vez: los estados se mantienen correctos; varias notificaciones juntas se agrupan ("4 sessions need you").
 - [ ] **macOS:** el icono del dock muestra cuántas sesiones te necesitan.
 - [ ] Pasar el ratón por una fila: tarjeta con agente, modelo, rama, carpeta, tokens, inicio y última herramienta.

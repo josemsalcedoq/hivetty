@@ -53,33 +53,106 @@ pub fn set_badge(count: usize) {
 ///   (F6-09).
 /// - macOS: `osascript` for now; native notifications need the signed `.app` bundle (F6-07).
 pub fn notify(title: &str, body: &str) {
+    notify_with(title, body, NotifyOptions::default());
+}
+
+/// What a notification does besides showing its text (F4-18).
+#[derive(Default)]
+pub struct NotifyOptions {
+    /// Play the system's notification sound.
+    pub sound: bool,
+    /// Called (on the notification's thread) when the user clicks the notification, with the
+    /// label of its button where one is shown (Linux). Windows and Linux only.
+    pub on_click: Option<(String, Box<dyn FnOnce() + Send>)>,
+}
+
+impl std::fmt::Debug for NotifyOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NotifyOptions")
+            .field("sound", &self.sound)
+            .field("on_click", &self.on_click.as_ref().map(|(label, _)| label))
+            .finish()
+    }
+}
+
+/// Notifications whose thread may wait for a click at the same time. A toast that went to the
+/// Windows action center can wait forever; beyond this many, new ones are not waited on.
+#[cfg(not(target_os = "macos"))]
+const MAX_WAITING: usize = 8;
+#[cfg(not(target_os = "macos"))]
+static WAITING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// [`notify`] with a sound and a click action.
+pub fn notify_with(title: &str, body: &str, options: NotifyOptions) {
     let (title, body) = (title.to_owned(), body.to_owned());
     let _ = std::thread::Builder::new()
         .name("notify".into())
         .spawn(move || {
-            if let Err(err) = send_notification(&title, &body) {
+            if let Err(err) = send_notification(&title, &body, options) {
                 log::warn!("notification failed: {err}");
             }
         });
 }
 
+/// Runs `wait` unless too many notifications are already waiting for a click.
 #[cfg(not(target_os = "macos"))]
-fn send_notification(title: &str, body: &str) -> Result<(), String> {
-    notify_rust::Notification::new()
-        .summary(title)
-        .body(body)
-        .appname("hivetty")
-        .show()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+fn wait_bounded(wait: impl FnOnce()) {
+    use std::sync::atomic::Ordering;
+    if WAITING.fetch_add(1, Ordering::AcqRel) < MAX_WAITING {
+        wait();
+    }
+    WAITING.fetch_sub(1, Ordering::AcqRel);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn send_notification(title: &str, body: &str, options: NotifyOptions) -> Result<(), String> {
+    let mut notification = notify_rust::Notification::new();
+    notification.summary(title).body(body).appname("hivetty");
+    if options.sound {
+        // Windows' default toast sound; the freedesktop sound for a new message on Linux.
+        notification.sound_name(if cfg!(windows) {
+            "Default"
+        } else {
+            "message-new-instant"
+        });
+    }
+    #[cfg(not(windows))]
+    if let Some((label, _)) = &options.on_click {
+        // The freedesktop "default" action is a click on the notification itself.
+        notification.action("default", label);
+    }
+    let handle = notification.show().map_err(|e| e.to_string())?;
+    if let Some((_, on_click)) = options.on_click {
+        wait_bounded(|| {
+            // A click on the toast's body is the "default" response.
+            #[cfg(windows)]
+            let _ = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
+                if matches!(response, notify_rust::NotificationResponse::Default) {
+                    on_click();
+                }
+            });
+            #[cfg(not(windows))]
+            handle.wait_for_action(|action| {
+                if action == "default" {
+                    on_click();
+                }
+            });
+        });
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
-fn send_notification(title: &str, body: &str) -> Result<(), String> {
+fn send_notification(title: &str, body: &str, options: NotifyOptions) -> Result<(), String> {
     // AppleScript string literals: escape backslashes and quotes; the text is data, never code.
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+    let sound = if options.sound {
+        " sound name \"Glass\""
+    } else {
+        ""
+    };
     let script = format!(
-        "display notification {} with title {}",
+        "display notification {} with title {}{sound}",
         quote(body),
         quote(title)
     );

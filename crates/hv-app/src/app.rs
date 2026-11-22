@@ -50,6 +50,10 @@ pub(crate) enum AppEvent {
         hv_ui::NewSession,
         Result<(std::path::PathBuf, std::path::PathBuf), String>,
     ),
+    /// A notification was clicked: bring its session forward (F4-18).
+    FocusPane(PaneId),
+    /// The grouped notification was clicked: go to the next session that needs the user.
+    FocusNextNeedsYou,
     /// This is the first run: show the wizard (F6-03).
     Welcome(hv_ui::WelcomeInfo),
     /// Usage logs were read in the background (F5).
@@ -1390,7 +1394,10 @@ impl App {
 
     /// Agent notifications due in the active window (F4-18): one per new attention state,
     /// skipping the pane the user is looking at.
-    fn notify_candidates(&mut self, window_focused: bool) -> Vec<(&'static str, String, String)> {
+    fn notify_candidates(
+        &mut self,
+        window_focused: bool,
+    ) -> Vec<(PaneId, &'static str, String, String)> {
         let Some(ui) = &mut self.ui else {
             return Vec::new();
         };
@@ -1405,10 +1412,10 @@ impl App {
                 .or_else(|| pane.session.cwd())
                 .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "~".to_owned());
-            if let Some(note) = pane.info.take_notification(&project) {
+            if let Some((kind, title, body)) = pane.info.take_notification(&project) {
                 // Never for the pane the user is looking at.
                 if !(window_focused && Some(*id) == focused) {
-                    out.push(note);
+                    out.push((*id, kind, title, body));
                 }
             }
         }
@@ -1419,19 +1426,50 @@ impl App {
         out
     }
 
-    fn send_agent_notifications(&mut self, notes: Vec<(&'static str, String, String)>) {
+    fn send_agent_notifications(&mut self, notes: Vec<(PaneId, &'static str, String, String)>) {
         let config = &self.config.notifications;
         if !config.enabled {
             return;
         }
         let window = Duration::from_secs(config.group_window_seconds.max(1));
-        for (kind, title, body) in notes {
+        for (pane, kind, title, body) in notes {
             if !config.on.iter().any(|k| k == kind) {
                 continue;
             }
             if self.notify_group.admit(Instant::now(), window) {
-                notify(config, &title, &body);
+                let options = hv_platform::NotifyOptions {
+                    sound: config.sounds.iter().any(|k| k == kind),
+                    on_click: Some(focus_on_click(&self.proxy, AppEvent::FocusPane(pane))),
+                };
+                notify_with(config, &title, &body, options);
             }
+        }
+    }
+
+    /// Brings a pane forward wherever it is: its window, its tab, the keyboard (F4-18).
+    fn focus_pane_anywhere(&mut self, pane: PaneId) {
+        let owner = self
+            .window_ids()
+            .into_iter()
+            .find(|id| self.window_has_pane(*id, pane));
+        let Some(window) = owner else { return };
+        if self.activate(window)
+            && let Some(ui) = &mut self.ui
+        {
+            ui.tabs.focus_pane(pane);
+            ui.window.focus_window();
+            ui.window.request_redraw();
+        }
+        self.focus_changed();
+    }
+
+    fn window_has_pane(&self, window: WindowId, pane: PaneId) -> bool {
+        match &self.ui {
+            Some(ui) if ui.window.id() == window => ui.panes.contains_key(&pane),
+            _ => self
+                .parked
+                .get(&window)
+                .is_some_and(|ui| ui.panes.contains_key(&pane)),
         }
     }
 
@@ -2249,7 +2287,14 @@ impl App {
                                 .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned());
                             let body =
                                 hv_ui::strings::command_finished(&name, exit, &took_text(took));
-                            notify(notes, title, &body);
+                            let options = hv_platform::NotifyOptions {
+                                sound: false,
+                                on_click: Some(focus_on_click(
+                                    &self.proxy,
+                                    AppEvent::FocusPane(*id),
+                                )),
+                            };
+                            notify_with(notes, title, &body, options);
                             if Some(*id) != focused {
                                 pane.info.unseen = true;
                             }
@@ -2909,6 +2954,8 @@ impl ApplicationHandler<AppEvent> for App {
                     hv_platform::notify(hv_ui::strings::WORKTREE_FAILED, &err);
                 }
             },
+            AppEvent::FocusPane(pane) => self.focus_pane_anywhere(pane),
+            AppEvent::FocusNextNeedsYou => self.focus_next_needing_you(),
             AppEvent::Welcome(info) => {
                 if let Some(ui) = &mut self.ui {
                     ui.chrome.open_welcome(info);
@@ -3100,10 +3147,15 @@ impl ApplicationHandler<AppEvent> for App {
         let group_window =
             Duration::from_secs(self.config.notifications.group_window_seconds.max(1));
         if let Some(count) = self.notify_group.due_summary(Instant::now(), group_window) {
-            notify(
+            let options = hv_platform::NotifyOptions {
+                sound: !self.config.notifications.sounds.is_empty(),
+                on_click: Some(focus_on_click(&self.proxy, AppEvent::FocusNextNeedsYou)),
+            };
+            notify_with(
                 &self.config.notifications,
                 &hv_ui::strings::sessions_need_you(count),
                 hv_ui::strings::NOTIFY_OPEN_HIVETTY,
+                options,
             );
         }
         let mut deadline: Option<Instant> = self.notify_group.deadline(group_window);
@@ -3479,10 +3531,30 @@ fn open_in_editor(command: &str, dir: std::path::PathBuf) {
         });
 }
 
-/// A desktop notification, also forwarded to the phone when configured (F4-33).
-fn notify(config: &hv_config::Notifications, title: &str, body: &str) {
-    hv_platform::notify(title, body);
+/// A desktop notification with its sound and click action, also forwarded to the phone when
+/// configured (F4-33).
+fn notify_with(
+    config: &hv_config::Notifications,
+    title: &str,
+    body: &str,
+    options: hv_platform::NotifyOptions,
+) {
+    hv_platform::notify_with(title, body, options);
     crate::forward::send(&config.forward, title, body);
+}
+
+/// A click action that sends `event` to the app.
+fn focus_on_click(
+    proxy: &EventLoopProxy<AppEvent>,
+    event: AppEvent,
+) -> (String, Box<dyn FnOnce() + Send>) {
+    let proxy = proxy.clone();
+    (
+        hv_ui::strings::NOTIFY_FOCUS.to_owned(),
+        Box::new(move || {
+            let _ = proxy.send_event(event);
+        }),
+    )
 }
 
 /// Where the agent time hivetty measures is kept.
