@@ -1,0 +1,10 @@
+{
+  "session_id": "01a20387-628c-7ba0-89b3-6b6bcaabd3f2",
+  "turn_id": "01a20387-6384-7110-aa12-36f842a0597e",
+  "transcript_path": "/home/me/.codex/sessions/2026/11/22/rollout-2026-11-22T08-52-14-01a20387-628c-7ba0-89b3-6b6bcaabd3f2.jsonl",
+  "cwd": "/home/me/proj",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-6.2-sol",
+  "permission_mode": "bypassPermissions",
+  "prompt": "Run the shell command: echo hi. Then reply with one word."
+}

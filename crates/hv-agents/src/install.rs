@@ -39,6 +39,9 @@ pub struct HookTarget {
     pub tool_events: &'static [&'static str],
     /// The `timeout` written with each hook, in the agent's unit (seconds or milliseconds).
     pub timeout: u64,
+    /// Runs hook commands with PowerShell on Windows (checked with the real agent), which
+    /// needs `& 'program' args` instead of `'program' args`.
+    pub powershell_on_windows: bool,
 }
 
 /// Claude Code: `~/.claude/settings.json`, timeouts in seconds.
@@ -47,6 +50,8 @@ pub const CLAUDE: HookTarget = HookTarget {
     events: CLAUDE_EVENTS,
     tool_events: &["PreToolUse", "PostToolUse"],
     timeout: 5,
+    // Git Bash on Windows.
+    powershell_on_windows: false,
 };
 
 /// Gemini CLI: `~/.gemini/settings.json`, timeouts in milliseconds.
@@ -55,6 +60,8 @@ pub const GEMINI: HookTarget = HookTarget {
     events: GEMINI_EVENTS,
     tool_events: &["BeforeTool", "AfterTool"],
     timeout: 5000,
+    // Windows PowerShell 5.1 (verified with 0.70.0).
+    powershell_on_windows: true,
 };
 
 impl HookTarget {
@@ -68,9 +75,18 @@ impl HookTarget {
         format!(" hook --agent {} --event ", self.agent)
     }
 
-    /// The command the agent runs for `event`.
+    /// The command the agent runs for `event` on this platform.
     pub fn command(&self, exe: &Path, event: &str) -> String {
-        format!("{}{}{event}", quote_exe(exe), self.marker())
+        self.command_for(exe, event, cfg!(windows))
+    }
+
+    /// The command for `event`, written for Windows or for a POSIX shell.
+    pub fn command_for(&self, exe: &Path, event: &str, windows: bool) -> String {
+        if windows && self.powershell_on_windows {
+            format!("& {}{}{event}", quote_exe_powershell(exe), self.marker())
+        } else {
+            format!("{}{}{event}", quote_exe(exe), self.marker())
+        }
     }
 
     fn is_ours(&self, command: &str) -> bool {
@@ -86,6 +102,12 @@ fn quote_exe(exe: &Path) -> String {
         .to_string_lossy()
         .replace('\\', "/")
         .replace('\'', r"'\''");
+    format!("'{exe}'")
+}
+
+/// The hivetty binary for PowerShell: single quotes, where a quote is doubled.
+fn quote_exe_powershell(exe: &Path) -> String {
+    let exe = exe.to_string_lossy().replace('\\', "/").replace('\'', "''");
     format!("'{exe}'")
 }
 
@@ -338,8 +360,23 @@ mod tests {
         assert_eq!(tool["hooks"][0]["timeout"], 5000);
         assert_eq!(
             tool["hooks"][0]["command"],
+            GEMINI.command(exe, "BeforeTool")
+        );
+        assert_eq!(
+            GEMINI.command_for(exe, "BeforeTool", false),
             "'/opt/hivetty/hivetty' hook --agent gemini-cli --event BeforeTool"
         );
+        // PowerShell on Windows, with quotes doubled.
+        assert_eq!(
+            GEMINI.command_for(
+                Path::new(r"C:\Program Files\it's\hivetty.exe"),
+                "AfterAgent",
+                true
+            ),
+            "& 'C:/Program Files/it''s/hivetty.exe' hook --agent gemini-cli --event AfterAgent"
+        );
+        // Claude Code uses Git Bash on Windows too.
+        assert!(CLAUDE.command_for(exe, "Stop", true).starts_with('\''));
         // Claude Code's entries are not Gemini's, and the other way round.
         assert!(
             plan_uninstall_for(CLAUDE, &plan.new_text)
