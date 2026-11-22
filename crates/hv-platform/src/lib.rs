@@ -21,6 +21,30 @@ pub fn attach_parent_console() {
     }
 }
 
+/// Shows how many sessions need the user on the app's icon (F4-19); 0 clears it. Call it on
+/// the main thread.
+///
+/// - macOS: the dock badge.
+/// - Windows and Linux: nothing yet (the taskbar overlay icon needs COM and an icon per count;
+///   Linux has no common API). The taskbar still flashes through winit's attention request.
+pub fn set_badge(count: usize) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::NSApplication;
+        use objc2_foundation::NSString;
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let label = (count > 0).then(|| NSString::from_str(&count.to_string()));
+        NSApplication::sharedApplication(mtm)
+            .dockTile()
+            .setBadgeLabel(label.as_deref());
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = count;
+}
+
 /// Shows a desktop notification without blocking the caller (it is sent from a short-lived
 /// thread). Failures are logged and otherwise ignored.
 ///

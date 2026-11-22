@@ -489,6 +489,8 @@ struct App {
     plan_limits: PlanLimits,
     /// A problem with config.toml to show until fixed or closed (F6-02).
     config_notice: Option<String>,
+    /// The count last shown on the app icon (F4-19).
+    badge: usize,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -578,6 +580,7 @@ impl App {
             archive: Vec::new(),
             plan_limits: PlanLimits::default(),
             config_notice: None,
+            badge: 0,
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -2896,6 +2899,21 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.sync_watched_panes();
+        // F4-19: how many sessions need the user, on the app icon.
+        let badge = self
+            .ui
+            .iter()
+            .chain(self.parked.values())
+            .flat_map(|ui| ui.panes.values())
+            .filter(|p| {
+                crate::model::session_row(&p.info, None).state == hv_ui::RowState::Waiting
+                    || p.info.unseen
+            })
+            .count();
+        if badge != self.badge {
+            self.badge = badge;
+            hv_platform::set_badge(badge);
+        }
         let group_window =
             Duration::from_secs(self.config.notifications.group_window_seconds.max(1));
         if let Some(count) = self.notify_group.due_summary(Instant::now(), group_window) {
