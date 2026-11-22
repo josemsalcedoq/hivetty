@@ -197,7 +197,10 @@ fn confirm_and_apply(
         println!("\nDry run: nothing was written.");
         return Ok(());
     }
-    print!("\nA backup goes to settings.json.hivetty-bak. Apply these changes? [y/N] ");
+    print!(
+        "\nA backup goes to {}. Apply these changes? [y/N] ",
+        hv_agents::install::backup_path(path).display()
+    );
     std::io::stdout().flush()?;
     let mut answer = String::new();
     std::io::stdin().lock().read_line(&mut answer)?;

@@ -326,8 +326,22 @@ pub fn claude_settings_path(home: &Path) -> PathBuf {
     home.join(".claude").join("settings.json")
 }
 
-/// Writes `plan` to `path`: a copy of the old file goes to `settings.json.hivetty-bak`, and the
-/// new one is written to a temporary file and renamed over the old (never half-written).
+/// Where [`apply`] keeps the previous version of `path`: `settings.json.hivetty-bak`,
+/// `config.toml.hivetty-bak`.
+pub fn backup_path(path: &Path) -> PathBuf {
+    sibling(path, "hivetty-bak")
+}
+
+/// `<file name>.<suffix>` in the same folder.
+fn sibling(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".");
+    name.push(suffix);
+    path.with_file_name(name)
+}
+
+/// Writes `plan` to `path`: a copy of the old file goes to [`backup_path`], and the new one is
+/// written to a temporary file and renamed over the old (never half-written).
 pub fn apply(path: &Path, plan: &Plan) -> std::io::Result<()> {
     // Write through a symlink (dotfiles repos link settings.json) instead of replacing it.
     let target = if path.is_symlink() {
@@ -340,9 +354,9 @@ pub fn apply(path: &Path, plan: &Plan) -> std::io::Result<()> {
     }
     let permissions = std::fs::metadata(&target).ok().map(|m| m.permissions());
     if target.exists() {
-        std::fs::copy(&target, target.with_extension("json.hivetty-bak"))?;
+        std::fs::copy(&target, backup_path(&target))?;
     }
-    let tmp = target.with_extension("json.hivetty-tmp");
+    let tmp = sibling(&target, "hivetty-tmp");
     std::fs::write(&tmp, &plan.new_text)?;
     // Keep the original permissions (the file may hold API keys and be private).
     if let Some(permissions) = permissions {
