@@ -4,6 +4,18 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// A helper program run without a console window: the release build on Windows has no
+/// console, so each console program would otherwise flash one.
+pub(crate) fn background(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 /// A branch name we are willing to pass to git: letters, digits and `/ _ . -`, no `..`, not
 /// starting with `-` or `/`, at most 100 characters.
 pub(crate) fn valid_branch(name: &str) -> bool {
@@ -60,7 +72,7 @@ pub(crate) fn create(root: &Path, branch: &str, dir: &Path) -> Result<(), String
         return Err(format!("invalid branch name '{branch}'"));
     }
     let git = hv_pty::resolve_program("git");
-    let output = Command::new(git)
+    let output = background(&mut Command::new(git))
         .arg("-C")
         .arg(root)
         .args(["worktree", "add", "-b", branch, "--"])
@@ -74,6 +86,60 @@ pub(crate) fn create(root: &Path, branch: &str, dir: &Path) -> Result<(), String
     }
 }
 
+/// Most bytes copied by [`copy_included`] (a `.env` is small; a stray `node_modules` is not).
+const MAX_INCLUDE_BYTES: u64 = 50 << 20;
+
+/// Copies the files listed in the repository's `.worktreeinclude` into a new worktree (F4-31):
+/// files git does not track, like `.env`, that a fresh checkout lacks. One relative path per
+/// line (`#` comments); a directory is copied whole. Paths that leave the repository, and
+/// symbolic links, are skipped. Returns what was copied. Blocking: call off the UI thread.
+pub(crate) fn copy_included(root: &Path, dir: &Path) -> Vec<PathBuf> {
+    let Ok(list) = std::fs::read_to_string(root.join(".worktreeinclude")) else {
+        return Vec::new();
+    };
+    let mut budget = MAX_INCLUDE_BYTES;
+    let mut copied = Vec::new();
+    for line in list.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let rel = Path::new(line.trim_start_matches("./"));
+        let inside = rel
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if !inside {
+            log::warn!(".worktreeinclude: skipping '{line}' (outside the repository)");
+            continue;
+        }
+        copy_tree(&root.join(rel), &dir.join(rel), &mut budget, &mut copied);
+    }
+    copied
+}
+
+/// Copies a file or a directory tree, without following symbolic links, within `budget` bytes.
+fn copy_tree(from: &Path, to: &Path, budget: &mut u64, copied: &mut Vec<PathBuf>) {
+    let Ok(meta) = std::fs::symlink_metadata(from) else {
+        return;
+    };
+    if meta.is_dir() {
+        let Ok(entries) = std::fs::read_dir(from) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            copy_tree(&entry.path(), &to.join(entry.file_name()), budget, copied);
+        }
+    } else if meta.is_file()
+        && meta.len() <= *budget
+        && !to.exists()
+        && let Some(parent) = to.parent()
+        && std::fs::create_dir_all(parent).is_ok()
+        && std::fs::copy(from, to).is_ok()
+    {
+        *budget -= meta.len();
+        copied.push(to.to_path_buf());
+    }
+}
+
 /// Runs `git worktree remove <dir>` in `root` (no `--force`: git refuses when the worktree
 /// has uncommitted or untracked changes). Retries for a few seconds while the closed shell
 /// still holds the folder (Windows). Blocking: call off the UI thread.
@@ -81,7 +147,7 @@ pub(crate) fn remove(root: &Path, dir: &Path) -> Result<(), String> {
     let git = hv_pty::resolve_program("git");
     let mut last = String::new();
     for _ in 0..10 {
-        let output = Command::new(&git)
+        let output = background(&mut Command::new(&git))
             .arg("-C")
             .arg(root)
             .args(["worktree", "remove", "--"])
@@ -155,6 +221,21 @@ mod tests {
         let dir = worktree_dir(&repo, "agent/test").unwrap();
         create(&repo, "agent/test", &dir).unwrap();
         assert!(dir.join("README").is_file());
+        // Untracked files listed in .worktreeinclude follow; paths outside do not.
+        std::fs::write(repo.join(".env"), "KEY=1").unwrap();
+        std::fs::create_dir_all(repo.join("conf")).unwrap();
+        std::fs::write(repo.join("conf/local.toml"), "x").unwrap();
+        std::fs::write(
+            repo.join(".worktreeinclude"),
+            "# local files\n.env\nconf\n../secret\n",
+        )
+        .unwrap();
+        let copied = copy_included(&repo, &dir);
+        assert_eq!(copied.len(), 2, "{copied:?}");
+        assert_eq!(std::fs::read_to_string(dir.join(".env")).unwrap(), "KEY=1");
+        assert!(dir.join("conf/local.toml").is_file());
+        std::fs::remove_file(dir.join(".env")).unwrap();
+        std::fs::remove_dir_all(dir.join("conf")).unwrap();
         assert!(
             create(&repo, "agent/test", &base.join("other")).is_err(),
             "branch exists"

@@ -70,6 +70,7 @@ fn config_text(choice: &WelcomeChoice) -> String {
 
 /// Applies the choices (`None` = skipped) and remembers that the wizard ran.
 pub(crate) fn finish(choice: Option<&WelcomeChoice>) -> Result<(), String> {
+    let mut problem = None;
     if let Some(choice) = choice {
         if let Some(path) = hv_config::default_path()
             && !path.exists()
@@ -80,14 +81,16 @@ pub(crate) fn finish(choice: Option<&WelcomeChoice>) -> Result<(), String> {
             std::fs::write(&path, config_text(choice)).map_err(|e| e.to_string())?;
         }
         if choice.install_hooks || choice.install_statusline {
-            install_agent(choice)?;
+            // Remember the wizard ran even if this fails, and report it.
+            problem = install_agent(choice).err();
         }
     }
     let marker = marker().ok_or("no data directory")?;
     if let Some(dir) = marker.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(marker, "").map_err(|e| e.to_string())
+    std::fs::write(marker, "").map_err(|e| e.to_string())?;
+    problem.map_or(Ok(()), Err)
 }
 
 /// Installs what the user ticked, planned again from the file as it is now (both changes
@@ -106,19 +109,27 @@ fn install_agent(choice: &WelcomeChoice) -> Result<(), String> {
         changed |= !plan.changes.is_empty();
         text = plan.new_text;
     }
+    // The statusline can fail on its own (the user set one up meanwhile): the hooks still go in.
+    let mut skipped = None;
     if choice.install_statusline {
-        let plan = hv_agents::install::plan_statusline_install(&text, &exe)?;
-        changed |= !plan.changes.is_empty();
-        text = plan.new_text;
+        match hv_agents::install::plan_statusline_install(&text, &exe) {
+            Ok(plan) => {
+                changed |= !plan.changes.is_empty();
+                text = plan.new_text;
+            }
+            Err(err) => skipped = Some(err),
+        }
     }
-    if !changed {
-        return Ok(());
+    if changed {
+        let plan = hv_agents::install::Plan {
+            new_text: text,
+            changes: Vec::new(),
+        };
+        hv_agents::install::apply(&path, &plan).map_err(|e| e.to_string())?;
     }
-    let plan = hv_agents::install::Plan {
-        new_text: text,
-        changes: Vec::new(),
-    };
-    hv_agents::install::apply(&path, &plan).map_err(|e| e.to_string())
+    skipped.map_or(Ok(()), |err| {
+        Err(format!("statusline not installed: {err}"))
+    })
 }
 
 #[cfg(test)]

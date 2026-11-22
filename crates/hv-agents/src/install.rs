@@ -161,11 +161,18 @@ pub fn statusline_command(exe: &Path) -> String {
 /// What identifies hivetty's statusline command.
 const STATUSLINE_MARKER: &str = " statusline";
 
+/// A statusline command hivetty wrote: `'<…/hivetty[.exe]>' statusline`, for any path (the
+/// binary may have moved). Another tool's `'…/ccusage' statusline` is not ours.
 fn is_our_statusline(value: &Value) -> bool {
     value
         .get("command")
         .and_then(Value::as_str)
-        .is_some_and(|c| c.ends_with(&format!("'{STATUSLINE_MARKER}")))
+        .and_then(|c| c.strip_suffix(&format!("'{STATUSLINE_MARKER}")))
+        .and_then(|quoted| quoted.strip_prefix('\''))
+        .is_some_and(|exe| {
+            let name = exe.rsplit('/').next().unwrap_or(exe);
+            name.eq_ignore_ascii_case("hivetty") || name.eq_ignore_ascii_case("hivetty.exe")
+        })
 }
 
 /// Sets hivetty's statusline. A statusline the user already has is never replaced.
@@ -264,6 +271,15 @@ mod tests {
         let again = plan_statusline_install(&plan.new_text, exe).unwrap();
         assert!(again.changes.is_empty());
         let users = r#"{"statusLine":{"type":"command","command":"~/.claude/mine.sh"}}"#;
+        let other_tool =
+            r#"{"statusLine":{"type":"command","command":"'/usr/bin/ccusage' statusline"}}"#;
+        assert!(plan_statusline_install(other_tool, exe).is_err());
+        assert!(
+            plan_statusline_uninstall(other_tool)
+                .unwrap()
+                .changes
+                .is_empty()
+        );
         assert!(plan_statusline_install(users, exe).is_err());
         assert!(plan_statusline_uninstall(users).unwrap().changes.is_empty());
         let removed = plan_statusline_uninstall(&plan.new_text).unwrap();

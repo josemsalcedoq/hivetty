@@ -16,6 +16,8 @@ pub(crate) struct SessionInfo {
     pub(crate) custom_title: Option<String>,
     /// The repository and the git worktree hivetty created for this session (F4-22).
     pub(crate) worktree: Option<(std::path::PathBuf, std::path::PathBuf)>,
+    /// Remove that worktree when the pane closes (the user asked to).
+    pub(crate) remove_worktree: bool,
     /// When the session started.
     pub(crate) started: Instant,
     /// Whether the program has exited.
@@ -37,8 +39,10 @@ pub(crate) struct SessionInfo {
     pub(crate) agent_name: Option<String>,
     /// Context window used, from the agent's statusline (F4-32).
     pub(crate) context_percent: Option<f64>,
-    /// Since when (Unix seconds) the agent has been working, as seen here (F4-23).
-    pub(crate) working_since: Option<i64>,
+    /// Since when the agent has been working, as seen here (F4-23): Unix seconds for the record,
+    /// and the monotonic clock for its length (which skips a suspended machine on macOS and
+    /// Linux).
+    pub(crate) working_since: Option<(i64, Instant)>,
     /// The last tool the agent used, worded for the hover card (S-15).
     pub(crate) last_tool: Option<String>,
     /// The attention state last notified ("waiting", "done", "error"), so a state is announced
@@ -52,6 +56,7 @@ impl SessionInfo {
             title: None,
             custom_title: None,
             worktree: None,
+            remove_worktree: false,
             started: Instant::now(),
             exited: false,
             agent: Tracker::default(),
@@ -166,18 +171,18 @@ impl SessionInfo {
         let working = !closing
             && !self.exited
             && matches!(self.agent.state(), Some(AgentState::Working { .. }));
-        let now = jiff::Timestamp::now().as_second();
         match (working, self.working_since) {
             (true, None) => {
-                self.working_since = Some(now);
+                self.working_since = Some((jiff::Timestamp::now().as_second(), Instant::now()));
                 None
             }
-            (false, Some(start)) => {
+            (false, Some((start, began))) => {
                 self.working_since = None;
+                let length = i64::try_from(began.elapsed().as_secs()).unwrap_or(0);
                 Some(hv_usage::observed::Interval {
                     agent: self.agent_id.clone()?,
                     start,
-                    end: now,
+                    end: start + length,
                 })
                 .filter(|i| i.end > i.start)
             }
@@ -394,8 +399,9 @@ mod tests {
         let mut info = SessionInfo::new();
         info.on_hook(&hook("UserPromptSubmit", "{}"));
         assert_eq!(info.working_interval(false), None, "a stretch opens");
-        let start = info.working_since.unwrap() - 30;
-        info.working_since = Some(start);
+        let (start, began) = info.working_since.unwrap();
+        let start = start - 30;
+        info.working_since = Some((start, began - std::time::Duration::from_secs(30)));
         assert_eq!(info.working_interval(false), None, "still working");
         info.on_hook(&hook("Stop", "{}"));
         let done = info.working_interval(false).unwrap();

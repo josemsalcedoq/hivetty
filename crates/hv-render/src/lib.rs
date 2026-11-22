@@ -226,12 +226,20 @@ impl Renderer {
         let surface = instance
             .create_surface(window)
             .context("cannot create GPU surface")?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            force_fallback_adapter: software(),
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
+        // Safe mode asks for the software adapter; Metal has none, and Linux may lack Mesa's,
+        // so fall back to the GPU then.
+        let request = |fallback: bool| {
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                force_fallback_adapter: fallback,
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            }))
+        };
+        let adapter = match software() {
+            true => request(true).or_else(|_| request(false)),
+            false => request(false),
+        }
         .context("no compatible GPU adapter")?;
         let adapter_info = adapter.get_info();
         log::info!("GPU: {} ({:?})", adapter_info.name, adapter_info.backend);
@@ -269,11 +277,18 @@ impl Renderer {
         let instance = wgpu::Instance::new(with_preferred_backends(
             wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
         ));
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            force_fallback_adapter: software(),
-            ..Default::default()
-        }))
+        let request = |fallback: bool| {
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                force_fallback_adapter: fallback,
+                compatible_surface: None,
+                ..Default::default()
+            }))
+        };
+        let adapter = match software() {
+            true => request(true).or_else(|_| request(false)),
+            false => request(false),
+        }
         .context("no GPU adapter")?;
         let adapter_info = adapter.get_info();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {

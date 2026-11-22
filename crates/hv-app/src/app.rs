@@ -123,7 +123,8 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
     }
     // Restore and save the layout only for a plain launch (not `hivetty -e program`).
     let mut app = App::new(spec, proxy);
-    if !explicit_program {
+    // Safe mode must not overwrite the user's layout with its one default pane.
+    if !explicit_program && !safe {
         app.layout_path = crate::saved::layout_path();
         app.restore = app
             .layout_path
@@ -928,7 +929,6 @@ impl App {
             Action::FontSmaller => zoom(ui, -1.0),
             Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
             Action::NextNeedsYou => self.focus_next_needing_you(),
-            Action::ClosePaneById(id) => self.close_pane(id, event_loop),
             Action::ClosePanesById(ids) => {
                 for id in ids {
                     self.close_pane(id, event_loop);
@@ -1240,8 +1240,13 @@ impl App {
                         None => Err(format!("{} is not in a git repository", folder.display())),
                         Some(root) => match crate::worktree::worktree_dir(&root, &branch) {
                             None => Err("cannot place the worktree".to_owned()),
-                            Some(dir) => crate::worktree::create(&root, &branch, &dir)
-                                .map(|()| (root.clone(), dir)),
+                            Some(dir) => {
+                                crate::worktree::create(&root, &branch, &dir).map(|()| {
+                                    // F4-31: untracked files the repo lists, like `.env`.
+                                    crate::worktree::copy_included(&root, &dir);
+                                    (root.clone(), dir)
+                                })
+                            }
                         },
                     };
                     let _ = proxy.send_event(AppEvent::WorktreeReady(request, result));
@@ -1458,9 +1463,16 @@ impl App {
 
     /// Closes the active window (its panes die with it). Exits after the last one.
     fn close_window(&mut self, event_loop: &ActiveEventLoop) {
+        // The last window: the process ends next, so write on this thread.
+        let last = self.parked.is_empty();
         if let Some(mut ui) = self.ui.take() {
             for pane in ui.panes.values_mut() {
-                record_interval(pane.info.working_interval(true));
+                let interval = pane.info.working_interval(true);
+                if last {
+                    record_interval_now(interval);
+                } else {
+                    record_interval(interval);
+                }
                 pane.session.kill();
             }
         }
@@ -1509,6 +1521,25 @@ impl App {
         if let Some(mut pane) = ui.panes.remove(&id) {
             record_interval(pane.info.working_interval(true));
             pane.session.kill();
+            if pane.info.remove_worktree
+                && let Some((root, dir)) = pane.info.worktree.clone()
+            {
+                let _ = std::thread::Builder::new()
+                    .name("hv-worktree".into())
+                    .spawn(move || {
+                        if let Err(err) = crate::worktree::remove(&root, &dir) {
+                            log::warn!("worktree: {err}");
+                            hv_platform::notify(hv_ui::strings::WORKTREE_NOT_REMOVED, &err);
+                        }
+                    });
+            }
+        }
+        // Dialogs about this pane go with it.
+        if ui.confirm_close.is_some_and(|(p, _)| p == id) {
+            ui.confirm_close = None;
+        }
+        if ui.renaming == Some(id) {
+            ui.renaming = None;
         }
         if ui.tabs.remove_pane(id) {
             self.close_window(event_loop);
@@ -2001,10 +2032,15 @@ impl App {
             return;
         };
         let (config, error) = hv_config::load(path);
+        // Bad custom colors still leave a usable config (with the built-in palette).
+        let mut theme_error = None;
         if let Some(err) = error {
             log::warn!("{err}");
-            self.set_config_notice(Some(err));
-            return; // keep the last good config
+            if !err.starts_with("theme.colors") {
+                self.set_config_notice(Some(err));
+                return; // keep the last good config
+            }
+            theme_error = Some(err);
         }
         for id in self.window_ids() {
             if self.activate(id)
@@ -2015,7 +2051,7 @@ impl App {
         }
         let (keymap, keymap_problem) = keymap_from(&config);
         self.keymap = keymap;
-        self.set_config_notice(keymap_problem);
+        self.set_config_notice(theme_error.or(keymap_problem));
         let system_light = self
             .ui
             .as_ref()
@@ -2343,6 +2379,7 @@ impl App {
                 .spawn(move || {
                     if let Err(err) = crate::welcome::finish(choice.as_ref()) {
                         log::warn!("first-run setup: {err}");
+                        hv_platform::notify(hv_ui::strings::SETUP_PROBLEM, &err);
                     }
                 });
         }
@@ -2366,20 +2403,13 @@ impl App {
         {
             if answer
                 && kind == Confirm::RemoveWorktree
-                && let Some((root, dir)) = ui.panes.get(&id).and_then(|p| p.info.worktree.clone())
+                && let Some(pane) = ui.panes.get_mut(&id)
             {
-                // After the pane closes (its shell holds the folder), in the background.
-                let _ = std::thread::Builder::new()
-                    .name("hv-worktree".into())
-                    .spawn(move || {
-                        if let Err(err) = crate::worktree::remove(&root, &dir) {
-                            log::warn!("worktree: {err}");
-                            hv_platform::notify(hv_ui::strings::WORKTREE_NOT_REMOVED, &err);
-                        }
-                    });
+                // Done by `close_pane`, after the shell and the agent are killed.
+                pane.info.remove_worktree = true;
             }
             if answer {
-                self.pending_action = Some(Action::ClosePaneById(id));
+                self.queue_close(id);
             }
             if let Some(ui) = &self.ui {
                 ui.window.request_redraw();
@@ -2650,6 +2680,15 @@ fn run_chrome(
 }
 
 impl ApplicationHandler<AppEvent> for App {
+    /// The app ends (also through the macOS Quit menu): close every open working stretch.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        for ui in self.ui.iter_mut().chain(self.parked.values_mut()) {
+            for pane in ui.panes.values_mut() {
+                record_interval_now(pane.info.working_interval(true));
+            }
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.ui.is_some() {
             return;
@@ -2800,6 +2839,10 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(ui) = &mut self.ui
                     && let Some(p) = ui.panes.get_mut(&pane)
                 {
+                    if agent != p.info.agent_id {
+                        // The stretch belongs to the agent that was running.
+                        record_interval(p.info.working_interval(true));
+                    }
                     if agent.is_none() && p.info.agent_id.is_some() {
                         // The agent exited: back to a plain shell.
                         p.info.agent = hv_agents::Tracker::default();
@@ -3248,6 +3291,15 @@ fn observed_path() -> Option<std::path::PathBuf> {
 }
 
 /// Appends a finished working stretch on a background thread (F4-23).
+/// The same, on this thread (when the app is about to end).
+fn record_interval_now(interval: Option<hv_usage::observed::Interval>) {
+    if let (Some(interval), Some(path)) = (interval, observed_path())
+        && let Err(err) = hv_usage::observed::append(&path, &interval)
+    {
+        log::warn!("cannot record agent time: {err}");
+    }
+}
+
 fn record_interval(interval: Option<hv_usage::observed::Interval>) {
     let (Some(interval), Some(path)) = (interval, observed_path()) else {
         return;

@@ -412,3 +412,5 @@ pub fn confirm_remove_worktree(dir: &str) -> String {
 pub const REMOVE: &str = "Remove";
 /// Notification when git refused.
 pub const WORKTREE_NOT_REMOVED: &str = "The worktree was not removed";
+/// Notification when part of the first-run setup failed.
+pub const SETUP_PROBLEM: &str = "Part of the setup was not applied";

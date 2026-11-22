@@ -46,7 +46,7 @@ pub(crate) fn send(config: &Forward, title: &str, body: &str) {
 
 /// POSTs `data` with curl. Blocking.
 fn post(url: &str, content_type: &str, data: &str) -> Result<(), String> {
-    let mut child = Command::new(hv_pty::resolve_program("curl"))
+    let mut child = crate::worktree::background(&mut Command::new(hv_pty::resolve_program("curl")))
         .args([
             "-fsS",
             "-m",

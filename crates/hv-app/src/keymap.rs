@@ -42,8 +42,6 @@ pub(crate) enum Action {
     NextNeedsYou,
     /// Write this text to the focused terminal (`action = { send_text = "…" }`).
     SendText(String),
-    /// Close one pane (after the user confirmed it in the chrome).
-    ClosePaneById(u64),
     /// Close several panes (archiving a project's finished sessions).
     ClosePanesById(Vec<u64>),
     /// Explicitly unbound (`action = "none"` in the config).
