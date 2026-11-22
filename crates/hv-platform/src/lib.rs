@@ -21,6 +21,55 @@ pub fn attach_parent_console() {
     }
 }
 
+/// Shows a desktop notification without blocking the caller (it is sent from a short-lived
+/// thread). Failures are logged and otherwise ignored.
+///
+/// - Windows and Linux: native toasts / freedesktop notifications (`notify-rust`). On Windows
+///   they appear under PowerShell's name until the installer registers hivetty's AppUserModelID
+///   (F6-09).
+/// - macOS: `osascript` for now; native notifications need the signed `.app` bundle (F6-07).
+pub fn notify(title: &str, body: &str) {
+    let (title, body) = (title.to_owned(), body.to_owned());
+    let _ = std::thread::Builder::new()
+        .name("notify".into())
+        .spawn(move || {
+            if let Err(err) = send_notification(&title, &body) {
+                log::warn!("notification failed: {err}");
+            }
+        });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn send_notification(title: &str, body: &str) -> Result<(), String> {
+    notify_rust::Notification::new()
+        .summary(title)
+        .body(body)
+        .appname("hivetty")
+        .show()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn send_notification(title: &str, body: &str) -> Result<(), String> {
+    // AppleScript string literals: escape backslashes and quotes; the text is data, never code.
+    let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+    let script = format!(
+        "display notification {} with title {}",
+        quote(body),
+        quote(title)
+    );
+    std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .status()
+        .map_err(|e| e.to_string())
+        .and_then(|s| {
+            s.success()
+                .then_some(())
+                .ok_or_else(|| format!("osascript: {s}"))
+        })
+}
+
 /// The effective user id of this process.
 #[cfg(unix)]
 pub fn effective_uid() -> u32 {

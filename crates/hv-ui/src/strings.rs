@@ -24,6 +24,10 @@ pub const STATE_IDLE: &str = "Idle";
 pub const STATE_DONE: &str = "Done";
 /// Agent failed.
 pub const STATE_ERROR: &str = "Error";
+/// Notification title when a long shell command finishes.
+pub const NOTIFY_COMMAND_DONE: &str = "Command finished";
+/// Notification title when a long shell command fails.
+pub const NOTIFY_COMMAND_FAILED: &str = "Command failed";
 /// Title used when the program set none.
 pub const DEFAULT_TITLE: &str = "Shell";
 /// Tooltip and accessible name of the `+` button in the tab bar.

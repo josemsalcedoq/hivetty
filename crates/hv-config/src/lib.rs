@@ -23,6 +23,8 @@ pub struct Config {
     pub terminal: Terminal,
     /// Window behaviour.
     pub window: WindowConfig,
+    /// Desktop notifications.
+    pub notifications: Notifications,
     /// Shortcut overrides, applied on top of the defaults (docs/keybindings.md).
     pub keybindings: Vec<KeyBinding>,
 }
@@ -130,6 +132,28 @@ impl Default for WindowConfig {
         Self {
             remember_geometry: true,
             restore_layout: true,
+        }
+    }
+}
+
+/// `[notifications]`
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Notifications {
+    /// Send desktop notifications at all.
+    pub enabled: bool,
+    /// Only when the user is not looking at the pane (window unfocused or another pane).
+    pub only_when_unfocused: bool,
+    /// Notify when a shell command that ran at least this long finishes; 0 disables it.
+    pub long_command_seconds: u64,
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            only_when_unfocused: true,
+            long_command_seconds: 30,
         }
     }
 }

@@ -1407,6 +1407,7 @@ impl App {
     fn handle_session_events(&mut self, event_loop: &ActiveEventLoop) {
         let Some(ui) = &mut self.ui else { return };
         let focused = ui.focused_id();
+        let window_focused = self.focused_window == Some(ui.window.id());
         let mut exited = Vec::new();
         let mut bell = false;
         for (id, pane) in &mut ui.panes {
@@ -1458,6 +1459,38 @@ impl App {
                             && pane.info.needs_attention()
                         {
                             pane.info.unseen = true;
+                        }
+                        // F3-13: a long command finished while the user looked elsewhere.
+                        let notes = &self.config.notifications;
+                        if let Some((took, exit)) =
+                            pane.info.command_finished(&term_event, Instant::now())
+                            && notes.enabled
+                            && notes.long_command_seconds > 0
+                            && took.as_secs() >= notes.long_command_seconds
+                            && (!notes.only_when_unfocused
+                                || !window_focused
+                                || Some(*id) != focused)
+                        {
+                            let title = if exit.unwrap_or(0) == 0 {
+                                hv_ui::strings::NOTIFY_COMMAND_DONE
+                            } else {
+                                hv_ui::strings::NOTIFY_COMMAND_FAILED
+                            };
+                            let name = pane
+                                .info
+                                .title
+                                .clone()
+                                .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned());
+                            let body = match exit {
+                                Some(code) if code != 0 => {
+                                    format!("{name}: exit code {code} after {}", took_text(took))
+                                }
+                                _ => format!("{name}: done after {}", took_text(took)),
+                            };
+                            hv_platform::notify(title, &body);
+                            if Some(*id) != focused {
+                                pane.info.unseen = true;
+                            }
                         }
                     }
                 }
@@ -1870,6 +1903,11 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::Focused(true) => self.focused_window = Some(id),
+            WindowEvent::Focused(false) => {
+                if self.focused_window == Some(id) {
+                    self.focused_window = None;
+                }
+            }
             WindowEvent::ModifiersChanged(m) => {
                 self.modifiers = m.state();
                 self.update_hover_link();
@@ -2000,6 +2038,16 @@ fn pressed_chord(event: &KeyEvent, mods: ModifiersState) -> Option<Chord> {
         alt: mods.alt_key(),
         super_key: mods.super_key(),
     })
+}
+
+/// "45s", "3m 20s", "1h 5m".
+fn took_text(took: Duration) -> String {
+    let s = took.as_secs();
+    match s {
+        0..60 => format!("{s}s"),
+        60..3600 => format!("{}m {}s", s / 60, s % 60),
+        _ => format!("{}h {}m", s / 3600, s % 3600 / 60),
+    }
 }
 
 /// Grid size for a pane drawn in `area`.

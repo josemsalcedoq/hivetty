@@ -25,6 +25,8 @@ pub(crate) struct SessionInfo {
     /// OSC 9;4 progress: `(state, percent)`; state 1 = normal, 2 = error, 3 = indeterminate,
     /// 4 = paused.
     pub(crate) progress: Option<(u8, u8)>,
+    /// When the running shell command started (OSC 133;C).
+    pub(crate) command_started: Option<Instant>,
 }
 
 impl SessionInfo {
@@ -37,6 +39,7 @@ impl SessionInfo {
             unseen: false,
             bell: false,
             progress: None,
+            command_started: None,
         }
     }
 
@@ -67,6 +70,29 @@ impl SessionInfo {
                 changed
             }
             _ => false,
+        }
+    }
+
+    /// Tracks shell commands from OSC 133 marks. On `D`, returns how long the command ran and
+    /// its exit code.
+    pub(crate) fn command_finished(
+        &mut self,
+        event: &TermEvent,
+        now: Instant,
+    ) -> Option<(std::time::Duration, Option<i32>)> {
+        match event {
+            TermEvent::PromptMark { kind: 'C', .. } => {
+                self.command_started = Some(now);
+                None
+            }
+            TermEvent::PromptMark {
+                kind: 'D',
+                exit_code,
+            } => self
+                .command_started
+                .take()
+                .map(|start| (now.saturating_duration_since(start), *exit_code)),
+            _ => None,
         }
     }
 
@@ -221,6 +247,18 @@ mod tests {
             event: event.into(),
             payload: payload.into(),
         }
+    }
+
+    #[test]
+    fn commands_are_timed_from_c_to_d() {
+        let mut info = SessionInfo::new();
+        let t0 = Instant::now();
+        let mark = |kind, exit_code| TermEvent::PromptMark { kind, exit_code };
+        assert_eq!(info.command_finished(&mark('C', None), t0), None);
+        let done = info.command_finished(&mark('D', Some(2)), t0 + Duration::from_secs(40));
+        assert_eq!(done, Some((Duration::from_secs(40), Some(2))));
+        // A D without a C (an empty line) is not a command.
+        assert_eq!(info.command_finished(&mark('D', Some(0)), t0), None);
     }
 
     #[test]

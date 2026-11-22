@@ -16,3 +16,9 @@ windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [target."cfg(unix)".dependencies]
 libc = "0.2.191"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+notify-rust = "4.19"
+
+[dependencies]
+log = "0.4.35"
