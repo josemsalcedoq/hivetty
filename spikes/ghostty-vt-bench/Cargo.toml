@@ -1,0 +1,23 @@
+[package]
+name = "ghostty-vt-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# Standalone, throwaway spike (SP-1b). Not part of the hivetty workspace.
+[workspace]
+
+[dependencies]
+alacritty_terminal = "0.26"
+# crates.io 0.2.2 pins a pre-1.0 ghostty commit (Zig 0.15); this rev pins vt-1.0.1 (Zig 0.17).
+libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "483ea3d5247b214060da58ef6037a95f30ae89fb" }
+# hv-term's snapshot.rs and osc.rs are compiled in via #[path] for an apples-to-apples comparison.
+hv-grid = { path = "../../crates/hv-grid" }
+base64 = "0.23.1"
+
+# Same release profile as the hivetty workspace.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

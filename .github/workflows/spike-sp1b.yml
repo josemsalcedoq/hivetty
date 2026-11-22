@@ -1,0 +1,45 @@
+name: spike-sp1b
+
+# SP-1b throwaway: confirms libghostty-vt (built with Zig) links on the three OSes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: spikes/ghostty-vt-bench
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.1
+
+      - name: Build (release)
+        shell: bash
+        run: |
+          start=$(date +%s)
+          cargo build --release
+          echo "build took $(( $(date +%s) - start )) s"
+          ls -l target/release/ghostty-vt-bench* || true
+
+      - name: Run (short)
+        run: cargo run --release -- 16
