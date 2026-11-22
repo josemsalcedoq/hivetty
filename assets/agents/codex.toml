@@ -6,6 +6,7 @@ command = "codex"
 process_names = ["codex"]
 node_args = ["@openai/codex"]
 verified = true
+prompt_arg = true
 
 [state]
 osc7501 = false

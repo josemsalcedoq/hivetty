@@ -1,12 +1,14 @@
 //! Window chrome built with egui (ADR 0003): sidebar, and later tabs, attention inbox and the
 //! usage dashboard. The terminal grid itself is drawn by `hv-render` in the space egui leaves.
 
+mod new_session;
 mod palette;
 mod sidebar;
 pub mod strings;
 mod tabs;
 mod theme;
 
+pub use new_session::{AgentChoice, NewSession};
 pub use palette::PaletteItem;
 pub use tabs::{TAB_BAR_HEIGHT, TabAction, TabItem};
 
@@ -60,6 +62,10 @@ pub struct ChromeModel {
     /// Sections of the ☰ menu in the tab bar; empty = no menu button (macOS uses the system
     /// menu bar instead).
     pub menu: Vec<Vec<PaletteItem>>,
+    /// Installed agents for the dock and the New session dialog (a plain shell first).
+    pub agents: Vec<AgentChoice>,
+    /// Shortcut shown on the New session button ("Ctrl+Shift+A").
+    pub new_session_hint: String,
 }
 
 /// What the chrome produced this frame.
@@ -74,6 +80,12 @@ pub struct ChromeOutput {
     pub tab_action: Option<TabAction>,
     /// The command chosen in the palette (its [`PaletteItem::id`]).
     pub palette_choice: Option<usize>,
+    /// The New session button was pressed (the app opens the dialog with its defaults).
+    pub new_session_clicked: bool,
+    /// The dialog was confirmed.
+    pub new_session: Option<NewSession>,
+    /// An agent in the dock was clicked (profile id).
+    pub dock_choice: Option<String>,
 }
 
 impl std::fmt::Debug for ChromeOutput {
@@ -93,6 +105,7 @@ pub struct Chrome {
     palette: Option<palette::Palette>,
     tab_bar: tabs::TabBar,
     sidebar: sidebar::Sidebar,
+    new_session: Option<new_session::Dialog>,
 }
 
 /// Sidebar width in points (docs/ui-spec.md 1: 300 px default; narrower until tabs exist).
@@ -108,6 +121,7 @@ impl Chrome {
             palette: None,
             tab_bar: tabs::TabBar::default(),
             sidebar: sidebar::Sidebar::default(),
+            new_session: None,
         }
     }
 
@@ -125,6 +139,10 @@ impl Chrome {
         let palette = &mut self.palette;
         let tab_bar = &mut self.tab_bar;
         let sidebar_state = &mut self.sidebar;
+        let dialog = &mut self.new_session;
+        let mut new_session_clicked = false;
+        let mut new_session = None;
+        let mut dock_choice = None;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 egui::Panel::left("sidebar")
@@ -137,7 +155,14 @@ impl Chrome {
                             .stroke(Stroke::new(1.0, theme::BORDER)),
                     )
                     .show(ui, |ui| {
-                        clicked_session = sidebar_state.show(ui, &model.sessions);
+                        egui::Panel::bottom("dock")
+                            .frame(egui::Frame::new().inner_margin(Margin::symmetric(0, 6)))
+                            .show(ui, |ui| {
+                                dock_choice = new_session::dock(ui, &model.agents);
+                            });
+                        let out = sidebar_state.show(ui, &model.sessions, &model.new_session_hint);
+                        clicked_session = out.0;
+                        new_session_clicked = out.1;
                     });
             }
             if !model.tabs.is_empty() {
@@ -155,6 +180,16 @@ impl Chrome {
                     });
             }
             central = ui.available_rect_before_wrap();
+            if let Some(open) = dialog.as_mut() {
+                match open.show(ui.ctx()) {
+                    new_session::Outcome::Open => {}
+                    new_session::Outcome::Cancelled => *dialog = None,
+                    new_session::Outcome::Create(request) => {
+                        new_session = Some(request);
+                        *dialog = None;
+                    }
+                }
+            }
             if let Some(open) = palette.as_mut() {
                 match open.show(ui.ctx()) {
                     palette::PaletteOutcome::Open => {}
@@ -179,6 +214,9 @@ impl Chrome {
             clicked_session,
             tab_action,
             palette_choice,
+            new_session_clicked,
+            new_session,
+            dock_choice,
         }
     }
 
@@ -201,9 +239,18 @@ impl Chrome {
         self.palette.is_some()
     }
 
-    /// Whether a text field of the chrome (palette, tab rename) takes the keyboard and IME.
+    /// Opens the New session dialog with an agent (profile id) and folder preselected.
+    pub fn open_new_session(&mut self, agents: Vec<AgentChoice>, agent: &str, folder: String) {
+        self.new_session = Some(new_session::Dialog::new(agents, agent, folder));
+    }
+
+    /// Whether a text field of the chrome (palette, dialog, tab rename, search) takes the
+    /// keyboard and IME.
     pub fn takes_keyboard(&self) -> bool {
-        self.palette.is_some() || self.tab_bar.editing() || self.ctx.egui_wants_keyboard_input()
+        self.palette.is_some()
+            || self.new_session.is_some()
+            || self.tab_bar.editing()
+            || self.ctx.egui_wants_keyboard_input()
     }
 
     /// Whether egui wants keyboard input (a text field has focus).
@@ -332,6 +379,8 @@ mod tests {
             sidebar_visible: true,
             tabs: Vec::new(),
             menu: Vec::new(),
+            agents: Vec::new(),
+            new_session_hint: String::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
                 subtitle: "Needs permission: Bash".into(),
@@ -381,6 +430,8 @@ mod tests {
             sidebar_visible: true,
             tabs: Vec::new(),
             menu: Vec::new(),
+            agents: Vec::new(),
+            new_session_hint: String::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),
                 subtitle: "Working".into(),

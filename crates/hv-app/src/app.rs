@@ -133,6 +133,19 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
         .ok()
     };
     app.profiles = hv_agents::profile::builtin();
+    app.agent_choices = std::iter::once(hv_ui::AgentChoice {
+        id: String::new(),
+        name: hv_ui::strings::DEFAULT_TITLE.to_owned(),
+    })
+    .chain(
+        hv_agents::profile::installed(&app.profiles, std::env::var_os("PATH").as_deref())
+            .into_iter()
+            .map(|(p, _)| hv_ui::AgentChoice {
+                id: p.id.clone(),
+                name: p.name.clone(),
+            }),
+    )
+    .collect();
     app.agent_watch = {
         let proxy = std::sync::Mutex::new(app.proxy.clone());
         hv_agents::watch::ProcessWatcher::start(
@@ -170,6 +183,9 @@ fn keymap_from(config: &hv_config::Config) -> Keymap {
 struct Pane {
     session: Session,
     info: SessionInfo,
+    /// A command to type once the shell shows its first prompt (an agent started from the
+    /// New session dialog or the dock), and the deadline after which it is typed anyway.
+    pending_command: Option<(String, Instant)>,
     /// Project chips by prompt line (scrollback line of the OSC 133;A mark).
     chips: std::collections::BTreeMap<usize, Arc<hv_shell::detect::ProjectInfo>>,
     /// Where it was laid out last, to resize the PTY only when it changes.
@@ -274,7 +290,12 @@ impl Ui {
     }
 
     /// The sidebar and tab bar contents.
-    fn chrome_model(&mut self, sidebar_visible: bool, keymap: &Keymap) -> hv_ui::ChromeModel {
+    fn chrome_model(
+        &mut self,
+        sidebar_visible: bool,
+        keymap: &Keymap,
+        agents: &[hv_ui::AgentChoice],
+    ) -> hv_ui::ChromeModel {
         let focused = self.focused_id();
         let mut sessions = Vec::new();
         self.row_panes.clear();
@@ -349,6 +370,11 @@ impl Ui {
             sidebar_visible,
             tabs,
             menu,
+            agents: agents.to_vec(),
+            new_session_hint: keymap
+                .chord_for(&Action::NewAgentSession)
+                .map(crate::keymap::Chord::pretty)
+                .unwrap_or_default(),
         }
     }
 }
@@ -411,6 +437,10 @@ struct App {
     agent_watch: Option<hv_agents::watch::ProcessWatcher>,
     /// Groups bursts of agent notifications (F4-18).
     notify_group: NotifyGroup,
+    /// Agents found on PATH at start, a plain shell first (dock and New session).
+    agent_choices: Vec<hv_ui::AgentChoice>,
+    /// The agent last started from the dialog or the dock.
+    last_agent: String,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -492,6 +522,8 @@ impl App {
             profiles: Vec::new(),
             agent_watch: None,
             notify_group: NotifyGroup::default(),
+            agent_choices: Vec::new(),
+            last_agent: "claude-code".to_owned(),
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -659,6 +691,7 @@ impl App {
                 session,
                 info: SessionInfo::new(),
                 chips: std::collections::BTreeMap::new(),
+                pending_command: None,
                 area: None,
             },
         ))
@@ -791,6 +824,7 @@ impl App {
             Action::FontSmaller => zoom(ui, -1.0),
             Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
             Action::NextNeedsYou => self.focus_next_needing_you(),
+            Action::NewAgentSession => self.open_new_session_dialog(),
             Action::CommandPalette => {
                 let items = crate::keymap::PALETTE_ACTIONS
                     .iter()
@@ -837,6 +871,63 @@ impl App {
             Err(_) => log::warn!("cannot save the layout"),
             Ok(Ok(())) => {}
         }
+    }
+
+    /// Opens the New session dialog with the last agent and the focused pane's folder.
+    fn open_new_session_dialog(&mut self) {
+        let agents = self.agent_choices.clone();
+        let agent = self.last_agent.clone();
+        let Some(ui) = &mut self.ui else { return };
+        let folder = ui
+            .focused()
+            .and_then(|p| p.session.cwd())
+            .or_else(home_dir)
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        ui.chrome.open_new_session(agents, &agent, folder);
+        ui.window.request_redraw();
+    }
+
+    /// Starts a shell in the requested folder (new tab or split) and types the agent command
+    /// once the shell is ready (S-01, S-11, A-16).
+    fn start_agent_session(&mut self, request: &hv_ui::NewSession) {
+        let profile = hv_agents::profile::find(&self.profiles, &request.agent).cloned();
+        if let Some(p) = &profile {
+            self.last_agent.clone_from(&p.id);
+        }
+        let Some(ui) = self.ui.take() else { return };
+        let spawned = self.spawn_pane(&ui, Some(std::path::PathBuf::from(&request.folder)));
+        let mut ui = ui;
+        match spawned {
+            Ok((id, mut pane)) => {
+                if let Some(profile) = &profile {
+                    let shell = self
+                        .spec
+                        .program
+                        .clone()
+                        .unwrap_or_else(|| hv_pty::default_shell().0);
+                    let command = agent_command_line(profile, request, &shell);
+                    // Typed at the first prompt; if the shell never reports one, after 1.5 s.
+                    pane.pending_command =
+                        Some((command, Instant::now() + Duration::from_millis(1500)));
+                    pane.info.agent_id = Some(profile.id.clone());
+                    pane.info.agent_name = Some(profile.name.clone());
+                }
+                ui.panes.insert(id, pane);
+                if request.split
+                    && let Some(tab) = ui.tabs.active_mut()
+                {
+                    tab.root.split(tab.focused, id, Axis::Horizontal);
+                    tab.focused = id;
+                    tab.zoomed = false;
+                } else {
+                    ui.tabs.open(id);
+                }
+            }
+            Err(err) => log::error!("cannot start a new session: {err:#}"),
+        }
+        self.ui = Some(ui);
+        self.focus_changed();
     }
 
     /// Agent notifications due in the active window (F4-18): one per new attention state,
@@ -1583,6 +1674,12 @@ impl App {
                     }
                     SessionEvent::Term(term_event) => {
                         log::debug!("terminal event in pane {id}: {term_event:?}");
+                        // The first prompt of a pane started for an agent: type its command.
+                        if let hv_term::osc::TermEvent::PromptMark { kind: 'A', .. } = term_event
+                            && let Some((command, _)) = pane.pending_command.take()
+                        {
+                            pane.session.write(command.as_bytes());
+                        }
                         // A new prompt: work out its chips in the background.
                         if let hv_term::osc::TermEvent::PromptMark { kind: 'A', .. } = term_event
                             && self.config.shell.chips
@@ -1676,7 +1773,13 @@ impl App {
             egui::CursorIcon::Text
         };
         let Some(ui) = &mut self.ui else { return };
-        let (mut frame, out) = run_chrome(ui, self.sidebar_visible, &self.keymap, cursor);
+        let (mut frame, out) = run_chrome(
+            ui,
+            self.sidebar_visible,
+            &self.keymap,
+            &self.agent_choices,
+            cursor,
+        );
         // Clicks in the chrome.
         if let Some(row) = out.clicked_session
             && let Some(&id) = ui.row_panes.get(row)
@@ -1754,6 +1857,29 @@ impl App {
         }
         if let Some(action) = tab_action {
             self.on_tab_action(action);
+        }
+        if out.new_session_clicked {
+            self.open_new_session_dialog();
+        }
+        if let Some(request) = out.new_session.clone() {
+            self.start_agent_session(&request);
+        }
+        if let Some(agent) = out.dock_choice.clone() {
+            let folder = self
+                .ui
+                .as_ref()
+                .and_then(Ui::focused)
+                .and_then(|p| p.session.cwd())
+                .or_else(home_dir)
+                .map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            self.start_agent_session(&hv_ui::NewSession {
+                agent,
+                folder,
+                prompt: String::new(),
+                args: String::new(),
+                split: false,
+            });
         }
         if let Some(id) = out.palette_choice {
             self.pending_action = crate::keymap::PALETTE_ACTIONS
@@ -1838,10 +1964,11 @@ fn run_chrome(
     ui: &mut Ui,
     sidebar_visible: bool,
     keymap: &Keymap,
+    agents: &[hv_ui::AgentChoice],
     cursor: egui::CursorIcon,
 ) -> (hv_render::UiFrame, hv_ui::ChromeOutput) {
     let input = ui.egui.take_egui_input(&ui.window);
-    let model = ui.chrome_model(sidebar_visible, keymap);
+    let model = ui.chrome_model(sidebar_visible, keymap, agents);
     let mut out = ui.chrome.run(input, &model);
     if ui.terminal_area != Some(out.terminal_area) {
         ui.terminal_area = Some(out.terminal_area);
@@ -2116,6 +2243,19 @@ impl ApplicationHandler<AppEvent> for App {
             if let Some(action) = self.pending_action.take() {
                 self.run_action(action, event_loop);
             }
+            if let Some(ui) = &mut self.ui {
+                let now = Instant::now();
+                for pane in ui.panes.values_mut() {
+                    if pane
+                        .pending_command
+                        .as_ref()
+                        .is_some_and(|(_, at)| now >= *at)
+                        && let Some((command, _)) = pane.pending_command.take()
+                    {
+                        pane.session.write(command.as_bytes());
+                    }
+                }
+            }
             // Panes that are not drawn (background tabs, zoomed-out panes) still need their
             // expired synchronized updates closed, or their deadline stays in the past.
             if let Some(ui) = &self.ui {
@@ -2157,7 +2297,12 @@ impl App {
                 crate::model::next_elapsed_change(since, now)
             })
             .min();
-        [sync, self.bell_until, tick, ui.repaint_at]
+        let pending = ui
+            .panes
+            .values()
+            .filter_map(|p| p.pending_command.as_ref().map(|(_, at)| *at))
+            .min();
+        [sync, self.bell_until, tick, ui.repaint_at, pending]
             .into_iter()
             .flatten()
             .min()
@@ -2270,6 +2415,33 @@ fn took_text(took: Duration) -> String {
         60..3600 => format!("{}m {}s", s / 60, s % 60),
         _ => format!("{}h {}m", s / 3600, s % 3600 / 60),
     }
+}
+
+/// The user's home directory.
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(std::path::PathBuf::from)
+}
+
+/// The line typed into the shell to start an agent: its command, the extra arguments as typed,
+/// and the prompt as one quoted argument (agents that take a first prompt as an argument).
+fn agent_command_line(
+    profile: &hv_agents::profile::Profile,
+    request: &hv_ui::NewSession,
+    shell: &str,
+) -> String {
+    let mut line = profile.command.clone();
+    if !request.args.is_empty() {
+        line.push(' ');
+        line.push_str(&request.args);
+    }
+    if !request.prompt.is_empty() && profile.prompt_arg {
+        let quoting = hv_term::input::Quoting::for_program(shell);
+        line.push(' ');
+        line.push_str(&hv_term::input::quote_path(&request.prompt, quoting));
+    }
+    line.push('\r');
+    line
 }
 
 /// Grid size for a pane drawn in `area`.
@@ -2438,6 +2610,33 @@ mod tests {
         assert_eq!(group.due_summary(t0 + window, window), Some(2));
         // A new window starts fresh.
         assert!(group.admit(t0 + Duration::from_secs(30), window));
+    }
+
+    #[test]
+    fn agent_command_lines_quote_the_prompt_for_the_shell() {
+        let profiles = hv_agents::profile::builtin();
+        let claude = hv_agents::profile::find(&profiles, "claude-code").unwrap();
+        let request = |prompt: &str, args: &str| hv_ui::NewSession {
+            agent: "claude-code".into(),
+            folder: ".".into(),
+            prompt: prompt.into(),
+            args: args.into(),
+            split: false,
+        };
+        assert_eq!(
+            agent_command_line(claude, &request("", "--model opus"), "/bin/zsh"),
+            "claude --model opus\r"
+        );
+        assert_eq!(
+            agent_command_line(claude, &request("fix it's tests", ""), "pwsh.exe"),
+            "claude 'fix it''s tests'\r"
+        );
+        // Agents that do not take a prompt argument just start.
+        let aider = hv_agents::profile::find(&profiles, "aider").unwrap();
+        assert_eq!(
+            agent_command_line(aider, &request("hi", ""), "bash"),
+            "aider\r"
+        );
     }
 
     #[test]

@@ -43,14 +43,31 @@ pub(crate) struct Sidebar {
 }
 
 impl Sidebar {
-    /// Draws the sidebar. Returns the index (in `sessions`) of a clicked row.
-    pub(crate) fn show(&mut self, ui: &mut egui::Ui, sessions: &[SessionRow]) -> Option<usize> {
+    /// Draws the sidebar. Returns the index (in `sessions`) of a clicked row and whether the
+    /// New session button was pressed.
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        sessions: &[SessionRow],
+        new_session_hint: &str,
+    ) -> (Option<usize>, bool) {
         let mut clicked = None;
-        ui.label(
-            RichText::new(strings::SESSIONS)
-                .size(12.0)
-                .color(theme::TEXT_MUTED),
-        );
+        let mut new_session = false;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(strings::SESSIONS)
+                    .size(12.0)
+                    .color(theme::TEXT_MUTED),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let button = egui::Button::new(RichText::new(strings::NEW_SESSION).size(12.0))
+                    .shortcut_text(new_session_hint)
+                    .corner_radius(CornerRadius::same(6));
+                if ui.add(button).clicked() {
+                    new_session = true;
+                }
+            });
+        });
         ui.add_space(6.0);
         let search = egui::TextEdit::singleline(&mut self.query)
             .hint_text(strings::SEARCH_SESSIONS)
@@ -119,7 +136,7 @@ impl Sidebar {
                     ui.label(RichText::new(strings::NO_MATCHES).color(theme::TEXT_MUTED));
                 }
             });
-        clicked
+        (clicked, new_session)
     }
 }
 

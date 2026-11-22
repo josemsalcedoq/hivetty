@@ -59,6 +59,7 @@ pub const PALETTE_EMPTY: &str = "No matching commands";
 pub fn action_label(name: &str) -> Option<&'static str> {
     Some(match name {
         "new_tab" => "New tab",
+        "new_agent_session" => "New agent session…",
         "new_window" => "New window",
         "move_tab_to_new_window" => "Move tab to new window",
         "close_window" => "Close window",
@@ -103,3 +104,27 @@ pub const FILTER_WORKING: &str = "Working";
 pub const FILTER_DONE: &str = "Done";
 /// Shown when the search or filter hides every session.
 pub const NO_MATCHES: &str = "No matching sessions";
+/// New session button and dialog.
+pub const NEW_SESSION: &str = "New session";
+/// Dialog field labels.
+pub const FIELD_AGENT: &str = "Agent";
+/// Dialog field labels.
+pub const FIELD_FOLDER: &str = "Folder";
+/// Dialog field labels.
+pub const FIELD_PROMPT: &str = "Prompt";
+/// Dialog field labels.
+pub const FIELD_ARGUMENTS: &str = "Arguments";
+/// Dialog field labels.
+pub const FIELD_OPEN_IN: &str = "Open in";
+/// Hint in optional fields.
+pub const OPTIONAL: &str = "optional";
+/// "Open in" choices.
+pub const OPEN_NEW_TAB: &str = "New tab";
+/// "Open in" choices.
+pub const OPEN_SPLIT_RIGHT: &str = "Split right";
+/// Dialog buttons.
+pub const CREATE: &str = "Create";
+/// Dialog buttons.
+pub const CANCEL: &str = "Cancel";
+/// Shown when the folder does not exist.
+pub const FOLDER_MISSING: &str = "That folder does not exist";

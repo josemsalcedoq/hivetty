@@ -177,7 +177,9 @@ fn control_bytes_in_sources(root: &Path) -> Vec<(PathBuf, usize, u8)> {
                 && let Ok(bytes) = std::fs::read(&path)
             {
                 for (offset, &byte) in bytes.iter().enumerate() {
-                    if byte < 0x20 && !matches!(byte, b'\t' | b'\n' | b'\r') {
+                    // A CR is fine only as part of a CRLF line ending.
+                    let bare_cr = byte == b'\r' && bytes.get(offset + 1) != Some(&b'\n');
+                    if bare_cr || (byte < 0x20 && !matches!(byte, b'\t' | b'\n' | b'\r')) {
                         out.push((path.clone(), offset, byte));
                     }
                 }

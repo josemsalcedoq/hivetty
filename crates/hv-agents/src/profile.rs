@@ -65,6 +65,9 @@ pub struct Profile {
     /// Whether the command and process names were checked against a real install.
     #[serde(default)]
     pub verified: bool,
+    /// The command takes a first prompt as its last argument (`claude "fix the tests"`).
+    #[serde(default)]
+    pub prompt_arg: bool,
     /// How its live state is obtained.
     #[serde(default)]
     pub state: StateSources,

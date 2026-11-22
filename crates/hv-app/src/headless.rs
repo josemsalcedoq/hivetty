@@ -202,8 +202,28 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
                 })
                 .collect()
         };
+        let profiles = hv_agents::profile::builtin();
+        let agents = std::iter::once(hv_ui::AgentChoice {
+            id: String::new(),
+            name: hv_ui::strings::DEFAULT_TITLE.to_owned(),
+        })
+        .chain(
+            hv_agents::profile::installed(&profiles, std::env::var_os("PATH").as_deref())
+                .into_iter()
+                .map(|(p, _)| hv_ui::AgentChoice {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                }),
+        )
+        .collect();
+        let new_session_hint = keymap
+            .chord_for(&crate::keymap::Action::NewAgentSession)
+            .map(crate::keymap::Chord::pretty)
+            .unwrap_or_default();
         let model = hv_ui::ChromeModel {
             sidebar_visible: true,
+            agents,
+            new_session_hint,
             menu,
             sessions,
             tabs: vec![{

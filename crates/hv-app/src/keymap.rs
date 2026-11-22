@@ -10,6 +10,8 @@ use crate::workspace::Direction;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Action {
     NewTab,
+    /// Open the New session dialog (agent, folder, prompt).
+    NewAgentSession,
     NewWindow,
     MoveTabToNewWindow,
     CloseWindow,
@@ -48,6 +50,7 @@ impl Action {
         use Direction::{Down, Left, Right, Up};
         let action = match name {
             "new_tab" => Self::NewTab,
+            "new_agent_session" => Self::NewAgentSession,
             "new_window" => Self::NewWindow,
             "move_tab_to_new_window" => Self::MoveTabToNewWindow,
             "close_window" => Self::CloseWindow,
@@ -303,6 +306,7 @@ struct Binding {
 
 /// Actions listed in the command palette, by config name, in display order.
 pub(crate) const PALETTE_ACTIONS: &[&str] = &[
+    "new_agent_session",
     "new_tab",
     "new_window",
     "move_tab_to_new_window",
@@ -338,6 +342,7 @@ pub(crate) const PALETTE_ACTIONS: &[&str] = &[
 /// Sections of the menu (the ☰ menu, and the menu bar on macOS), by action name.
 pub(crate) const MENU_SECTIONS: &[&[&str]] = &[
     &[
+        "new_agent_session",
         "new_tab",
         "new_window",
         "split_right",
@@ -487,6 +492,7 @@ impl Keymap {
 
 const MAC: &[(&str, &str)] = &[
     ("cmd+t", "new_tab"),
+    ("shift+cmd+t", "new_agent_session"),
     ("cmd+n", "new_window"),
     ("cmd+w", "close_pane"),
     ("cmd+d", "split_right"),
@@ -517,6 +523,7 @@ const MAC: &[(&str, &str)] = &[
 
 const OTHERS: &[(&str, &str)] = &[
     ("ctrl+shift+t", "new_tab"),
+    ("ctrl+shift+a", "new_agent_session"),
     ("ctrl+shift+n", "new_window"),
     ("ctrl+shift+w", "close_pane"),
     ("ctrl+shift+d", "split_right"),

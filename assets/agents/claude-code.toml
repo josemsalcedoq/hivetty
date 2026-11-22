@@ -7,6 +7,7 @@ process_names = ["claude"]
 # Older installs run under node: match node only when its arguments mention claude.
 node_args = ["claude-code", "@anthropic-ai/claude-code"]
 verified = true
+prompt_arg = true
 
 [state]
 osc7501 = true
