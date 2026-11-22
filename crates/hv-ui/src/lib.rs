@@ -116,6 +116,8 @@ pub struct ChromeModel {
     pub confirm: Option<String>,
     /// A session being renamed: its current title (opens the rename dialog).
     pub rename: Option<String>,
+    /// A problem to tell the user about (a bad config), shown over the terminal until closed.
+    pub notice: Option<String>,
 }
 
 /// What the chrome produced this frame.
@@ -150,6 +152,8 @@ pub struct ChromeOutput {
     pub renamed: Option<Option<String>>,
     /// The first-run wizard closed: `Some(choice)` or `None` when skipped.
     pub welcome: Option<Option<WelcomeChoice>>,
+    /// The notice was closed.
+    pub notice_closed: bool,
     /// A hover card is showing (the app refreshes the usage numbers if they are old).
     pub card_shown: bool,
     /// Restore or delete an archived session (index in `archived`).
@@ -253,6 +257,7 @@ impl Chrome {
         let rename_state = &mut self.rename;
         let welcome_state = &mut self.welcome;
         let mut welcome = None;
+        let mut notice_closed = false;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
                 // Drag its right edge to resize it (S-10).
@@ -306,6 +311,9 @@ impl Chrome {
             }
             if let Some(question) = &model.confirm {
                 confirmed = confirm_dialog(ui.ctx(), question);
+            }
+            if let Some(text) = &model.notice {
+                notice_closed = notice_bar(ui.ctx(), central, text);
             }
             if let Some((text, needs_focus)) = rename_state.as_mut() {
                 renamed = rename_dialog(ui.ctx(), text, needs_focus);
@@ -367,6 +375,7 @@ impl Chrome {
             project_menu,
             renamed,
             welcome,
+            notice_closed,
             card_shown,
             archive_restore,
             archive_delete,
@@ -435,6 +444,35 @@ fn state_color(state: RowState) -> Color32 {
         RowState::Error => theme::STATE_ERROR(),
         RowState::Idle => theme::TEXT_MUTED(),
     }
+}
+
+/// A warning bar at the top of the terminal area. Returns true when closed.
+fn notice_bar(ctx: &egui::Context, area: egui::Rect, text: &str) -> bool {
+    let mut closed = false;
+    let width = (area.width() - 24.0).max(100.0);
+    egui::Area::new(egui::Id::unique("notice"))
+        .order(egui::Order::Foreground)
+        .fade_in(false)
+        .fixed_pos(area.min + egui::vec2(12.0, 8.0))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme::ELEVATED_BG())
+                .stroke(Stroke::new(1.0, theme::STATE_WAITING()))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Label::new(egui::RichText::new(text).size(12.0)).wrap());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("×").clicked() {
+                                closed = true;
+                            }
+                        });
+                    });
+                });
+        });
+    closed
 }
 
 /// The rename dialog. Enter saves, Esc cancels.
@@ -693,6 +731,7 @@ mod tests {
             archived: Vec::new(),
             confirm: None,
             rename: None,
+            notice: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
@@ -752,6 +791,7 @@ mod tests {
             archived: Vec::new(),
             confirm: None,
             rename: None,
+            notice: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),

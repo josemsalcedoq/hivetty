@@ -396,3 +396,7 @@ pub fn welcome_changes(path: &str) -> String {
 pub const WELCOME_START: &str = "Start";
 /// First-run wizard.
 pub const WELCOME_SKIP: &str = "Skip";
+/// The notice shown when config.toml has a problem (F6-02).
+pub fn config_problem(detail: &str) -> String {
+    format!("config.toml: {detail}")
+}

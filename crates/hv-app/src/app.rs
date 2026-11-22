@@ -87,7 +87,7 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
             .as_deref()
             .map_or_else(|| (hv_config::Config::default(), None), hv_config::load)
     };
-    if let Some(err) = config_error {
+    if let Some(err) = &config_error {
         log::warn!("{err}");
     }
     // An explicit `-e PROGRAM` wins over the configured shell.
@@ -127,7 +127,12 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
             .as_deref()
             .and_then(crate::saved::SavedLayout::load);
     }
-    app.keymap = keymap_from(&config);
+    let (keymap, keymap_problem) = keymap_from(&config);
+    app.keymap = keymap;
+    app.config_notice = config_error
+        .clone()
+        .or(keymap_problem)
+        .map(|e| hv_ui::strings::config_problem(&e));
     app.shell_dir = hv_config::data_dir().and_then(|dir| {
         hv_shell::install(&dir.join("shell"))
             .map_err(|err| log::warn!("shell integration unavailable: {err}"))
@@ -188,12 +193,14 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
 }
 
 /// The default shortcuts with the user's `[keybindings]` applied.
-fn keymap_from(config: &hv_config::Config) -> Keymap {
+/// The keymap with the config's overrides, and the first problem with them (to tell the user).
+fn keymap_from(config: &hv_config::Config) -> (Keymap, Option<String>) {
     let (keymap, errors) = Keymap::defaults().with_overrides(&config.keybindings);
-    for err in errors {
+    for err in &errors {
         log::warn!("keybindings: {err}");
     }
-    keymap
+    let problem = errors.first().map(|e| format!("keybindings: {e}"));
+    (keymap, problem)
 }
 
 /// One terminal pane.
@@ -402,6 +409,7 @@ impl Ui {
             archived: Vec::new(),
             confirm: None,
             rename: None,
+            notice: None,
             plan_limits: Vec::new(),
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
@@ -479,6 +487,8 @@ struct App {
     archive: Vec<crate::archive::ArchivedSession>,
     /// Plan limits last reported by an agent's statusline (F4-32).
     plan_limits: PlanLimits,
+    /// A problem with config.toml to show until fixed or closed (F6-02).
+    config_notice: Option<String>,
     /// The macOS menu bar (kept alive while shown).
     #[cfg(target_os = "macos")]
     menu: Option<muda::Menu>,
@@ -567,6 +577,7 @@ impl App {
             usage: UsageState::default(),
             archive: Vec::new(),
             plan_limits: PlanLimits::default(),
+            config_notice: None,
             #[cfg(target_os = "macos")]
             menu: None,
         }
@@ -1965,6 +1976,14 @@ impl App {
 
     /// Applies a changed config file. Font and shortcut changes apply live; shell and
     /// scrollback apply to new panes.
+    /// Shows (or clears) the config problem notice in every window.
+    fn set_config_notice(&mut self, problem: Option<String>) {
+        self.config_notice = problem.map(|e| hv_ui::strings::config_problem(&e));
+        for ui in self.ui.iter().chain(self.parked.values()) {
+            ui.window.request_redraw();
+        }
+    }
+
     fn reload_config(&mut self) {
         let Some(path) = &self.config_path else {
             return;
@@ -1972,6 +1991,7 @@ impl App {
         let (config, error) = hv_config::load(path);
         if let Some(err) = error {
             log::warn!("{err}");
+            self.set_config_notice(Some(err));
             return; // keep the last good config
         }
         for id in self.window_ids() {
@@ -1981,7 +2001,9 @@ impl App {
                 apply_font(ui, &config.font);
             }
         }
-        self.keymap = keymap_from(&config);
+        let (keymap, keymap_problem) = keymap_from(&config);
+        self.keymap = keymap;
+        self.set_config_notice(keymap_problem);
         let system_light = self
             .ui
             .as_ref()
@@ -2175,6 +2197,7 @@ impl App {
                 usage_data: usage_data.as_deref(),
                 archived,
                 plan_limits: self.plan_limits.lines(),
+                notice: self.config_notice.clone(),
             },
             cursor,
         );
@@ -2297,6 +2320,9 @@ impl App {
         }
         if let Some((row, choice)) = out.session_menu {
             self.on_session_menu(row, choice);
+        }
+        if out.notice_closed {
+            self.set_config_notice(None);
         }
         if let Some(choice) = out.welcome {
             // The config file it writes is picked up by the config watcher.
@@ -2485,6 +2511,7 @@ struct ChromeExtra<'a> {
     usage_data: Option<&'a UsageData>,
     archived: Vec<hv_ui::ArchivedRow>,
     plan_limits: Vec<String>,
+    notice: Option<String>,
 }
 
 fn run_chrome(
@@ -2500,6 +2527,7 @@ fn run_chrome(
     model.usage = extra.usage;
     model.archived = extra.archived;
     model.plan_limits = extra.plan_limits;
+    model.notice = extra.notice;
     model.confirm = ui
         .confirm_close
         .map(|_| hv_ui::strings::CONFIRM_CLOSE.to_owned());
