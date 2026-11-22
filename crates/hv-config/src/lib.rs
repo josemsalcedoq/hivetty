@@ -21,6 +21,34 @@ pub struct Config {
     pub shell: Shell,
     /// Terminal behaviour.
     pub terminal: Terminal,
+    /// Shortcut overrides, applied on top of the defaults (docs/keybindings.md).
+    pub keybindings: Vec<KeyBinding>,
+}
+
+/// One `[[keybindings]]` entry.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyBinding {
+    /// Chord, e.g. `"primary+shift+t"` (primary = Cmd on macOS, Ctrl elsewhere).
+    pub key: String,
+    /// What it does.
+    pub action: BindingAction,
+    /// Optional condition, e.g. `"os == 'windows'"` or `"search_open"`.
+    #[serde(default)]
+    pub when: Option<String>,
+}
+
+/// The action of a key binding: a named action or text to send to the program.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum BindingAction {
+    /// `action = "split_right"` (or `"none"` to unbind).
+    Named(String),
+    /// `action = { send_text = "\u001b\r" }` (ESC + CR).
+    SendText {
+        /// Bytes to write to the focused terminal.
+        send_text: String,
+    },
 }
 
 /// `[font]`

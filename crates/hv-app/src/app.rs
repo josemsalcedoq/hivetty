@@ -1,35 +1,43 @@
-//! The window: winit event loop wired to one terminal session and the GPU renderer.
+//! The window: winit event loop wired to tabs of split panes (one terminal session each), the
+//! egui chrome and the GPU renderer.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use hv_render::Renderer;
+use hv_render::{PaneView, Renderer};
 use hv_term::input::{
     Key as TermKey, Mods, MouseAction, MouseButton as TermButton, encode_key, encode_mouse,
 };
-use std::time::{Duration, Instant};
-
+use hv_term::links::{self, LinkTarget};
 use hv_term::{GridSize, SelectKind, Session, SessionEvent, SpawnSpec};
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::dpi::{PhysicalPosition, PhysicalSize as PhysSize};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{
     ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{Window, WindowId};
 
-use hv_term::links::{self, LinkTarget};
+use crate::keymap::{Action, Chord, Keymap};
+use crate::model::SessionInfo;
+use crate::workspace::{Axis, Direction, Divider, Layout, PaneId, Tabs};
 
 const DEFAULT_FONT_SIZE: f32 = 14.0;
 const APP_TITLE: &str = "hivetty";
+/// Share of a split moved by one resize shortcut.
+const RESIZE_STEP: f32 = 0.05;
+/// Extra pixels on each side of a divider that still grab it (6 px zone, docs/ui-spec.md 5).
+const DIVIDER_SLACK: f32 = 3.0;
 
 /// Events sent to the UI thread from other threads.
 #[derive(Debug)]
 pub(crate) enum AppEvent {
-    /// The PTY reader produced output or an event.
+    /// A PTY reader produced output or an event.
     Wakeup,
     /// The config file changed on disk.
     ConfigChanged,
@@ -45,7 +53,7 @@ impl From<egui_winit::accesskit_winit::Event> for AppEvent {
     }
 }
 
-/// Runs the terminal window until the shell exits or the window is closed.
+/// Runs the terminal window until the last pane exits or the window is closed.
 pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result<()> {
     let event_loop = EventLoop::<AppEvent>::with_user_event()
         .build()
@@ -81,16 +89,11 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
         })
     };
     match &ipc {
-        Ok(server) => {
-            spec.env.extend(server.endpoint().env());
-            spec.env.push((
-                hv_ipc::ENV_SESSION.to_owned(),
-                crate::model::SESSION_ID.to_owned(),
-            ));
-        }
+        Ok(server) => spec.env.extend(server.endpoint().env()),
         Err(err) => log::warn!("agent hooks disabled: cannot start IPC: {err}"),
     }
     let mut app = App::new(spec, proxy);
+    app.keymap = keymap_from(&config);
     app.config = config;
     app.config_path = config_path;
     app.record = record;
@@ -101,71 +104,138 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
     Ok(())
 }
 
+/// The default shortcuts with the user's `[keybindings]` applied.
+fn keymap_from(config: &hv_config::Config) -> Keymap {
+    let (keymap, errors) = Keymap::defaults().with_overrides(&config.keybindings);
+    for err in errors {
+        log::warn!("keybindings: {err}");
+    }
+    keymap
+}
+
+/// One terminal pane.
+struct Pane {
+    session: Session,
+    info: SessionInfo,
+    /// Where it was laid out last, to resize the PTY only when it changes.
+    area: Option<[f32; 4]>,
+}
+
 struct Ui {
     window: Arc<Window>,
     renderer: Renderer,
-    session: Session,
-    /// Sidebar and other egui chrome (SP-3, ADR 0003).
+    /// Sidebar, tab bar and other egui chrome (SP-3, ADR 0003).
     chrome: hv_ui::Chrome,
     egui: egui_winit::State,
-    /// What the sidebar shows about the session.
-    info: crate::model::SessionInfo,
-    /// Grid area egui left last frame, in physical pixels.
+    panes: HashMap<PaneId, Pane>,
+    tabs: Tabs,
+    /// Pane areas and dividers of the active tab, from the last frame.
+    layout: Layout,
+    /// Space egui left for the terminals last frame, in physical pixels.
     terminal_area: Option<[f32; 4]>,
+    /// Sidebar row index → pane, from the last frame.
+    row_panes: Vec<PaneId>,
 }
 
 impl Ui {
-    /// Whether a point (physical pixels) is over the chrome rather than the terminal.
+    fn focused_id(&self) -> Option<PaneId> {
+        self.tabs.focused()
+    }
+
+    fn focused(&self) -> Option<&Pane> {
+        self.panes.get(&self.focused_id()?)
+    }
+
+    fn pane(&self, id: PaneId) -> Option<&Pane> {
+        self.panes.get(&id)
+    }
+
+    /// Whether a point (physical pixels) is over the chrome rather than the terminals.
     fn over_chrome(&self, x: f32, y: f32) -> bool {
         self.terminal_area
             .is_some_and(|[ax, ay, aw, ah]| x < ax || y < ay || x >= ax + aw || y >= ay + ah)
     }
 
-    /// Runs the chrome for this frame, applies a changed grid area and returns what to paint.
-    fn run_chrome(
-        &mut self,
-        sidebar_visible: bool,
-        cursor: egui::CursorIcon,
-    ) -> hv_render::UiFrame {
-        let input = self.egui.take_egui_input(&self.window);
-        let model = hv_ui::ChromeModel {
-            sidebar_visible,
-            sessions: vec![crate::model::session_row(
-                &self.info,
-                self.session.cwd().as_deref(),
-            )],
+    /// Width of the line between panes.
+    fn gap(&self) -> f32 {
+        (self.window.scale_factor() as f32).round().max(1.0)
+    }
+
+    /// Lays out the active tab and resizes the PTYs whose area changed.
+    fn relayout(&mut self) {
+        let (Some(area), Some(tab)) = (self.terminal_area, self.tabs.active()) else {
+            self.layout = Layout::default();
+            return;
         };
-        let mut out = self.chrome.run(input, &model);
-        if self.terminal_area != Some(out.terminal_area) {
-            self.terminal_area = Some(out.terminal_area);
-            self.renderer.set_grid_area(Some(out.terminal_area));
-            self.session.resize(grid_size(&self.renderer));
-        }
-        let ppp = out.full.pixels_per_point;
-        let pointer_over_terminal = self
-            .chrome
-            .context()
-            .pointer_latest_pos()
-            .is_some_and(|p| !self.over_chrome(p.x * ppp, p.y * ppp));
-        if pointer_over_terminal {
-            out.full.platform_output.cursor_icon = cursor;
-        }
-        let platform = std::mem::take(&mut out.full.platform_output);
-        self.egui.handle_platform_output(&self.window, platform);
-        if out
-            .full
-            .viewport_output
-            .values()
-            .any(|v| v.repaint_delay.is_zero())
-        {
-            self.window.request_redraw();
-        }
-        hv_render::UiFrame {
-            primitives: self.chrome.tessellate(out.full.shapes, ppp),
-            textures: out.full.textures_delta,
-            pixels_per_point: ppp,
+        self.layout = tab.layout(area, self.gap());
+        for (id, area) in &self.layout.panes {
+            if let Some(pane) = self.panes.get_mut(id)
+                && pane.area != Some(*area)
+            {
+                pane.area = Some(*area);
+                pane.session.resize(grid_size_in(&self.renderer, *area));
+            }
         }
     }
+
+    /// Resizes every laid-out pane again (after a font or DPI change).
+    fn resize_all(&mut self) {
+        for pane in self.panes.values_mut() {
+            pane.area = None;
+        }
+        self.relayout();
+    }
+
+    /// The sidebar and tab bar contents.
+    fn chrome_model(&mut self, sidebar_visible: bool) -> hv_ui::ChromeModel {
+        let focused = self.focused_id();
+        let mut sessions = Vec::new();
+        self.row_panes.clear();
+        let mut tabs = Vec::new();
+        for (index, tab) in self.tabs.list.iter().enumerate() {
+            let mut most_urgent = hv_ui::RowState::Idle;
+            for id in tab.root.panes() {
+                let Some(pane) = self.panes.get(&id) else {
+                    continue;
+                };
+                let mut row = crate::model::session_row(&pane.info, pane.session.cwd().as_deref());
+                row.focused = Some(id) == focused;
+                most_urgent = more_urgent(most_urgent, row.state);
+                sessions.push(row);
+                self.row_panes.push(id);
+            }
+            let title = tab.title_override.clone().unwrap_or_else(|| {
+                self.panes
+                    .get(&tab.focused)
+                    .and_then(|p| p.info.title.clone())
+                    .filter(|t| !t.trim().is_empty())
+                    .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned())
+            });
+            tabs.push(hv_ui::TabItem {
+                title,
+                state: most_urgent,
+                active: index == self.tabs.active,
+            });
+        }
+        hv_ui::ChromeModel {
+            sessions,
+            sidebar_visible,
+            tabs,
+        }
+    }
+}
+
+/// Which of two states the tab dot shows: the one that needs the user most.
+fn more_urgent(a: hv_ui::RowState, b: hv_ui::RowState) -> hv_ui::RowState {
+    use hv_ui::RowState::{Done, Error, Idle, Waiting, Working};
+    let rank = |s| match s {
+        Waiting => 4,
+        Error => 3,
+        Done => 2,
+        Working => 1,
+        Idle => 0,
+    };
+    if rank(b) > rank(a) { b } else { a }
 }
 
 struct App {
@@ -173,6 +243,7 @@ struct App {
     proxy: EventLoopProxy<AppEvent>,
     wake_pending: Arc<AtomicBool>,
     ui: Option<Ui>,
+    next_pane: PaneId,
     modifiers: ModifiersState,
     scroll_remainder: f32,
     fatal: Option<anyhow::Error>,
@@ -181,9 +252,10 @@ struct App {
     ime_composing: bool,
     config: hv_config::Config,
     config_path: Option<std::path::PathBuf>,
-    /// Scrollback search in progress (F1-21).
+    keymap: Keymap,
+    /// Scrollback search in progress in the focused pane (F1-21).
     search: Option<SearchUi>,
-    /// `--record` target.
+    /// `--record` target (first pane only).
     record: Option<std::path::PathBuf>,
     /// Visual bell: flash the window until this instant (F1-23).
     bell_until: Option<Instant>,
@@ -210,19 +282,25 @@ impl SearchUi {
     }
 }
 
-/// Pointer position and click tracking for selection.
+/// Pointer position and click tracking.
 #[derive(Default)]
 struct MouseState {
     x: f32,
     y: f32,
+    /// Pane that owns the current press (selection drag or reported button).
+    pane: Option<PaneId>,
     selecting: bool,
     last_click: Option<(Instant, usize, usize)>,
     click_count: u8,
-    /// Link under the pointer while the link modifier is held: `(row, start, end, target)`.
-    hover_link: Option<(usize, usize, usize, LinkTarget)>,
+    /// Link under the pointer while the link modifier is held: `(pane, row, start, end, target)`.
+    hover_link: Option<(PaneId, usize, usize, usize, LinkTarget)>,
     /// Button held while reporting to the program, and the last cell reported.
     reported_button: Option<TermButton>,
     last_reported_cell: Option<(usize, usize)>,
+    /// Divider being dragged.
+    dragging: Option<Divider>,
+    /// Divider under the pointer (for the resize cursor).
+    over_divider: Option<Axis>,
 }
 
 /// How long the visual bell flashes.
@@ -238,6 +316,7 @@ impl App {
             proxy,
             wake_pending: Arc::new(AtomicBool::new(false)),
             ui: None,
+            next_pane: 1,
             modifiers: ModifiersState::empty(),
             scroll_remainder: 0.0,
             fatal: None,
@@ -245,6 +324,7 @@ impl App {
             ime_composing: false,
             config: hv_config::Config::default(),
             config_path: None,
+            keymap: Keymap::defaults(),
             search: None,
             record: None,
             bell_until: None,
@@ -275,25 +355,6 @@ impl App {
             DEFAULT_FONT_SIZE,
         )?;
         log::info!("renderer: {}", renderer.adapter_description());
-
-        let grid = grid_size(&renderer);
-        let proxy = self.proxy.clone();
-        let pending = Arc::clone(&self.wake_pending);
-        let wake = move || {
-            // Coalesce: one pending wakeup is enough, the UI drains everything at once.
-            if !pending.swap(true, Ordering::AcqRel) {
-                let _ = proxy.send_event(AppEvent::Wakeup);
-            }
-        };
-        let session = Session::spawn(
-            &self.spec,
-            grid,
-            self.config.terminal.scrollback_lines,
-            wake,
-        )?;
-        if let Some(path) = &self.record {
-            session.start_recording(path, grid)?;
-        }
         let chrome = hv_ui::Chrome::new();
         let mut egui = egui_winit::State::new(
             chrome.context().clone(),
@@ -308,78 +369,251 @@ impl App {
         let mut ui = Ui {
             window,
             renderer,
-            session,
             chrome,
             egui,
-            info: crate::model::SessionInfo::new(),
+            panes: HashMap::new(),
+            tabs: Tabs::default(),
+            layout: Layout::default(),
             terminal_area: None,
+            row_panes: Vec::new(),
         };
         apply_font(&mut ui, &self.config.font);
+        let first = self.spawn_pane(&ui, None)?;
+        if let Some(path) = self.record.take() {
+            first
+                .1
+                .session
+                .start_recording(&path, grid_size_in(&ui.renderer, [0.0, 0.0, 1.0, 1.0]))?;
+        }
+        ui.panes.insert(first.0, first.1);
+        ui.tabs.open(first.0);
         Ok(ui)
     }
 
-    fn on_key(&mut self, event: &KeyEvent) {
+    /// Starts a new terminal in `cwd` (or the default directory).
+    fn spawn_pane(&mut self, ui: &Ui, cwd: Option<std::path::PathBuf>) -> Result<(PaneId, Pane)> {
+        let id = self.next_pane;
+        self.next_pane += 1;
+        let mut spec = self.spec.clone();
+        if cwd.is_some() {
+            spec.cwd = cwd;
+        }
+        spec.env
+            .push((hv_ipc::ENV_SESSION.to_owned(), id.to_string()));
+        let proxy = self.proxy.clone();
+        let pending = Arc::clone(&self.wake_pending);
+        let wake = move || {
+            // Coalesce: one pending wakeup is enough, the UI drains every pane at once.
+            if !pending.swap(true, Ordering::AcqRel) {
+                let _ = proxy.send_event(AppEvent::Wakeup);
+            }
+        };
+        let area =
+            ui.terminal_area
+                .unwrap_or([0.0, 0.0, ui.window.inner_size().width as f32, 600.0]);
+        let session = Session::spawn(
+            &spec,
+            grid_size_in(&ui.renderer, area),
+            self.config.terminal.scrollback_lines,
+            wake,
+        )?;
+        Ok((
+            id,
+            Pane {
+                session,
+                info: SessionInfo::new(),
+                area: None,
+            },
+        ))
+    }
+
+    /// The pane under the pointer, or the one that owns the current press.
+    fn pointer_pane(&self) -> Option<(PaneId, [f32; 4])> {
+        let ui = self.ui.as_ref()?;
+        let id = self
+            .mouse
+            .pane
+            .or_else(|| ui.layout.pane_at(self.mouse.x, self.mouse.y))?;
+        Some((id, ui.layout.area(id)?))
+    }
+
+    fn run_action(&mut self, action: Action, event_loop: &ActiveEventLoop) {
         let Some(ui) = &mut self.ui else { return };
-        if event.state != ElementState::Pressed || self.ime_composing {
+        match action {
+            Action::NewTab | Action::SplitRight | Action::SplitDown => {
+                let cwd = ui.focused().and_then(|p| p.session.cwd());
+                let Some(ui) = self.ui.take() else { return };
+                let spawned = self.spawn_pane(&ui, cwd);
+                let mut ui = ui;
+                match spawned {
+                    Ok((id, pane)) => {
+                        ui.panes.insert(id, pane);
+                        if action == Action::NewTab {
+                            ui.tabs.open(id);
+                        } else if let Some(tab) = ui.tabs.active_mut() {
+                            let axis = if action == Action::SplitRight {
+                                Axis::Horizontal
+                            } else {
+                                Axis::Vertical
+                            };
+                            tab.root.split(tab.focused, id, axis);
+                            tab.focused = id;
+                            tab.zoomed = false;
+                        }
+                    }
+                    Err(err) => log::error!("cannot start a new terminal: {err:#}"),
+                }
+                self.ui = Some(ui);
+                self.focus_changed();
+            }
+            Action::ClosePane => {
+                if let Some(id) = ui.focused_id() {
+                    self.close_pane(id, event_loop);
+                }
+            }
+            Action::FocusPane(dir) => {
+                if let Some(from) = ui.focused_id()
+                    && let Some(to) = crate::workspace::neighbor(&ui.layout, from, dir)
+                {
+                    ui.tabs.focus_pane(to);
+                    self.focus_changed();
+                }
+            }
+            Action::ResizePane(dir) => {
+                if let Some(tab) = ui.tabs.active_mut() {
+                    let (axis, delta) = match dir {
+                        Direction::Left => (Axis::Horizontal, -RESIZE_STEP),
+                        Direction::Right => (Axis::Horizontal, RESIZE_STEP),
+                        Direction::Up => (Axis::Vertical, -RESIZE_STEP),
+                        Direction::Down => (Axis::Vertical, RESIZE_STEP),
+                    };
+                    let focused = tab.focused;
+                    tab.root.resize(focused, axis, delta);
+                    ui.relayout();
+                }
+            }
+            Action::ToggleZoom => {
+                if let Some(tab) = ui.tabs.active_mut() {
+                    tab.zoomed = !tab.zoomed;
+                    ui.relayout();
+                }
+            }
+            Action::NextTab => {
+                ui.tabs.cycle(1);
+                self.focus_changed();
+            }
+            Action::PreviousTab => {
+                ui.tabs.cycle(-1);
+                self.focus_changed();
+            }
+            Action::GoToTab(n) => {
+                if n < ui.tabs.list.len() {
+                    ui.tabs.active = n;
+                    self.focus_changed();
+                }
+            }
+            Action::ToggleSidebar => self.sidebar_visible = !self.sidebar_visible,
+            Action::Find => {
+                self.search = Some(SearchUi::default());
+                self.refresh_search_bar();
+            }
+            Action::Copy => {
+                if let Some(pane) = ui.focused() {
+                    copy_selection(&pane.session);
+                }
+            }
+            Action::Paste => {
+                if let Some(pane) = ui.focused() {
+                    paste_clipboard(&pane.session);
+                }
+            }
+            Action::FontBigger => zoom(ui, 1.0),
+            Action::FontSmaller => zoom(ui, -1.0),
+            Action::FontReset => zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size()),
+            Action::SendText(text) => {
+                if let Some(pane) = ui.focused() {
+                    pane.session.scroll_to_bottom();
+                    pane.session.write(text.as_bytes());
+                }
+            }
+            Action::None => {}
+        }
+        if let Some(ui) = &self.ui {
+            ui.window.request_redraw();
+        }
+    }
+
+    /// Kills a pane and removes it; exits when it was the last one.
+    fn close_pane(&mut self, id: PaneId, event_loop: &ActiveEventLoop) {
+        let Some(ui) = &mut self.ui else { return };
+        if let Some(pane) = ui.panes.remove(&id) {
+            pane.session.kill();
+        }
+        if ui.tabs.remove_pane(id) {
+            event_loop.exit();
+            return;
+        }
+        if self.mouse.pane == Some(id) {
+            self.mouse.pane = None;
+            self.mouse.selecting = false;
+        }
+        self.focus_changed();
+    }
+
+    /// Something else has the focus now: close the search, retitle the window, relayout.
+    fn focus_changed(&mut self) {
+        if self.search.is_some() {
+            if let Some(pane) = self.ui.as_ref().and_then(Ui::focused) {
+                pane.session.search_clear();
+            }
+            self.search = None;
+            self.refresh_search_bar();
+        }
+        self.mouse.hover_link = None;
+        if let Some(ui) = &mut self.ui {
+            let title = ui
+                .focused()
+                .and_then(|p| p.info.title.clone())
+                .unwrap_or_else(|| APP_TITLE.to_owned());
+            ui.window.set_title(&title);
+            ui.renderer.set_preedit(None);
+            ui.relayout();
+            ui.window.request_redraw();
+        }
+    }
+
+    fn on_key(&mut self, event: &KeyEvent, event_loop: &ActiveEventLoop) {
+        if event.state != ElementState::Pressed || self.ime_composing || self.ui.is_none() {
+            return;
+        }
+        let ctx = crate::keymap::Context {
+            search_open: self.search.is_some(),
+            agent: None,
+        };
+        if let Some(chord) = pressed_chord(event, self.modifiers)
+            && let Some(action) = self.keymap.lookup(&chord, &ctx)
+        {
+            self.run_action(action, event_loop);
             return;
         }
         if self.search.is_some() {
             self.on_search_key(event);
             return;
         }
+        let Some(ui) = &mut self.ui else { return };
+        let Some(pane) = ui.focused() else { return };
+        let session = &pane.session;
         let m = self.modifiers;
-        // The app's own shortcut modifier: Cmd on macOS, Ctrl+Shift elsewhere (docs/keybindings.md).
-        let primary = if cfg!(target_os = "macos") {
-            m.super_key()
-        } else {
-            m.control_key() && m.shift_key()
-        };
-
-        if primary && let Key::Character(c) = &event.logical_key {
-            match c.to_lowercase().as_str() {
-                "b" => {
-                    self.sidebar_visible = !self.sidebar_visible;
-                    ui.window.request_redraw();
-                    return;
-                }
-                "f" => {
-                    self.search = Some(SearchUi::default());
-                    self.refresh_search_bar();
-                    return;
-                }
-                "c" => {
-                    copy_selection(&ui.session);
-                    return;
-                }
-                "v" => {
-                    paste_clipboard(&ui.session);
-                    return;
-                }
-                "=" | "+" => {
-                    zoom(ui, 1.0);
-                    return;
-                }
-                "-" => {
-                    zoom(ui, -1.0);
-                    return;
-                }
-                "0" => {
-                    zoom(ui, DEFAULT_FONT_SIZE - ui.renderer.font_size());
-                    return;
-                }
-                _ => {}
-            }
-        }
         // Windows convention: Ctrl+C copies when there is a selection, otherwise it is ^C.
         if cfg!(windows)
             && m.control_key()
             && !m.shift_key()
             && !m.alt_key()
             && matches!(&event.logical_key, Key::Character(c) if c.eq_ignore_ascii_case("c"))
-            && ui.session.selection_text().is_some()
+            && session.selection_text().is_some()
         {
-            copy_selection(&ui.session);
-            ui.session.select_clear();
+            copy_selection(session);
+            session.select_clear();
             ui.window.request_redraw();
             return;
         }
@@ -405,39 +639,35 @@ impl App {
         } else {
             mods
         };
-        if let Some(bytes) = encode_key(&key, mods, ui.session.key_modes()) {
-            ui.session.select_clear();
-            ui.session.scroll_to_bottom();
-            ui.session.write(&bytes);
+        if let Some(bytes) = encode_key(&key, mods, session.key_modes()) {
+            session.select_clear();
+            session.scroll_to_bottom();
+            session.write(&bytes);
         }
     }
 
     fn on_ime(&mut self, ime: Ime) {
+        let Some(ui) = &mut self.ui else { return };
         match ime {
             Ime::Preedit(text, _) => {
                 self.ime_composing = !text.is_empty();
-                if let Some(ui) = &mut self.ui {
-                    ui.renderer.set_preedit(Some(&text));
-                    ui.window.request_redraw();
-                }
+                ui.renderer.set_preedit(Some(&text));
             }
             Ime::Commit(text) => {
                 self.ime_composing = false;
-                if let Some(ui) = &mut self.ui {
-                    ui.renderer.set_preedit(None);
-                    ui.session.select_clear();
-                    ui.session.scroll_to_bottom();
-                    ui.session.write(text.as_bytes());
+                ui.renderer.set_preedit(None);
+                if let Some(pane) = ui.focused() {
+                    pane.session.select_clear();
+                    pane.session.scroll_to_bottom();
+                    pane.session.write(text.as_bytes());
                 }
             }
             Ime::Enabled | Ime::Disabled => {
                 self.ime_composing = false;
-                if let Some(ui) = &mut self.ui {
-                    ui.renderer.set_preedit(None);
-                    ui.window.request_redraw();
-                }
+                ui.renderer.set_preedit(None);
             }
         }
+        ui.window.request_redraw();
     }
 
     fn current_mods(&self) -> Mods {
@@ -448,21 +678,27 @@ impl App {
         }
     }
 
-    /// Sends a mouse event to the program if it asked for them (and Shift is not held).
-    /// Returns true if the event was consumed by reporting.
+    /// Sends a mouse event to the program under the pointer if it asked for them (and Shift
+    /// is not held). Returns true if the event was consumed by reporting.
     fn report_mouse(&mut self, button: TermButton, action: MouseAction) -> bool {
+        let Some((id, area)) = self.pointer_pane() else {
+            return false;
+        };
         let Some(ui) = &self.ui else { return false };
-        let modes = ui.session.mouse_modes();
+        let Some(pane) = ui.pane(id) else {
+            return false;
+        };
+        let modes = pane.session.mouse_modes();
         if !modes.any() || self.modifiers.shift_key() {
             return false;
         }
-        let (row, col, _) = ui.renderer.cell_at(self.mouse.x, self.mouse.y);
+        let (row, col, _) = ui.renderer.cell_at_in(area, self.mouse.x, self.mouse.y);
         if action == MouseAction::Motion && self.mouse.last_reported_cell == Some((row, col)) {
             return true;
         }
         self.mouse.last_reported_cell = Some((row, col));
         if let Some(bytes) = encode_mouse(button, action, row, col, self.current_mods(), modes) {
-            ui.session.write(&bytes);
+            pane.session.write(&bytes);
         }
         true
     }
@@ -476,14 +712,14 @@ impl App {
         }
     }
 
-    /// Recomputes which link (if any) is under the pointer and updates the mouse cursor.
+    /// Recomputes which link (if any) is under the pointer.
     fn update_hover_link(&mut self) {
-        let hover = match (&self.ui, self.link_modifier()) {
-            (Some(ui), true) => {
-                let (row, col, _) = ui.renderer.cell_at(self.mouse.x, self.mouse.y);
-                let snap = ui.session.snapshot();
-                link_at(&snap, row, col)
-            }
+        let hover = match (self.link_modifier(), self.pointer_pane(), &self.ui) {
+            (true, Some((id, area)), Some(ui)) => ui.pane(id).and_then(|pane| {
+                let (row, col, _) = ui.renderer.cell_at_in(area, self.mouse.x, self.mouse.y);
+                let snap = pane.session.snapshot();
+                link_at(&snap, row, col).map(|(r, s, e, t)| (id, r, s, e, t))
+            }),
             _ => None,
         };
         if hover != self.mouse.hover_link {
@@ -500,16 +736,18 @@ impl App {
         let (Some(ui), Some(search)) = (&self.ui, &mut self.search) else {
             return;
         };
+        let Some(pane) = ui.focused() else { return };
+        let session = &pane.session;
         let mut changed = false;
         match &event.logical_key {
             Key::Named(NamedKey::Escape) => {
-                ui.session.search_clear();
+                session.search_clear();
                 self.search = None;
                 self.refresh_search_bar();
                 return;
             }
             Key::Named(NamedKey::Enter) => {
-                let found = ui.session.search_step(!self.modifiers.shift_key());
+                let found = session.search_step(!self.modifiers.shift_key());
                 search.result = Some(Ok(found));
             }
             Key::Named(NamedKey::Backspace) => {
@@ -526,7 +764,7 @@ impl App {
             }
         }
         if changed {
-            search.result = (!search.query.is_empty()).then(|| ui.session.search(&search.query));
+            search.result = (!search.query.is_empty()).then(|| session.search(&search.query));
         }
         self.refresh_search_bar();
     }
@@ -539,9 +777,14 @@ impl App {
         }
     }
 
-    /// A file dropped on the window: insert its path, quoted for the running shell.
+    /// A file dropped on the window: insert its path, quoted for the shell, into the pane under
+    /// the pointer.
     fn on_drop(&mut self, path: &std::path::Path) {
+        let target = self.pointer_pane().map(|(id, _)| id);
         let Some(ui) = &self.ui else { return };
+        let Some(pane) = target.and_then(|id| ui.pane(id)).or_else(|| ui.focused()) else {
+            return;
+        };
         let program = self
             .spec
             .program
@@ -549,24 +792,45 @@ impl App {
             .unwrap_or_else(|| hv_pty::default_shell().0);
         let quoting = hv_term::input::Quoting::for_program(&program);
         let text = hv_term::input::quote_path(&path.to_string_lossy(), quoting);
-        ui.session.paste(&format!("{text} "));
+        pane.session.paste(&format!("{text} "));
         ui.window.focus_window();
     }
 
     fn on_mouse_button(&mut self, state: ElementState, button: MouseButton) {
-        // Presses on the sidebar belong to egui; releases still end a selection drag.
-        if state == ElementState::Pressed
-            && self
+        let Some(ui) = &mut self.ui else { return };
+        if state == ElementState::Released {
+            self.mouse.dragging = None;
+        }
+        if state == ElementState::Pressed {
+            // Presses on the sidebar and tab bar belong to egui.
+            if ui.over_chrome(self.mouse.x, self.mouse.y) {
+                return;
+            }
+            if button == MouseButton::Left
+                && let Some(divider) =
+                    ui.layout
+                        .divider_at(self.mouse.x, self.mouse.y, DIVIDER_SLACK)
+            {
+                self.mouse.dragging = Some(divider.clone());
+                return;
+            }
+            // A click focuses the pane under the pointer.
+            if let Some(id) = ui.layout.pane_at(self.mouse.x, self.mouse.y)
+                && ui.focused_id() != Some(id)
+            {
+                ui.tabs.focus_pane(id);
+                self.focus_changed();
+            }
+            self.mouse.pane = self
                 .ui
                 .as_ref()
-                .is_some_and(|ui| ui.over_chrome(self.mouse.x, self.mouse.y))
-        {
-            return;
+                .and_then(|ui| ui.layout.pane_at(self.mouse.x, self.mouse.y));
         }
         if button == MouseButton::Left && state == ElementState::Pressed && self.link_modifier() {
             self.update_hover_link();
-            if let (Some((.., target)), Some(ui)) = (self.mouse.hover_link.clone(), &self.ui) {
-                open_link(&target, ui.session.cwd().as_deref());
+            if let (Some((id, .., target)), Some(ui)) = (self.mouse.hover_link.clone(), &self.ui) {
+                let cwd = ui.pane(id).and_then(|p| p.session.cwd());
+                open_link(&target, cwd.as_deref());
                 return;
             }
         }
@@ -583,26 +847,36 @@ impl App {
         };
         if self.report_mouse(term_button, action) {
             self.mouse.reported_button = (action == MouseAction::Press).then_some(term_button);
+            if action == MouseAction::Release {
+                self.mouse.pane = None;
+            }
             return;
         }
+        let Some((id, area)) = self.pointer_pane() else {
+            return;
+        };
         let Some(ui) = &mut self.ui else { return };
+        let Some(pane) = ui.panes.get(&id) else {
+            return;
+        };
+        let session = &pane.session;
         if button != MouseButton::Left {
             return;
         }
         if state == ElementState::Pressed
             && ui.renderer.hits_jump_to_bottom(self.mouse.x, self.mouse.y)
         {
-            ui.session.scroll_to_bottom();
+            session.scroll_to_bottom();
             ui.window.request_redraw();
             return;
         }
         // Programs that asked for mouse reporting get clicks (F1-16); Shift forces selection.
-        if ui.session.mouse_mode() && !self.modifiers.shift_key() {
+        if session.mouse_mode() && !self.modifiers.shift_key() {
             return;
         }
         match state {
             ElementState::Pressed => {
-                let (row, col, right) = ui.renderer.cell_at(self.mouse.x, self.mouse.y);
+                let (row, col, right) = ui.renderer.cell_at_in(area, self.mouse.x, self.mouse.y);
                 let now = Instant::now();
                 self.mouse.click_count = match self.mouse.last_click {
                     Some((t, r, c)) if now - t < MULTI_CLICK && r == row && c == col => {
@@ -617,17 +891,18 @@ impl App {
                     _ if self.modifiers.alt_key() => SelectKind::Block,
                     _ => SelectKind::Simple,
                 };
-                ui.session.select_start(row, col, right, kind);
+                session.select_start(row, col, right, kind);
                 if kind != SelectKind::Simple && kind != SelectKind::Block {
-                    ui.session.select_update(row, col, right);
+                    session.select_update(row, col, right);
                 }
                 self.mouse.selecting = true;
             }
             ElementState::Released => {
                 self.mouse.selecting = false;
+                self.mouse.pane = None;
                 // A plain click without dragging leaves no selection behind.
-                if self.mouse.click_count == 1 && ui.session.selection_text().is_none() {
-                    ui.session.select_clear();
+                if self.mouse.click_count == 1 && session.selection_text().is_none() {
+                    session.select_clear();
                 }
             }
         }
@@ -637,18 +912,33 @@ impl App {
     fn on_cursor_moved(&mut self, x: f32, y: f32) {
         self.mouse.x = x;
         self.mouse.y = y;
-        if let Some(ui) = &self.ui {
-            ui.window.request_redraw(); // egui hover state
+        let Some(ui) = &mut self.ui else { return };
+        ui.window.request_redraw(); // egui hover state, divider cursor
+        if let Some(divider) = &self.mouse.dragging {
+            let [sx, sy, sw, sh] = divider.span;
+            let ratio = match divider.axis {
+                Axis::Horizontal => (x - sx) / sw.max(1.0),
+                Axis::Vertical => (y - sy) / sh.max(1.0),
+            };
+            if let Some(tab) = ui.tabs.active_mut() {
+                tab.root.set_ratio(&divider.path, ratio);
+            }
+            ui.relayout();
+            return;
         }
+        self.mouse.over_divider = ui.layout.divider_at(x, y, DIVIDER_SLACK).map(|d| d.axis);
         self.update_hover_link();
         let held = self.mouse.reported_button.unwrap_or(TermButton::None);
         if self.report_mouse(held, MouseAction::Motion) {
             return;
         }
-        if let (true, Some(ui)) = (self.mouse.selecting, &self.ui) {
-            let (row, col, right) = ui.renderer.cell_at(x, y);
-            ui.session.select_update(row, col, right);
-            ui.window.request_redraw();
+        if self.mouse.selecting
+            && let Some((id, area)) = self.pointer_pane()
+            && let Some(ui) = &self.ui
+            && let Some(pane) = ui.pane(id)
+        {
+            let (row, col, right) = ui.renderer.cell_at_in(area, x, y);
+            pane.session.select_update(row, col, right);
         }
     }
 
@@ -668,7 +958,15 @@ impl App {
         if whole == 0 {
             return;
         }
-        if ui.session.mouse_modes().any() && !self.modifiers.shift_key() {
+        let Some((id, _)) = self.pointer_pane() else {
+            return;
+        };
+        let reporting = self
+            .ui
+            .as_ref()
+            .and_then(|ui| ui.pane(id))
+            .is_some_and(|p| p.session.mouse_modes().any() && !self.modifiers.shift_key());
+        if reporting {
             let button = if whole > 0 {
                 TermButton::WheelUp
             } else {
@@ -680,26 +978,27 @@ impl App {
             }
             return;
         }
-        let Some(ui) = &mut self.ui else { return };
-        if ui.session.alt_screen() {
+        let Some(ui) = &self.ui else { return };
+        let Some(pane) = ui.pane(id) else { return };
+        let session = &pane.session;
+        if session.alt_screen() {
             // Full-screen programs (vim, less, agent TUIs) get arrow keys, like xterm's alternate scroll.
             let key = if whole > 0 {
                 TermKey::Up
             } else {
                 TermKey::Down
             };
-            if let Some(bytes) = encode_key(&key, Mods::default(), ui.session.key_modes()) {
-                ui.session
-                    .write(&bytes.repeat(whole.unsigned_abs() as usize));
+            if let Some(bytes) = encode_key(&key, Mods::default(), session.key_modes()) {
+                session.write(&bytes.repeat(whole.unsigned_abs() as usize));
             }
         } else {
-            ui.session.scroll(whole);
+            session.scroll(whole);
         }
         ui.window.request_redraw();
     }
 
-    /// Applies a changed config file. Font changes apply live; shell and scrollback apply to
-    /// new sessions.
+    /// Applies a changed config file. Font and shortcut changes apply live; shell and
+    /// scrollback apply to new panes.
     fn reload_config(&mut self) {
         let Some(path) = &self.config_path else {
             return;
@@ -712,44 +1011,229 @@ impl App {
         if let Some(ui) = &mut self.ui {
             apply_font(ui, &config.font);
         }
+        self.keymap = keymap_from(&config);
         self.config = config;
     }
 
     fn handle_session_events(&mut self, event_loop: &ActiveEventLoop) {
         let Some(ui) = &mut self.ui else { return };
-        for event in ui.session.drain_events() {
-            match event {
-                SessionEvent::Title(title) => {
-                    ui.window.set_title(&title);
-                    ui.info.title = Some(title);
-                }
-                SessionEvent::ResetTitle => {
-                    ui.window.set_title(APP_TITLE);
-                    ui.info.title = None;
-                }
-                SessionEvent::Exited => event_loop.exit(),
-                SessionEvent::Bell => {
-                    ui.window.request_user_attention(Some(
-                        winit::window::UserAttentionType::Informational,
-                    ));
-                    self.bell_until = Some(Instant::now() + BELL_FLASH);
-                    ui.renderer.set_flash(true);
-                    ui.window.request_redraw();
-                }
-                SessionEvent::ClipboardStore(text) => {
-                    if let Err(err) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
-                        log::warn!("OSC 52 clipboard write failed: {err}");
+        let focused = ui.focused_id();
+        let mut exited = Vec::new();
+        let mut bell = false;
+        for (id, pane) in &mut ui.panes {
+            for event in pane.session.drain_events() {
+                match event {
+                    SessionEvent::Title(title) => {
+                        if Some(*id) == focused {
+                            ui.window.set_title(&title);
+                        }
+                        pane.info.title = Some(title);
                     }
-                }
-                SessionEvent::Term(term_event) => {
-                    log::debug!("terminal event: {term_event:?}");
-                    if ui.info.on_term_event(&term_event) {
-                        ui.window.request_redraw();
+                    SessionEvent::ResetTitle => {
+                        if Some(*id) == focused {
+                            ui.window.set_title(APP_TITLE);
+                        }
+                        pane.info.title = None;
+                    }
+                    SessionEvent::Exited => exited.push(*id),
+                    SessionEvent::Bell => bell = true,
+                    SessionEvent::ClipboardStore(text) => {
+                        if let Err(err) =
+                            arboard::Clipboard::new().and_then(|mut c| c.set_text(text))
+                        {
+                            log::warn!("OSC 52 clipboard write failed: {err}");
+                        }
+                    }
+                    SessionEvent::Term(term_event) => {
+                        log::debug!("terminal event in pane {id}: {term_event:?}");
+                        pane.info.on_term_event(&term_event);
                     }
                 }
             }
         }
+        if bell {
+            ui.window
+                .request_user_attention(Some(winit::window::UserAttentionType::Informational));
+            self.bell_until = Some(Instant::now() + BELL_FLASH);
+            ui.renderer.set_flash(true);
+        }
+        ui.window.request_redraw();
+        for id in exited {
+            self.close_pane(id, event_loop);
+        }
     }
+
+    fn redraw(&mut self) {
+        let cursor = if self.mouse.dragging.is_some() || self.mouse.over_divider.is_some() {
+            match self
+                .mouse
+                .dragging
+                .as_ref()
+                .map(|d| d.axis)
+                .or(self.mouse.over_divider)
+            {
+                Some(Axis::Horizontal) => egui::CursorIcon::ResizeHorizontal,
+                _ => egui::CursorIcon::ResizeVertical,
+            }
+        } else if self.mouse.hover_link.is_some() {
+            egui::CursorIcon::PointingHand
+        } else {
+            egui::CursorIcon::Text
+        };
+        let Some(ui) = &mut self.ui else { return };
+        let (mut frame, out) = run_chrome(ui, self.sidebar_visible, cursor);
+        // Clicks in the chrome.
+        if let Some(row) = out.clicked_session
+            && let Some(&id) = ui.row_panes.get(row)
+        {
+            ui.tabs.focus_pane(id);
+        }
+        let tab_action = out.tab_action;
+        if self.bell_until.is_some_and(|t| Instant::now() >= t) {
+            self.bell_until = None;
+            ui.renderer.set_flash(false);
+        }
+        let focused = ui.focused_id();
+        let mut snapshots = Vec::new();
+        for (id, area) in &ui.layout.panes {
+            let Some(pane) = ui.panes.get(id) else {
+                continue;
+            };
+            pane.session.flush_expired_sync();
+            let mut snap = pane.session.snapshot();
+            // Underline the link under the pointer while Ctrl/Cmd is held.
+            if let Some((link_pane, row, start, end, _)) = &self.mouse.hover_link
+                && link_pane == id
+                && *row < snap.rows
+            {
+                let cols = snap.cols;
+                for cell in &mut snap.cells[row * cols + start..row * cols + (*end).min(cols)] {
+                    cell.underline = true;
+                }
+            }
+            // Keep the IME candidate window next to the focused text cursor.
+            if Some(*id) == focused
+                && let Some(cursor) = snap.cursor
+            {
+                let (x, y, w, h) = ui.renderer.cell_rect_in(*area, cursor.row, cursor.col);
+                ui.window
+                    .set_ime_cursor_area(PhysicalPosition::new(x, y), PhysicalSize::new(w, h));
+            }
+            snapshots.push((*id, *area, snap));
+        }
+        let views: Vec<PaneView<'_>> = snapshots
+            .iter()
+            .map(|(id, area, snap)| PaneView {
+                id: *id,
+                snap,
+                area: *area,
+                focused: Some(*id) == focused,
+            })
+            .collect();
+        let dividers: Vec<[f32; 4]> = ui.layout.dividers.iter().map(|d| d.rect).collect();
+        if let Err(err) = ui
+            .renderer
+            .render_panes(&views, &dividers, Some(&mut frame))
+        {
+            log::error!("render failed: {err:#}");
+        }
+        drop(views);
+        if out.clicked_session.is_some() {
+            self.focus_changed();
+        }
+        if let Some(action) = tab_action {
+            self.on_tab_action(action);
+        }
+    }
+
+    fn on_tab_action(&mut self, action: hv_ui::TabAction) {
+        let Some(ui) = &mut self.ui else { return };
+        match action {
+            hv_ui::TabAction::Select(index) => {
+                ui.tabs.active = index.min(ui.tabs.list.len().saturating_sub(1));
+                self.focus_changed();
+            }
+            hv_ui::TabAction::Close(index) => {
+                let panes = ui
+                    .tabs
+                    .list
+                    .get(index)
+                    .map(|t| t.root.panes())
+                    .unwrap_or_default();
+                // Closing needs the event loop only to exit; the last pane exiting does that
+                // through the normal Exited path.
+                for id in panes {
+                    if let Some(pane) = ui.panes.remove(&id) {
+                        pane.session.kill();
+                    }
+                    if ui.tabs.remove_pane(id) {
+                        // Last tab: keep the window until the shell's exit event arrives.
+                        break;
+                    }
+                }
+                self.focus_changed();
+            }
+            hv_ui::TabAction::New => {
+                let cwd = ui.focused().and_then(|p| p.session.cwd());
+                let Some(ui) = self.ui.take() else { return };
+                let spawned = self.spawn_pane(&ui, cwd);
+                let mut ui = ui;
+                match spawned {
+                    Ok((id, pane)) => {
+                        ui.panes.insert(id, pane);
+                        ui.tabs.open(id);
+                    }
+                    Err(err) => log::error!("cannot start a new terminal: {err:#}"),
+                }
+                self.ui = Some(ui);
+                self.focus_changed();
+            }
+        }
+    }
+}
+
+/// Runs the chrome for this frame, lays the terminals out in the space it leaves and returns
+/// what to paint plus what the user clicked.
+fn run_chrome(
+    ui: &mut Ui,
+    sidebar_visible: bool,
+    cursor: egui::CursorIcon,
+) -> (hv_render::UiFrame, hv_ui::ChromeOutput) {
+    let input = ui.egui.take_egui_input(&ui.window);
+    let model = ui.chrome_model(sidebar_visible);
+    let mut out = ui.chrome.run(input, &model);
+    if ui.terminal_area != Some(out.terminal_area) {
+        ui.terminal_area = Some(out.terminal_area);
+        ui.renderer.set_grid_area(Some(out.terminal_area));
+    }
+    ui.relayout();
+    let ppp = out.full.pixels_per_point;
+    let pointer_over_terminal = ui
+        .chrome
+        .context()
+        .pointer_latest_pos()
+        .is_some_and(|p| !ui.over_chrome(p.x * ppp, p.y * ppp));
+    if pointer_over_terminal {
+        out.full.platform_output.cursor_icon = cursor;
+    }
+    let platform = std::mem::take(&mut out.full.platform_output);
+    ui.egui.handle_platform_output(&ui.window, platform);
+    if out
+        .full
+        .viewport_output
+        .values()
+        .any(|v| v.repaint_delay.is_zero())
+    {
+        ui.window.request_redraw();
+    }
+    let shapes = std::mem::take(&mut out.full.shapes);
+    let textures = std::mem::take(&mut out.full.textures_delta);
+    let frame = hv_render::UiFrame {
+        primitives: ui.chrome.tessellate(shapes, ppp),
+        textures,
+        pixels_per_point: ppp,
+    };
+    (frame, out)
 }
 
 impl ApplicationHandler<AppEvent> for App {
@@ -792,8 +1276,14 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             AppEvent::Hook(hook) => {
+                // Route to the pane named in HIVETTY_SESSION_ID.
+                let target = hook
+                    .session
+                    .as_deref()
+                    .and_then(|s| s.parse::<PaneId>().ok());
                 if let Some(ui) = &mut self.ui
-                    && ui.info.on_hook(&hook)
+                    && let Some(pane) = target.and_then(|id| ui.panes.get_mut(&id))
+                    && pane.info.on_hook(&hook)
                 {
                     ui.window.request_redraw();
                 }
@@ -801,9 +1291,6 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Wakeup => {
                 self.wake_pending.store(false, Ordering::Release);
                 self.handle_session_events(event_loop);
-                if let Some(ui) = &self.ui {
-                    ui.window.request_redraw();
-                }
             }
         }
     }
@@ -823,14 +1310,16 @@ impl ApplicationHandler<AppEvent> for App {
         match event {
             WindowEvent::CloseRequested => {
                 if let Some(ui) = &self.ui {
-                    ui.session.kill();
+                    for pane in ui.panes.values() {
+                        pane.session.kill();
+                    }
                 }
                 event_loop.exit();
             }
             WindowEvent::Resized(PhysicalSize { width, height }) => {
                 if let Some(ui) = &mut self.ui {
                     ui.renderer.resize(width, height);
-                    // The next frame lays out the chrome and resizes the grid to what is left.
+                    // The next frame lays out the chrome and resizes the panes to what is left.
                     ui.terminal_area = None;
                     ui.window.request_redraw();
                 }
@@ -839,6 +1328,7 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(ui) = &mut self.ui {
                     ui.renderer.set_scale(scale_factor as f32);
                     ui.terminal_area = None;
+                    ui.resize_all();
                     ui.window.request_redraw();
                 }
             }
@@ -846,7 +1336,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.modifiers = m.state();
                 self.update_hover_link();
             }
-            WindowEvent::KeyboardInput { event, .. } => self.on_key(&event),
+            WindowEvent::KeyboardInput { event, .. } => self.on_key(&event, event_loop),
             WindowEvent::Ime(ime) => self.on_ime(ime),
             WindowEvent::MouseWheel { delta, .. } => self.on_wheel(delta),
             WindowEvent::MouseInput { state, button, .. } => self.on_mouse_button(state, button),
@@ -854,63 +1344,88 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 self.on_cursor_moved(position.x as f32, position.y as f32);
             }
-            WindowEvent::RedrawRequested => {
-                if let Some(ui) = &mut self.ui {
-                    let cursor = if self.mouse.hover_link.is_some() {
-                        egui::CursorIcon::PointingHand
-                    } else {
-                        egui::CursorIcon::Text
-                    };
-                    let mut frame = ui.run_chrome(self.sidebar_visible, cursor);
-                    ui.session.flush_expired_sync();
-                    let mut snapshot = ui.session.snapshot();
-                    // Underline the link under the pointer while Ctrl/Cmd is held.
-                    if let Some((row, start, end, _)) = &self.mouse.hover_link
-                        && *row < snapshot.rows
-                    {
-                        let cols = snapshot.cols;
-                        for cell in
-                            &mut snapshot.cells[row * cols + start..row * cols + (*end).min(cols)]
-                        {
-                            cell.underline = true;
-                        }
-                    }
-                    // Keep the IME candidate window next to the text cursor.
-                    if let Some(cursor) = snapshot.cursor {
-                        let (x, y, w, h) = ui.renderer.cell_rect(cursor.row, cursor.col);
-                        ui.window
-                            .set_ime_cursor_area(PhysicalPosition::new(x, y), PhysSize::new(w, h));
-                    }
-                    if self.bell_until.is_some_and(|t| Instant::now() >= t) {
-                        self.bell_until = None;
-                        ui.renderer.set_flash(false);
-                    }
-                    if let Err(err) = ui.renderer.render_with_ui(&snapshot, Some(&mut frame)) {
-                        log::error!("render failed: {err:#}");
-                    }
-                }
-            }
+            WindowEvent::RedrawRequested => self.redraw(),
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(ui) = &self.ui else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        };
+        let now = Instant::now();
         // A synchronized update (DECSET 2026) must be flushed when its deadline passes even if
         // no more output arrives.
-        let sync = self.ui.as_ref().and_then(|ui| ui.session.sync_deadline());
-        // The sidebar's elapsed time changes every second for a minute, then every minute.
-        let tick = self
-            .ui
-            .as_ref()
+        let sync = ui
+            .panes
+            .values()
+            .filter_map(|p| p.session.sync_deadline())
+            .min();
+        // The sidebar's elapsed times change every second for a minute, then every minute.
+        let tick = ui
+            .panes
+            .values()
             .filter(|_| self.sidebar_visible)
-            .map(|ui| crate::model::next_elapsed_change(ui.info.started, Instant::now()));
+            .map(|p| {
+                let since = p.info.agent.since().unwrap_or(p.info.started);
+                crate::model::next_elapsed_change(since, now)
+            })
+            .min();
         let deadline = [sync, self.bell_until, tick].into_iter().flatten().min();
         event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 }
 
-fn grid_size(renderer: &Renderer) -> GridSize {
-    let (cols, rows) = renderer.grid_size();
+/// The chord a key press makes, for the keymap. Uses the key without modifiers so that
+/// Shift+1 is "shift+1" and not "!".
+fn pressed_chord(event: &KeyEvent, mods: ModifiersState) -> Option<Chord> {
+    let key = match event.key_without_modifiers() {
+        Key::Character(c) => c.to_lowercase(),
+        Key::Named(named) => match named {
+            NamedKey::ArrowLeft => "left".into(),
+            NamedKey::ArrowRight => "right".into(),
+            NamedKey::ArrowUp => "up".into(),
+            NamedKey::ArrowDown => "down".into(),
+            NamedKey::Enter => "enter".into(),
+            NamedKey::Tab => "tab".into(),
+            NamedKey::Escape => "escape".into(),
+            NamedKey::Space => "space".into(),
+            NamedKey::Backspace => "backspace".into(),
+            NamedKey::Delete => "delete".into(),
+            NamedKey::Insert => "insert".into(),
+            NamedKey::Home => "home".into(),
+            NamedKey::End => "end".into(),
+            NamedKey::PageUp => "pageup".into(),
+            NamedKey::PageDown => "pagedown".into(),
+            NamedKey::F1 => "f1".into(),
+            NamedKey::F2 => "f2".into(),
+            NamedKey::F3 => "f3".into(),
+            NamedKey::F4 => "f4".into(),
+            NamedKey::F5 => "f5".into(),
+            NamedKey::F6 => "f6".into(),
+            NamedKey::F7 => "f7".into(),
+            NamedKey::F8 => "f8".into(),
+            NamedKey::F9 => "f9".into(),
+            NamedKey::F10 => "f10".into(),
+            NamedKey::F11 => "f11".into(),
+            NamedKey::F12 => "f12".into(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(Chord {
+        key,
+        ctrl: mods.control_key(),
+        shift: mods.shift_key(),
+        alt: mods.alt_key(),
+        super_key: mods.super_key(),
+    })
+}
+
+/// Grid size for a pane drawn in `area`.
+fn grid_size_in(renderer: &Renderer, area: [f32; 4]) -> GridSize {
+    let (cols, rows) = renderer.grid_size_in(area);
     let (cw, ch) = renderer.cell_size();
     GridSize {
         cols,
@@ -928,13 +1443,13 @@ fn apply_font(ui: &mut Ui, font: &hv_config::Font) {
         );
     }
     ui.renderer.set_font_size(font.size);
-    ui.session.resize(grid_size(&ui.renderer));
+    ui.resize_all();
     ui.window.request_redraw();
 }
 
 fn zoom(ui: &mut Ui, delta: f32) {
     ui.renderer.set_font_size(ui.renderer.font_size() + delta);
-    ui.session.resize(grid_size(&ui.renderer));
+    ui.resize_all();
     ui.window.request_redraw();
 }
 

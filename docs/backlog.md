@@ -94,6 +94,15 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 
 ## F2 — Pestañas, paneles y sesiones
 
+**Estado (2026-11-22):**
+- ✅ F2-01: modelo `Tabs → Tab → PaneNode` puro y con tests (`hv-app/src/workspace.rs`). El renderer pinta varios paneles por frame (`PaneView`), con caché de filas por panel, recorte, separadores de 1 px y atenuación del 85 % sin foco. El trait `PaneHost` sigue pendiente: hoy la app habla con `hv_term::Session` directamente, y el renderer ya solo recibe instantáneas.
+- ✅ F2-02: dividir a la derecha o abajo, cerrar, mover el foco con flechas (por geometría), redimensionar con teclado o arrastrando el separador (zona de 6 px), maximizar o restaurar el panel.
+- 🟡 F2-03: barra de pestañas (título, punto de estado, cerrar, clic central, `+`). Faltan reordenar arrastrando, renombrar e iconos.
+- 🟡 F2-04: punto con el estado más urgente de la pestaña. Faltan spinner, "no visto", progreso OSC 9;4 y campana.
+- 🟡 F2-06: `keymap.rs` con acciones con nombre, acordes en texto (`primary` = Cmd/Ctrl), los atajos de `keybindings.md` por SO, `[[keybindings]]` en `config.toml` (reasignar, `none`, `send_text`) y condiciones `when` (`os`, `search_open`, `terminal_focused`, `agent`, `!`). Recarga en caliente. Falta saber el agente del panel para `agent == …` (F4).
+- Cada panel recibe su `HIVETTY_SESSION_ID` y los hooks se enrutan a su panel. Los paneles nuevos heredan el cwd del panel con foco (adelanta F3-08 cuando la shell informa el cwd).
+- `hivetty --screenshot --ui --split` captura dos paneles con la barra de pestañas.
+
 | ID | Tarea | Req | Depende | Tam. |
 |---|---|---|---|---|
 | F2-01 | Modelo `Workspace → Tab → PaneNode` y trait `PaneHost` (ADR 0002) | W-08 | F1 | M |

@@ -26,3 +26,7 @@ pub const STATE_DONE: &str = "Done";
 pub const STATE_ERROR: &str = "Error";
 /// Title used when the program set none.
 pub const DEFAULT_TITLE: &str = "Shell";
+/// Tooltip and accessible name of the `+` button in the tab bar.
+pub const NEW_TAB: &str = "New tab";
+/// Accessible name of a tab's close button.
+pub const CLOSE_TAB: &str = "Close tab";

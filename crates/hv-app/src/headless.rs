@@ -7,8 +7,11 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use hv_render::Renderer;
+use hv_render::{PaneView, Renderer};
 use hv_term::{GridSize, Session, SessionEvent, SpawnSpec};
+
+use crate::model::SessionInfo;
+use crate::workspace::{Axis, PaneNode};
 
 /// Options for a headless capture.
 #[derive(Debug, Clone)]
@@ -24,10 +27,12 @@ pub(crate) struct Capture {
     pub(crate) scroll_up: i32,
     /// Run a scrollback search and show the search bar before capturing.
     pub(crate) find: Option<String>,
-    /// Draw the egui chrome (sidebar) too.
+    /// Draw the egui chrome (sidebar and tab bar) too.
     pub(crate) ui: bool,
     /// Draw this as IME composition text at the cursor.
     pub(crate) preedit: Option<String>,
+    /// Run the program in two panes side by side (the second one focused).
+    pub(crate) split: bool,
 }
 
 impl Default for Capture {
@@ -42,6 +47,7 @@ impl Default for Capture {
             find: None,
             ui: false,
             preedit: None,
+            split: false,
         }
     }
 }
@@ -60,52 +66,86 @@ fn raw_input(width: u32, height: u32) -> egui::RawInput {
     }
 }
 
+/// One captured pane.
+struct Captured {
+    id: u64,
+    session: Session,
+    info: SessionInfo,
+    exited: bool,
+}
+
 /// Runs `spec`, waits for it to exit (or for `opts.wait`), and writes the screen to `out`.
 pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result<String> {
     let mut renderer = Renderer::new_headless(1, 1, 1.0, opts.font_size)?;
-    let (grid_w, height) = renderer.size_for_grid(opts.cols, opts.rows);
-    let sidebar = if opts.ui { SIDEBAR_PX } else { 0 };
-    let width = grid_w + sidebar;
+    let (grid_w, grid_h) = renderer.size_for_grid(opts.cols, opts.rows);
+    let panes_w = if opts.split { grid_w * 2 + 1 } else { grid_w };
+    let (sidebar, tab_bar) = if opts.ui {
+        (SIDEBAR_PX, hv_ui::TAB_BAR_HEIGHT as u32)
+    } else {
+        (0, 0)
+    };
+    let (width, height) = (panes_w + sidebar, grid_h + tab_bar);
     renderer.resize(width, height);
     let mut chrome = opts.ui.then(hv_ui::Chrome::new);
-    let mut info = crate::model::SessionInfo::new();
     // Texture updates (the font atlas) accumulate until the first frame is painted.
     let mut pending_textures = egui::TexturesDelta::default();
+    let mut area = [0.0, 0.0, width as f32, height as f32];
     if let Some(chrome) = chrome.as_mut() {
         let model = hv_ui::ChromeModel {
             sidebar_visible: true,
+            tabs: vec![hv_ui::TabItem {
+                title: String::new(),
+                state: hv_ui::RowState::Idle,
+                active: true,
+            }],
             ..Default::default()
         };
         let out = chrome.run(raw_input(width, height), &model);
         pending_textures.append(out.full.textures_delta);
-        renderer.set_grid_area(Some(out.terminal_area));
+        area = out.terminal_area;
+        renderer.set_grid_area(Some(area));
     }
+    let mut root = PaneNode::Leaf(1);
+    if opts.split {
+        root.split(1, 2, Axis::Horizontal);
+    }
+    let layout = root.layout(area, 1.0);
     let (cw, ch) = renderer.cell_size();
-    let grid = GridSize {
-        cols: opts.cols,
-        rows: opts.rows,
-        cell_width: cw as u16,
-        cell_height: ch as u16,
-    };
+    let mut panes = Vec::new();
+    for (id, pane_area) in &layout.panes {
+        let (cols, rows) = renderer.grid_size_in(*pane_area);
+        let grid = GridSize {
+            cols,
+            rows,
+            cell_width: cw as u16,
+            cell_height: ch as u16,
+        };
+        panes.push(Captured {
+            id: *id,
+            session: Session::spawn(spec, grid, 10_000, || {})?,
+            info: SessionInfo::new(),
+            exited: false,
+        });
+    }
 
-    let session = Session::spawn(spec, grid, 10_000, || {})?;
     let deadline = Instant::now() + opts.wait;
-    let mut exited = false;
     let mut events = Vec::new();
-    while !exited && Instant::now() < deadline {
+    while panes.iter().any(|p| !p.exited) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(50));
-        let batch = session.drain_events();
-        exited = batch.contains(&SessionEvent::Exited);
-        for event in &batch {
-            match event {
-                SessionEvent::Title(title) => info.title = Some(title.clone()),
-                SessionEvent::Term(term_event) => {
-                    info.on_term_event(term_event);
+        for pane in &mut panes {
+            let batch = pane.session.drain_events();
+            pane.exited |= batch.contains(&SessionEvent::Exited);
+            for event in &batch {
+                match event {
+                    SessionEvent::Title(title) => pane.info.title = Some(title.clone()),
+                    SessionEvent::Term(term_event) => {
+                        pane.info.on_term_event(term_event);
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
+            events.extend(batch);
         }
-        events.extend(batch);
     }
     if opts.print_events {
         for event in &events {
@@ -114,29 +154,49 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
     }
     // Let the last output settle and close any open synchronized update.
     std::thread::sleep(Duration::from_millis(150));
-    session.flush_expired_sync();
-    if !exited {
-        session.kill();
+    let focused = panes.last().map_or(1, |p| p.id);
+    for pane in &mut panes {
+        pane.session.flush_expired_sync();
+        if !pane.exited {
+            pane.session.kill();
+        }
+        pane.info.exited = pane.exited;
     }
-
+    let main = panes.last().expect("at least one pane");
     if opts.scroll_up > 0 {
-        session.scroll(opts.scroll_up);
+        main.session.scroll(opts.scroll_up);
     }
     renderer.set_preedit(opts.preedit.as_deref());
     if let Some(pattern) = &opts.find {
-        let status = match session.search(pattern) {
+        let status = match main.session.search(pattern) {
             Ok(true) => "",
             Ok(false) => "  (no matches)",
             Err(_) => "  (invalid pattern)",
         };
         renderer.set_search_bar(Some(&format!("Find: {pattern}▏{status}")));
     }
-    let snapshot = session.snapshot();
+    let snapshots: Vec<_> = panes.iter().map(|p| p.session.snapshot()).collect();
     let mut frame = chrome.as_mut().map(|chrome| {
-        info.exited = exited;
+        let sessions = panes
+            .iter()
+            .map(|p| {
+                let mut row = crate::model::session_row(&p.info, p.session.cwd().as_deref());
+                row.focused = p.id == focused;
+                row
+            })
+            .collect();
+        let title = panes
+            .last()
+            .and_then(|p| p.info.title.clone())
+            .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned());
         let model = hv_ui::ChromeModel {
             sidebar_visible: true,
-            sessions: vec![crate::model::session_row(&info, session.cwd().as_deref())],
+            sessions,
+            tabs: vec![hv_ui::TabItem {
+                title,
+                state: hv_ui::RowState::Idle,
+                active: true,
+            }],
         };
         let out = chrome.run(raw_input(width, height), &model);
         let mut textures = std::mem::take(&mut pending_textures);
@@ -147,7 +207,18 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             pixels_per_point: out.full.pixels_per_point,
         }
     });
-    let (w, h, rgba) = renderer.render_to_rgba_with_ui(&snapshot, frame.as_mut())?;
+    let views: Vec<PaneView<'_>> = panes
+        .iter()
+        .zip(&snapshots)
+        .map(|(pane, snap)| PaneView {
+            id: pane.id,
+            snap,
+            area: layout.area(pane.id).unwrap_or(area),
+            focused: pane.id == focused,
+        })
+        .collect();
+    let dividers: Vec<[f32; 4]> = layout.dividers.iter().map(|d| d.rect).collect();
+    let (w, h, rgba) = renderer.render_panes_to_rgba(&views, &dividers, frame.as_mut())?;
     pending_textures.clear();
     let file = File::create(out).with_context(|| format!("cannot create {}", out.display()))?;
     let mut encoder = png::Encoder::new(BufWriter::new(file), w, h);

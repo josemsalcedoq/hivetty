@@ -38,6 +38,17 @@ pub enum RowState {
     Idle,
 }
 
+/// One tab in the tab bar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabItem {
+    /// Title (the focused pane's title or the user's name for the tab).
+    pub title: String,
+    /// The most urgent state among its panes, for the dot.
+    pub state: RowState,
+    /// Whether it is the active tab.
+    pub active: bool,
+}
+
 /// Everything the chrome needs for one frame.
 #[derive(Debug, Clone, Default)]
 pub struct ChromeModel {
@@ -45,6 +56,19 @@ pub struct ChromeModel {
     pub sessions: Vec<SessionRow>,
     /// Whether the sidebar is visible.
     pub sidebar_visible: bool,
+    /// Tabs of the window. The bar is hidden when empty.
+    pub tabs: Vec<TabItem>,
+}
+
+/// What the user did in the tab bar this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabAction {
+    /// Activate the tab at this index.
+    Select(usize),
+    /// Close the tab at this index.
+    Close(usize),
+    /// Open a new tab.
+    New,
 }
 
 /// What the chrome produced this frame.
@@ -55,6 +79,8 @@ pub struct ChromeOutput {
     pub terminal_area: [f32; 4],
     /// Index of a session row the user clicked.
     pub clicked_session: Option<usize>,
+    /// A click in the tab bar.
+    pub tab_action: Option<TabAction>,
 }
 
 impl std::fmt::Debug for ChromeOutput {
@@ -62,6 +88,7 @@ impl std::fmt::Debug for ChromeOutput {
         f.debug_struct("ChromeOutput")
             .field("terminal_area", &self.terminal_area)
             .field("clicked_session", &self.clicked_session)
+            .field("tab_action", &self.tab_action)
             .finish_non_exhaustive()
     }
 }
@@ -91,6 +118,7 @@ impl Chrome {
     /// Runs one UI frame.
     pub fn run(&mut self, input: egui::RawInput, model: &ChromeModel) -> ChromeOutput {
         let mut clicked_session = None;
+        let mut tab_action = None;
         let mut central = egui::Rect::NOTHING;
         let full = self.ctx.run_ui(input, |ui| {
             if model.sidebar_visible {
@@ -107,6 +135,20 @@ impl Chrome {
                         clicked_session = sidebar(ui, &model.sessions);
                     });
             }
+            if !model.tabs.is_empty() {
+                egui::Panel::top("tabs")
+                    .exact_size(TAB_HEIGHT)
+                    .resizable(false)
+                    .frame(
+                        egui::Frame::new()
+                            .fill(theme::SIDEBAR_BG)
+                            .inner_margin(Margin::symmetric(6, 0))
+                            .stroke(Stroke::new(1.0, theme::BORDER)),
+                    )
+                    .show(ui, |ui| {
+                        tab_action = tab_bar(ui, &model.tabs);
+                    });
+            }
             central = ui.available_rect_before_wrap();
         });
         let ppp = full.pixels_per_point;
@@ -120,6 +162,7 @@ impl Chrome {
             full,
             terminal_area,
             clicked_session,
+            tab_action,
         }
     }
 
@@ -135,6 +178,134 @@ impl Chrome {
     /// Whether egui wants keyboard input (a text field has focus).
     pub fn wants_keyboard(&self) -> bool {
         self.ctx.egui_wants_keyboard_input()
+    }
+}
+
+/// Tab bar height in points (docs/ui-spec.md 1).
+const TAB_HEIGHT: f32 = TAB_BAR_HEIGHT;
+
+/// Height of the tab bar in points.
+pub const TAB_BAR_HEIGHT: f32 = 36.0;
+const TAB_MIN_WIDTH: f32 = 120.0;
+const TAB_MAX_WIDTH: f32 = 240.0;
+
+/// The tab strip with a `+` button. Returns what the user clicked.
+fn tab_bar(ui: &mut egui::Ui, tabs: &[TabItem]) -> Option<TabAction> {
+    let mut action = None;
+    let plus_width = 32.0;
+    let available = (ui.available_width() - plus_width).max(TAB_MIN_WIDTH);
+    let width = (available / tabs.len() as f32).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH);
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (i, tab) in tabs.iter().enumerate() {
+            if let Some(a) = tab_button(ui, tab, width, i) {
+                action = Some(a);
+            }
+        }
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(plus_width, TAB_HEIGHT - 8.0), Sense::click());
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, strings::NEW_TAB));
+        let painter = ui.painter_at(rect);
+        if response.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(6), theme::HOVER_BG);
+        }
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "+",
+            egui::FontId::proportional(16.0),
+            theme::TEXT_SECONDARY,
+        );
+        if response.on_hover_text(strings::NEW_TAB).clicked() {
+            action = Some(TabAction::New);
+        }
+    });
+    action
+}
+
+/// One tab: dot, elided title and a close button on hover or when active.
+fn tab_button(ui: &mut egui::Ui, tab: &TabItem, width: f32, index: usize) -> Option<TabAction> {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, TAB_HEIGHT - 8.0), Sense::click());
+    let label = tab.title.clone();
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, tab.active, &label));
+    let painter = ui.painter_at(rect);
+    let bg = if tab.active {
+        theme::SELECTED_BG
+    } else if response.hovered() {
+        theme::HOVER_BG
+    } else {
+        Color32::TRANSPARENT
+    };
+    painter.rect_filled(rect, CornerRadius::same(6), bg);
+    let dot = state_color(tab.state);
+    painter.circle_filled(egui::pos2(rect.left() + 12.0, rect.center().y), 3.5, dot);
+
+    let close_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 14.0, rect.center().y),
+        Vec2::splat(18.0),
+    );
+    let show_close = tab.active || response.hovered();
+    let font = egui::FontId::proportional(13.0);
+    let text_right = if show_close {
+        close_rect.left() - 4.0
+    } else {
+        rect.right() - 8.0
+    };
+    let title = elide(ui, &tab.title, &font, text_right - (rect.left() + 22.0));
+    let color = if tab.active {
+        theme::TEXT_PRIMARY
+    } else {
+        theme::TEXT_SECONDARY
+    };
+    painter.text(
+        egui::pos2(rect.left() + 22.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        font,
+        color,
+    );
+    let mut action = None;
+    if show_close {
+        let close = ui.interact(
+            close_rect,
+            ui.scope_id().with(("close-tab", index)),
+            Sense::click(),
+        );
+        close.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::Button, true, strings::CLOSE_TAB)
+        });
+        if close.hovered() {
+            painter.rect_filled(close_rect, CornerRadius::same(4), theme::BORDER);
+        }
+        painter.text(
+            close_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "×",
+            egui::FontId::proportional(14.0),
+            theme::TEXT_MUTED,
+        );
+        if close.clicked() {
+            action = Some(TabAction::Close(index));
+        }
+    }
+    if action.is_none() && response.clicked() {
+        action = Some(TabAction::Select(index));
+    }
+    if response.middle_clicked() {
+        action = Some(TabAction::Close(index));
+    }
+    action
+}
+
+fn state_color(state: RowState) -> Color32 {
+    match state {
+        RowState::Working => theme::STATE_WORKING,
+        RowState::Waiting => theme::STATE_WAITING,
+        RowState::Done => theme::STATE_DONE,
+        RowState::Error => theme::STATE_ERROR,
+        RowState::Idle => theme::TEXT_MUTED,
     }
 }
 
@@ -187,13 +358,7 @@ fn session_row(ui: &mut egui::Ui, row: &SessionRow) -> bool {
     };
     painter.rect_filled(rect, CornerRadius::same(6), bg);
 
-    let dot_color = match row.state {
-        RowState::Working => theme::STATE_WORKING,
-        RowState::Waiting => theme::STATE_WAITING,
-        RowState::Done => theme::STATE_DONE,
-        RowState::Error => theme::STATE_ERROR,
-        RowState::Idle => theme::TEXT_MUTED,
-    };
+    let dot_color = state_color(row.state);
     let left = rect.left() + 12.0;
     painter.circle_filled(egui::pos2(left + 4.0, rect.top() + 15.0), 4.0, dot_color);
 
@@ -295,6 +460,7 @@ mod tests {
         };
         let model = ChromeModel {
             sidebar_visible: true,
+            tabs: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
                 subtitle: "Needs permission: Bash".into(),
@@ -335,6 +501,7 @@ mod tests {
         };
         let model = ChromeModel {
             sidebar_visible: true,
+            tabs: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),
                 subtitle: "Working".into(),

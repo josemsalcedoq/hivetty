@@ -7,10 +7,7 @@ use hv_agents::{AgentState, Source, Tracker};
 use hv_term::osc::TermEvent;
 use hv_ui::{RowState, SessionRow, format_elapsed, strings};
 
-/// Value of `HIVETTY_SESSION_ID` for the (single, for now) pane.
-pub(crate) const SESSION_ID: &str = "1";
-
-/// What the app tracks about the (single, for now) session.
+/// What the app tracks about the session in one pane.
 #[derive(Debug, Clone)]
 pub(crate) struct SessionInfo {
     /// Last title the program set (OSC 0/2), if any.
@@ -57,11 +54,9 @@ impl SessionInfo {
         }
     }
 
-    /// Feeds a hook forwarded by `hivetty hook`. Returns true if the sidebar changed.
+    /// Feeds a hook forwarded by `hivetty hook` (already routed to this pane by its
+    /// `HIVETTY_SESSION_ID`). Returns true if the sidebar changed.
     pub(crate) fn on_hook(&mut self, hook: &hv_ipc::HookEvent) -> bool {
-        if hook.session.as_deref().is_some_and(|s| s != SESSION_ID) {
-            return false; // another pane (or another hivetty window)
-        }
         let update = match hook.agent.as_str() {
             "claude" => hv_agents::claude::from_hook(&hook.event, &hook.payload),
             _ => return false,
@@ -150,7 +145,7 @@ mod tests {
 
     fn hook(event: &str, payload: &str) -> hv_ipc::HookEvent {
         hv_ipc::HookEvent {
-            session: Some(SESSION_ID.into()),
+            session: Some("1".into()),
             agent: "claude".into(),
             event: event.into(),
             payload: payload.into(),
@@ -178,10 +173,10 @@ mod tests {
         assert_eq!(row.state, RowState::Waiting);
         assert_eq!(row.subtitle, "Needs permission: Bash(cargo test)");
 
-        let other_pane = hv_ipc::HookEvent {
-            session: Some("2".into()),
+        let other_agent = hv_ipc::HookEvent {
+            agent: "unknown".into(),
             ..hook("Stop", "{}")
         };
-        assert!(!info.on_hook(&other_pane));
+        assert!(!info.on_hook(&other_agent));
     }
 }

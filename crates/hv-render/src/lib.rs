@@ -61,6 +61,24 @@ impl fmt::Debug for UiFrame {
     }
 }
 
+/// One terminal pane to draw this frame.
+#[derive(Debug, Clone, Copy)]
+pub struct PaneView<'a> {
+    /// Stable id of the pane (keys the per-pane layout cache).
+    pub id: u64,
+    /// What to draw.
+    pub snap: &'a Snapshot,
+    /// Where, `[x, y, w, h]` in physical pixels (padding is added inside).
+    pub area: [f32; 4],
+    /// The focused pane gets the search bar, the IME text, the jump pill and no dimming.
+    pub focused: bool,
+}
+
+/// Color of the lines between panes.
+const DIVIDER: Rgb8 = Rgb8::hex(0x26262B);
+/// How much unfocused panes are dimmed (0 = not at all).
+const UNFOCUSED_DIM: f32 = 0.15;
+
 /// Renders terminal snapshots into a window surface or an offscreen texture.
 pub struct Renderer {
     /// `None` when rendering offscreen (screenshots, golden tests).
@@ -80,7 +98,8 @@ pub struct Renderer {
     scale: f32,
     cell_w: f32,
     cell_h: f32,
-    rows: Vec<RowCache>,
+    /// Row layout caches per pane id.
+    rows: std::collections::HashMap<u64, Vec<RowCache>>,
     /// Second text pass for labels drawn on top of overlay rectangles (the jump pill).
     ui_text: TextRenderer,
     pill_label: Buffer,
@@ -269,7 +288,7 @@ impl Renderer {
             scale,
             cell_w,
             cell_h,
-            rows: Vec::new(),
+            rows: std::collections::HashMap::new(),
             ui_text,
             pill_label,
             pill_rect: None,
@@ -390,16 +409,21 @@ impl Renderer {
         ])
     }
 
-    /// Top-left corner of the first cell.
-    fn origin(&self) -> (f32, f32) {
+    /// Top-left corner of the first cell of a pane drawn in `area`.
+    fn origin_in(&self, area: [f32; 4]) -> (f32, f32) {
         let pad = (PADDING * self.scale).round();
-        let [x, y, ..] = self.area();
+        let [x, y, ..] = area;
         ((x + pad).round(), (y + pad).round())
     }
 
     /// Position and size of a cell in physical pixels: `(x, y, w, h)`.
     pub fn cell_rect(&self, row: usize, col: usize) -> (f32, f32, f32, f32) {
-        let (ox, oy) = self.origin();
+        self.cell_rect_in(self.area(), row, col)
+    }
+
+    /// Like [`Renderer::cell_rect`] for a pane drawn in `area`.
+    pub fn cell_rect_in(&self, area: [f32; 4], row: usize, col: usize) -> (f32, f32, f32, f32) {
+        let (ox, oy) = self.origin_in(area);
         (
             ox + col as f32 * self.cell_w,
             oy + row as f32 * self.cell_h,
@@ -410,8 +434,13 @@ impl Renderer {
 
     /// The cell under a point in physical pixels: `(row, col, right_half)`, clamped to the grid.
     pub fn cell_at(&self, x: f32, y: f32) -> (usize, usize, bool) {
-        let (ox, oy) = self.origin();
-        let (cols, rows) = self.grid_size();
+        self.cell_at_in(self.area(), x, y)
+    }
+
+    /// Like [`Renderer::cell_at`] for a pane drawn in `area`.
+    pub fn cell_at_in(&self, area: [f32; 4], x: f32, y: f32) -> (usize, usize, bool) {
+        let (ox, oy) = self.origin_in(area);
+        let (cols, rows) = self.grid_size_in(area);
         let fx = ((x - ox) / self.cell_w).max(0.0);
         let fy = ((y - oy) / self.cell_h).max(0.0);
         let col = (fx.floor() as usize).min(usize::from(cols).saturating_sub(1));
@@ -419,10 +448,15 @@ impl Renderer {
         (row, col, fx.fract() >= 0.5)
     }
 
-    /// How many columns and rows fit in the window.
+    /// How many columns and rows fit in the window (or the grid area).
     pub fn grid_size(&self) -> (u16, u16) {
+        self.grid_size_in(self.area())
+    }
+
+    /// How many columns and rows fit in `area`.
+    pub fn grid_size_in(&self, area: [f32; 4]) -> (u16, u16) {
         let pad = PADDING * self.scale * 2.0;
-        let [_, _, area_w, area_h] = self.area();
+        let [_, _, area_w, area_h] = area;
         let cols = ((area_w - pad) / self.cell_w).floor().max(1.0);
         let rows = ((area_h - pad) / self.cell_h).floor().max(1.0);
         (cols as u16, rows as u16)
@@ -435,6 +469,28 @@ impl Renderer {
 
     /// Draws one frame to the window: the terminal grid, then the egui chrome on top.
     pub fn render_with_ui(&mut self, snap: &Snapshot, ui: Option<&mut UiFrame>) -> Result<()> {
+        let pane = self.single_pane(snap);
+        self.render_panes(&[pane], &[], ui)
+    }
+
+    /// The whole grid area as one focused pane (the single-pane API).
+    fn single_pane<'a>(&self, snap: &'a Snapshot) -> PaneView<'a> {
+        PaneView {
+            id: 0,
+            snap,
+            area: self.area(),
+            focused: true,
+        }
+    }
+
+    /// Draws several panes, the lines between them (`dividers`, `[x, y, w, h]`) and the egui
+    /// chrome on top.
+    pub fn render_panes(
+        &mut self,
+        panes: &[PaneView<'_>],
+        dividers: &[[f32; 4]],
+        ui: Option<&mut UiFrame>,
+    ) -> Result<()> {
         let Some(surface) = &self.surface else {
             return Err(anyhow!("headless renderer: use render_to_rgba"));
         };
@@ -451,7 +507,7 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut ui = ui;
-        let (extra, encoder) = self.encode(snap, &view, ui.as_deref_mut())?;
+        let (extra, encoder) = self.encode(panes, dividers, &view, ui.as_deref_mut())?;
         self.queue
             .submit(extra.into_iter().chain([encoder.finish()]));
         self.queue.present(frame);
@@ -471,6 +527,17 @@ impl Renderer {
         snap: &Snapshot,
         ui: Option<&mut UiFrame>,
     ) -> Result<(u32, u32, Vec<u8>)> {
+        let pane = self.single_pane(snap);
+        self.render_panes_to_rgba(&[pane], &[], ui)
+    }
+
+    /// Like [`Renderer::render_panes`], offscreen; returns tightly packed RGBA8 rows.
+    pub fn render_panes_to_rgba(
+        &mut self,
+        panes: &[PaneView<'_>],
+        dividers: &[[f32; 4]],
+        ui: Option<&mut UiFrame>,
+    ) -> Result<(u32, u32, Vec<u8>)> {
         let mut ui = ui;
         let (width, height) = (self.config.width, self.config.height);
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -488,7 +555,7 @@ impl Renderer {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let (extra, mut encoder) = self.encode(snap, &view, ui.as_deref_mut())?;
+        let (extra, mut encoder) = self.encode(panes, dividers, &view, ui.as_deref_mut())?;
         let padded_row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
             * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -540,38 +607,91 @@ impl Renderer {
     /// Records the draw commands for one frame into `view`.
     fn encode(
         &mut self,
-        snap: &Snapshot,
+        panes: &[PaneView<'_>],
+        dividers: &[[f32; 4]],
         view: &wgpu::TextureView,
         ui: Option<&mut UiFrame>,
     ) -> Result<(Vec<wgpu::CommandBuffer>, wgpu::CommandEncoder)> {
-        let (ox, oy) = self.origin();
-        let (back, mut over) = self.build_rects(snap, (ox, oy));
-        self.update_rows(snap);
-        let pill = self.layout_pill(snap, &mut over);
-        let search = self.layout_search(&mut over);
-        let preedit = self.layout_preedit(snap, &mut over);
+        let focused = panes
+            .iter()
+            .find(|p| p.focused)
+            .or_else(|| panes.first())
+            .copied();
+        let mut back = Vec::new();
+        let mut over = Vec::new();
+        self.rows.retain(|id, _| panes.iter().any(|p| p.id == *id));
+        for pane in panes {
+            let origin = self.origin_in(pane.area);
+            let (b, o) = self.build_rects(pane.snap, origin);
+            back.extend(b);
+            over.extend(o);
+            self.update_rows(pane.id, pane.snap);
+            if !pane.focused && panes.len() > 1 {
+                let [x, y, w, h] = pane.area;
+                over.push(Rect::with_alpha(
+                    x,
+                    y,
+                    w,
+                    h,
+                    Rgb8::hex(0x000000),
+                    UNFOCUSED_DIM,
+                ));
+            }
+        }
+        for &[x, y, w, h] in dividers {
+            over.push(Rect::new(x, y, w, h, DIVIDER));
+        }
+        let (pill, search, preedit) = match focused {
+            Some(pane) => (
+                self.layout_pill(pane.snap, pane.area, &mut over),
+                self.layout_search(pane.area, &mut over),
+                self.layout_preedit(pane.snap, pane.area, &mut over),
+            ),
+            None => {
+                self.pill_rect = None;
+                (None, None, None)
+            }
+        };
+        let (foreground, background) = focused
+            .map_or((Rgb8::hex(0xD4D4D4), Rgb8::hex(0x0C0C0C)), |p| {
+                (p.snap.foreground, p.snap.background)
+            });
         if self.flash {
             let (w, h) = (self.config.width as f32, self.config.height as f32);
-            over.push(Rect::with_alpha(0.0, 0.0, w, h, snap.foreground, 0.12));
+            over.push(Rect::with_alpha(0.0, 0.0, w, h, foreground, 0.12));
         }
 
         let width = self.config.width;
         let height = self.config.height;
         self.viewport
             .update(&self.queue, Resolution { width, height });
-        let areas = self.rows.iter().enumerate().map(|(row, cache)| TextArea {
-            buffer: &cache.buffer,
-            left: ox,
-            top: oy + row as f32 * self.cell_h,
-            scale: 1.0,
-            bounds: TextBounds {
-                left: 0,
-                top: 0,
-                right: width as i32,
-                bottom: height as i32,
-            },
-            default_color: to_text_color(snap.foreground),
-            custom_glyphs: &[],
+        let cell_h = self.cell_h;
+        let pad = (PADDING * self.scale).round();
+        let rows = &self.rows;
+        let areas = panes.iter().flat_map(|pane| {
+            let [x, y, w, h] = pane.area;
+            let (ox, oy) = ((x + pad).round(), (y + pad).round());
+            // Clip to the pane so text never spills into a neighbour.
+            let bounds = TextBounds {
+                left: x as i32,
+                top: y as i32,
+                right: (x + w) as i32,
+                bottom: (y + h) as i32,
+            };
+            let color = to_text_color(pane.snap.foreground);
+            rows.get(&pane.id)
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(move |(row, cache)| TextArea {
+                    buffer: &cache.buffer,
+                    left: ox,
+                    top: oy + row as f32 * cell_h,
+                    scale: 1.0,
+                    bounds,
+                    default_color: color,
+                    custom_glyphs: &[],
+                })
         });
         self.text_renderer
             .prepare(
@@ -590,38 +710,18 @@ impl Renderer {
             right: width as i32,
             bottom: height as i32,
         };
-        let search_area = search.map(|(x, y)| TextArea {
-            buffer: &self.search_label,
+        let label = |buffer, (x, y): (f32, f32)| TextArea {
+            buffer,
             left: x,
             top: y,
             scale: 1.0,
             bounds,
-            default_color: to_text_color(snap.foreground),
+            default_color: to_text_color(foreground),
             custom_glyphs: &[],
-        });
-        let pill_area = pill.map(|(x, y)| TextArea {
-            buffer: &self.pill_label,
-            left: x,
-            top: y,
-            scale: 1.0,
-            bounds: TextBounds {
-                left: 0,
-                top: 0,
-                right: width as i32,
-                bottom: height as i32,
-            },
-            default_color: to_text_color(snap.foreground),
-            custom_glyphs: &[],
-        });
-        let preedit_area = preedit.map(|(x, y)| TextArea {
-            buffer: &self.preedit_label,
-            left: x,
-            top: y,
-            scale: 1.0,
-            bounds,
-            default_color: to_text_color(snap.foreground),
-            custom_glyphs: &[],
-        });
+        };
+        let search_area = search.map(|at| label(&self.search_label, at));
+        let pill_area = pill.map(|at| label(&self.pill_label, at));
+        let preedit_area = preedit.map(|at| label(&self.preedit_label, at));
         self.ui_text
             .prepare(
                 &self.device,
@@ -668,7 +768,7 @@ impl Renderer {
             );
         }
         {
-            let bg = snap.background;
+            let bg = background;
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terminal"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -763,10 +863,15 @@ impl Renderer {
 
     /// Covers the cells under the cursor with the composition text, underlined like other
     /// terminals do. Returns where its label goes.
-    fn layout_preedit(&mut self, snap: &Snapshot, over: &mut Vec<Rect>) -> Option<(f32, f32)> {
+    fn layout_preedit(
+        &mut self,
+        snap: &Snapshot,
+        area: [f32; 4],
+        over: &mut Vec<Rect>,
+    ) -> Option<(f32, f32)> {
         self.preedit_text.as_ref()?;
         let cursor = snap.cursor?;
-        let (x, y, _, ch) = self.cell_rect(cursor.row, cursor.col);
+        let (x, y, _, ch) = self.cell_rect_in(area, cursor.row, cursor.col);
         let width = self
             .preedit_label
             .layout_runs()
@@ -774,8 +879,8 @@ impl Renderer {
             .fold(0.0f32, f32::max)
             .max(self.cell_w)
             .ceil();
-        // Keep it inside the grid area: shift left when it would overflow the right edge.
-        let [ax, _, aw, _] = self.area();
+        // Keep it inside the pane: shift left when it would overflow the right edge.
+        let [ax, _, aw, _] = area;
         let x = x.min(ax + aw - width).max(ax).round();
         let thickness = self.scale.round().max(1.0);
         over.push(Rect::new(x, y, width, ch, snap.background));
@@ -790,13 +895,13 @@ impl Renderer {
     }
 
     /// Adds the search bar (top right). Returns where its label goes.
-    fn layout_search(&mut self, over: &mut Vec<Rect>) -> Option<(f32, f32)> {
+    fn layout_search(&mut self, area: [f32; 4], over: &mut Vec<Rect>) -> Option<(f32, f32)> {
         let text = self.search_text.as_deref()?;
         let (cw, ch) = (self.cell_w, self.cell_h);
         let chars = text.chars().count().max(24) as f32;
         let (w, h) = ((chars * cw + cw * 2.0).round(), (ch * 1.5).round());
         let margin = (PADDING * self.scale).round();
-        let [ax, ay, aw, _] = self.area();
+        let [ax, ay, aw, _] = area;
         let x = (ax + aw - w - margin).max(ax).round();
         let y = ay + margin;
         let border = self.scale.round().max(1.0);
@@ -811,7 +916,12 @@ impl Renderer {
         Some((x + cw, y + ((h - ch) / 2.0).round()))
     }
 
-    fn layout_pill(&mut self, snap: &Snapshot, over: &mut Vec<Rect>) -> Option<(f32, f32)> {
+    fn layout_pill(
+        &mut self,
+        snap: &Snapshot,
+        area: [f32; 4],
+        over: &mut Vec<Rect>,
+    ) -> Option<(f32, f32)> {
         if snap.display_offset == 0 {
             self.pill_rect = None;
             return None;
@@ -819,7 +929,7 @@ impl Renderer {
         let (cw, ch) = (self.cell_w, self.cell_h);
         let label_w = JUMP_LABEL.chars().count() as f32 * cw;
         let (w, h) = ((label_w + cw * 2.0).round(), (ch * 1.5).round());
-        let [ax, ay, aw, ah] = self.area();
+        let [ax, ay, aw, ah] = area;
         let x = (ax + (aw - w) / 2.0).round();
         let y = (ay + ah - h - ch).round();
         let border = self.scale.round().max(1.0);
@@ -907,20 +1017,21 @@ impl Renderer {
     }
 
     /// Re-lays out the rows whose cells (or cursor) changed since the last frame.
-    fn update_rows(&mut self, snap: &Snapshot) {
+    fn update_rows(&mut self, pane: u64, snap: &Snapshot) {
         let metrics = Metrics::new(self.font_size * self.scale, self.cell_h);
-        self.rows.truncate(snap.rows);
-        while self.rows.len() < snap.rows {
+        let rows = self.rows.entry(pane).or_default();
+        rows.truncate(snap.rows);
+        while rows.len() < snap.rows {
             let mut buffer = Buffer::new(&mut self.font_system, metrics);
             buffer.set_monospace_width(Some(self.cell_w));
-            self.rows.push(RowCache {
+            rows.push(RowCache {
                 cells: Vec::new(),
                 cursor_col: None,
                 buffer,
             });
         }
         let width = snap.cols as f32 * self.cell_w + self.cell_w;
-        for (row, cache) in self.rows.iter_mut().enumerate() {
+        for (row, cache) in rows.iter_mut().enumerate() {
             let cells = &snap.cells[row * snap.cols..(row + 1) * snap.cols];
             let cursor_col = snap
                 .cursor

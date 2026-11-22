@@ -6,7 +6,9 @@
 mod app;
 mod headless;
 mod hook;
+mod keymap;
 mod model;
+mod workspace;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -34,6 +36,7 @@ OPTIONS:
     --ui                 With --screenshot, also draw the window chrome (sidebar)
     --find <PATTERN>     With --screenshot, search the scrollback (regex) and show the result
     --preedit <TEXT>     With --screenshot, draw TEXT as input-method composition at the cursor
+    --split              With --screenshot, run the program in two panes side by side
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
     hook --agent <ID> --event <NAME>
@@ -60,6 +63,7 @@ enum Command {
         find: Option<String>,
         ui: bool,
         preedit: Option<String>,
+        split: bool,
     },
     Doctor,
     Usage {
@@ -78,6 +82,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
     let mut find = None;
     let mut ui = false;
     let mut preedit = None;
+    let mut split = false;
     let mut record: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
@@ -124,6 +129,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
                 find = Some(value(i)?.clone());
                 i += 1;
             }
+            "--split" => split = true,
             "--preedit" => {
                 preedit = Some(value(i)?.clone());
                 i += 1;
@@ -153,6 +159,7 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
             find,
             ui,
             preedit,
+            split,
         },
         None => Command::Run(spec, record),
     })
@@ -212,6 +219,7 @@ fn main() -> ExitCode {
             find,
             ui,
             preedit,
+            split,
         } => {
             let opts = headless::Capture {
                 cols,
@@ -222,6 +230,7 @@ fn main() -> ExitCode {
                 find,
                 ui,
                 preedit,
+                split,
                 ..headless::Capture::default()
             };
             headless::screenshot(&spec, &opts, &out).map(|saved| println!("saved {saved}"))
