@@ -5,6 +5,7 @@
 
 mod agents_cli;
 mod app;
+mod crash;
 mod headless;
 mod hook;
 mod keymap;
@@ -203,6 +204,7 @@ fn main() -> ExitCode {
         env_logger::Env::new().filter_or("HIVETTY_LOG", "warn,wgpu_hal=off,wgpu_core=error"),
     )
     .init();
+    crash::install();
     let parsed = parse_args(&args);
     // Everything except opening the window prints to the console; in Windows release builds
     // (GUI subsystem) that needs the parent console attached first.
@@ -315,6 +317,9 @@ fn doctor_report() -> String {
     }
     if let Some(dir) = hv_config::data_dir() {
         report.push_str(&format!("data: {}\n", dir.display()));
+        if let Some(latest) = crash::reports(&dir).last() {
+            report.push_str(&format!("last crash report: {}\n", latest.display()));
+        }
         let cache = dir.join("usage.cache");
         if let Ok(meta) = std::fs::metadata(&cache) {
             report.push_str(&format!("usage cache: {} KB\n", meta.len() / 1024));
