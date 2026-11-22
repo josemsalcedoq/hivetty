@@ -4,7 +4,9 @@
 //! comes from hivetty's observed state intervals (phase F4).
 
 pub mod claude;
+pub mod codex;
 pub mod dashboard;
+pub mod gemini;
 pub mod observed;
 pub mod pricing;
 pub mod store;
@@ -14,6 +16,15 @@ use std::collections::BTreeMap;
 use jiff::Timestamp;
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
+
+/// What earlier lines of one log said (its session, folder and current model), kept between
+/// incremental reads of that log.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FileContext {
+    pub session: Option<String>,
+    pub cwd: Option<String>,
+    pub model: Option<String>,
+}
 
 /// One assistant turn with its token usage.
 #[derive(Debug, Clone, PartialEq, Eq)]

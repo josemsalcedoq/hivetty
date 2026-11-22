@@ -3093,8 +3093,8 @@ pub(crate) struct UsageData {
 }
 
 impl UsageData {
-    /// Reads every supported agent's logs (Claude Code for now). Blocking: call off the UI
-    /// thread.
+    /// Reads every supported agent's logs (Claude Code, Codex, Gemini CLI). Blocking: call
+    /// off the UI thread.
     pub(crate) fn read() -> Self {
         // Incremental: the cache remembers how far each log was read (docs/adr/0006).
         let cache = hv_config::data_dir().map(|d| d.join("usage.cache"));
@@ -3102,14 +3102,26 @@ impl UsageData {
             .as_deref()
             .map(hv_usage::store::Store::load)
             .unwrap_or_default();
+        // Each agent's own logs (F5-03): Claude Code, Codex and Gemini CLI.
+        let mut added = (0, 0);
+        let mut add = |(r, t): (usize, usize)| {
+            added.0 += r;
+            added.1 += t;
+        };
         if let Some(root) = hv_usage::claude::default_root() {
-            let (records, tasks) = store.ingest_claude(&root);
-            if (records > 0 || tasks > 0)
-                && let Some(cache) = &cache
-                && let Err(err) = store.save(cache)
-            {
-                log::warn!("cannot save the usage cache: {err}");
-            }
+            add(store.ingest_claude(&root));
+        }
+        if let Some(root) = hv_usage::codex::default_root() {
+            add(store.ingest_codex(&root));
+        }
+        if let Some(root) = hv_usage::gemini::default_root() {
+            add(store.ingest_gemini(&root));
+        }
+        if added != (0, 0)
+            && let Some(cache) = &cache
+            && let Err(err) = store.save(cache)
+        {
+            log::warn!("cannot save the usage cache: {err}");
         }
         let records = store.records();
         let pricing = load_pricing();

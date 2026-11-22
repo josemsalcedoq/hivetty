@@ -10,3 +10,7 @@ verified = true
 [state]
 osc7501 = false
 title_from_osc = true
+
+[usage]
+format = "gemini-jsonl"
+paths = ["~/.gemini/tmp/*/chats/*.jsonl"]

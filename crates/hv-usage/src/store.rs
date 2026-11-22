@@ -9,11 +9,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Task, UsageRecord};
+use crate::{FileContext, Task, UsageRecord};
 
 /// Bump when the stored format or what counts as a task changes; older caches are discarded
-/// and rebuilt. 2: subagent prompts and interruptions are no longer tasks.
-const VERSION: u32 = 2;
+/// and rebuilt. 2: subagent prompts and interruptions are no longer tasks. 3: Codex and Gemini
+/// CLI logs, with a context per file.
+const VERSION: u32 = 3;
 /// A cache larger than this is not ours (or is corrupt): rebuild instead of reading it.
 const MAX_CACHE: u64 = 512 << 20;
 
@@ -21,6 +22,8 @@ const MAX_CACHE: u64 = 512 << 20;
 struct Cursor {
     /// Bytes consumed (always at a line boundary).
     offset: u64,
+    /// What the lines read so far said (session, folder, model).
+    context: crate::FileContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,8 +116,37 @@ impl Store {
     /// Reads what is new in Claude Code's transcripts under `root`. Returns how many records
     /// and tasks were added.
     pub fn ingest_claude(&mut self, root: &Path) -> (usize, usize) {
+        let files = crate::claude::transcript_files(root);
+        self.ingest(files.into_iter().map(|p| (p, None)), |lines, seen, _| {
+            crate::claude::parse_activity(lines, seen)
+        })
+    }
+
+    /// Reads what is new in Codex CLI's session logs under `root` (F5-03).
+    pub fn ingest_codex(&mut self, root: &Path) -> (usize, usize) {
+        let files = crate::codex::session_files(root);
+        self.ingest(files.into_iter().map(|p| (p, None)), |lines, seen, ctx| {
+            crate::codex::parse_activity(lines, seen, ctx)
+        })
+    }
+
+    /// Reads what is new in Gemini CLI's chat logs under `root` (F5-03).
+    pub fn ingest_gemini(&mut self, root: &Path) -> (usize, usize) {
+        let files = crate::gemini::session_files(root);
+        self.ingest(files, |lines, seen, ctx| {
+            crate::gemini::parse_activity(lines, seen, ctx)
+        })
+    }
+
+    /// Reads the new complete lines of each file with `parse`. `cwd` is the project folder
+    /// when the log does not say it.
+    fn ingest(
+        &mut self,
+        files: impl IntoIterator<Item = (PathBuf, Option<String>)>,
+        parse: impl Fn(&[u8], &mut HashSet<String>, &mut FileContext) -> (Vec<UsageRecord>, Vec<Task>),
+    ) -> (usize, usize) {
         let (mut added_records, mut added_tasks) = (0, 0);
-        for path in crate::claude::transcript_files(root) {
+        for (path, cwd) in files {
             let Ok(meta) = std::fs::metadata(&path) else {
                 continue;
             };
@@ -123,6 +155,7 @@ impl Store {
             // are skipped by id).
             if meta.len() < cursor.offset {
                 cursor.offset = 0;
+                cursor.context = FileContext::default();
             }
             if meta.len() == cursor.offset {
                 continue;
@@ -131,8 +164,14 @@ impl Store {
                 continue;
             };
             cursor.offset += consumed;
-            let (records, tasks) =
-                crate::claude::parse_activity(new_lines.as_slice(), &mut self.inner.seen);
+            if cursor.context.cwd.is_none() {
+                cursor.context.cwd = cwd;
+            }
+            let (records, tasks) = parse(
+                new_lines.as_slice(),
+                &mut self.inner.seen,
+                &mut cursor.context,
+            );
             added_records += records.len();
             added_tasks += tasks.len();
             self.inner

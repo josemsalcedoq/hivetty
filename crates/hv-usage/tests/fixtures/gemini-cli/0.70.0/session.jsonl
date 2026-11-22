@@ -1,0 +1,13 @@
+{"sessionId": "3a86fd33-aed3-4150-88b1-bdcf82baf08e", "startTime": "2026-11-22T13:35:23.833Z", "lastUpdated": "2026-11-22T13:35:23.833Z", "kind": "main"}
+{"id": "d04923d38bb0f6017037e74183378ef4", "timestamp": "2026-11-22T13:35:23.834Z", "type": "user", "content": [{"text": "<session_context>…"}]}
+{"$set": {"lastUpdated": "2026-11-22T13:35:23.836Z"}}
+{"id": "a1322301-7cbe-4c9e-aa0f-d8c4b850722e", "timestamp": "2026-11-22T13:35:23.868Z", "type": "user", "content": [{"text": "List the files in this folder, then reply with one short sentence."}]}
+{"$set": {"lastUpdated": "2026-11-22T13:35:23.868Z"}}
+{"id": "fcde70b7-5825-4a28-933f-933c4cf50de5", "timestamp": "2026-11-22T13:35:26.768Z", "type": "gemini", "content": "", "tokens": {"input": 8412, "output": 18, "cached": 0, "thoughts": 437, "tool": 0, "total": 8867}, "model": "gemini-3.5-flash-lite", "thoughts": []}
+{"$set": {"lastUpdated": "2026-11-22T13:35:26.769Z"}}
+{"id": "fcde70b7-5825-4a28-933f-933c4cf50de5", "timestamp": "2026-11-22T13:35:26.768Z", "type": "gemini", "content": "", "tokens": {"input": 8412, "output": 18, "cached": 0, "thoughts": 437, "tool": 0, "total": 8867}, "model": "gemini-3.5-flash-lite", "thoughts": [], "toolCalls": [{"id": "list_directory__call_8680686752598351962", "name": "list_directory"}]}
+{"id": "fcde70b7-5825-4a28-933f-933c4cf50de5", "timestamp": "2026-11-22T13:35:26.768Z", "type": "gemini", "content": "", "tokens": {"input": 8412, "output": 18, "cached": 0, "thoughts": 437, "tool": 0, "total": 8867}, "model": "gemini-3.5-flash-lite", "thoughts": [], "toolCalls": [{"id": "list_directory__call_8680686752598351962", "name": "list_directory"}]}
+{"id": "e39ede8d-18ac-4e09-922a-4fbe7c45e498", "timestamp": "2026-11-22T13:35:26.781Z", "type": "user", "content": [{"functionResponse": {"id": "list_directory__call_8680686752598351962", "name": "list_directory", "response": {"output": "note.txt (6 bytes)"}}}]}
+{"$set": {"lastUpdated": "2026-11-22T13:35:26.781Z"}}
+{"id": "6e9b6550-2ba3-4e29-a2d3-66435c825ccd", "timestamp": "2026-11-22T13:35:27.857Z", "type": "gemini", "content": "The folder contains `note.txt`.", "tokens": {"input": 8960, "output": 8, "cached": 6090, "thoughts": 50, "tool": 0, "total": 9018}, "model": "gemini-3.5-flash-lite", "thoughts": []}
+{"$set": {"lastUpdated": "2026-11-22T13:35:27.857Z"}}
