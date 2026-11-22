@@ -31,6 +31,8 @@ pub(crate) struct SessionInfo {
     pub(crate) agent_id: Option<String>,
     /// Its display name.
     pub(crate) agent_name: Option<String>,
+    /// Since when (Unix seconds) the agent has been working, as seen here (F4-23).
+    pub(crate) working_since: Option<i64>,
     /// The last tool the agent used, worded for the hover card (S-15).
     pub(crate) last_tool: Option<String>,
     /// The attention state last notified ("waiting", "done", "error"), so a state is announced
@@ -52,6 +54,7 @@ impl SessionInfo {
             agent_id: None,
             agent_name: None,
             last_tool: None,
+            working_since: None,
             notified: None,
         }
     }
@@ -143,6 +146,34 @@ impl SessionInfo {
             self.agent.state(),
             Some(AgentState::Done | AgentState::Blocked { .. } | AgentState::Error)
         )
+    }
+
+    /// Opens or closes the observed working stretch after the state may have changed; `closing`
+    /// when the pane goes away. Returns a stretch that just ended (F4-23).
+    pub(crate) fn working_interval(
+        &mut self,
+        closing: bool,
+    ) -> Option<hv_usage::observed::Interval> {
+        let working = !closing
+            && !self.exited
+            && matches!(self.agent.state(), Some(AgentState::Working { .. }));
+        let now = jiff::Timestamp::now().as_second();
+        match (working, self.working_since) {
+            (true, None) => {
+                self.working_since = Some(now);
+                None
+            }
+            (false, Some(start)) => {
+                self.working_since = None;
+                Some(hv_usage::observed::Interval {
+                    agent: self.agent_id.clone()?,
+                    start,
+                    end: now,
+                })
+                .filter(|i| i.end > i.start)
+            }
+            _ => None,
+        }
     }
 
     /// Feeds a hook forwarded by `hivetty hook` (already routed to this pane by its
@@ -324,6 +355,21 @@ mod tests {
             event: event.into(),
             payload: payload.into(),
         }
+    }
+
+    #[test]
+    fn working_stretches_are_measured() {
+        let mut info = SessionInfo::new();
+        info.on_hook(&hook("UserPromptSubmit", "{}"));
+        assert_eq!(info.working_interval(false), None, "a stretch opens");
+        let start = info.working_since.unwrap() - 30;
+        info.working_since = Some(start);
+        assert_eq!(info.working_interval(false), None, "still working");
+        info.on_hook(&hook("Stop", "{}"));
+        let done = info.working_interval(false).unwrap();
+        assert_eq!((done.agent.as_str(), done.start), ("claude-code", start));
+        assert!(done.end - done.start >= 30);
+        assert_eq!(info.working_interval(true), None, "nothing open");
     }
 
     #[test]

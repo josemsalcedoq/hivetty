@@ -333,3 +333,7 @@ pub fn card_tokens(input: &str, output: &str) -> String {
 pub fn ago(elapsed: &str) -> String {
     format!("{elapsed} ago")
 }
+/// Agent time card: the time hivetty measured itself (F4-23).
+pub fn observed(duration: &str) -> String {
+    format!("{duration} seen here")
+}

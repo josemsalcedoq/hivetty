@@ -226,12 +226,21 @@ fn body(ui: &mut egui::Ui, d: &Dashboard) -> Option<UsageAction> {
         (
             strings::KPI_AGENT_TIME,
             duration_text(d.agent_seconds),
-            format!(
-                "{} {} {}",
-                strings::UP_TO,
-                d.max_concurrency,
-                strings::AT_ONCE
-            ),
+            match d.observed_seconds {
+                Some(seen) => format!(
+                    "{} {} {} · {}",
+                    strings::UP_TO,
+                    d.max_concurrency,
+                    strings::AT_ONCE,
+                    strings::observed(&duration_text(seen))
+                ),
+                None => format!(
+                    "{} {} {}",
+                    strings::UP_TO,
+                    d.max_concurrency,
+                    strings::AT_ONCE
+                ),
+            },
             None,
             d.daily.iter().map(|x| x.seconds).collect(),
         ),

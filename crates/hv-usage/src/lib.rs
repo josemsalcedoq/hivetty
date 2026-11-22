@@ -5,6 +5,7 @@
 
 pub mod claude;
 pub mod dashboard;
+pub mod observed;
 pub mod pricing;
 pub mod store;
 

@@ -64,6 +64,8 @@ pub struct Dashboard {
     pub tasks: u64,
     /// AGENT TIME in seconds and the most sessions active at once (U-13).
     pub agent_seconds: u64,
+    /// Agent time hivetty saw itself in the range (F4-23), when it has any record.
+    pub observed_seconds: Option<u64>,
     pub max_concurrency: u32,
     /// Change against the previous period of the same length (U-14); `None` without data or
     /// for "All".
@@ -404,6 +406,7 @@ pub fn build(
         providers,
         agents,
         cost: None,
+        observed_seconds: None,
     }
 }
 

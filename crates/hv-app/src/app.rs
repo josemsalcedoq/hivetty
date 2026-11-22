@@ -1363,8 +1363,9 @@ impl App {
 
     /// Closes the active window (its panes die with it). Exits after the last one.
     fn close_window(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(ui) = self.ui.take() {
-            for pane in ui.panes.values() {
+        if let Some(mut ui) = self.ui.take() {
+            for pane in ui.panes.values_mut() {
+                record_interval(pane.info.working_interval(true));
                 pane.session.kill();
             }
         }
@@ -1410,7 +1411,8 @@ impl App {
     /// Kills a pane and removes it; closes the window when it was its last one.
     fn close_pane(&mut self, id: PaneId, event_loop: &ActiveEventLoop) {
         let Some(ui) = &mut self.ui else { return };
-        if let Some(pane) = ui.panes.remove(&id) {
+        if let Some(mut pane) = ui.panes.remove(&id) {
+            record_interval(pane.info.working_interval(true));
             pane.session.kill();
         }
         if ui.tabs.remove_pane(id) {
@@ -1985,6 +1987,7 @@ impl App {
                         {
                             pane.info.unseen = true;
                         }
+                        record_interval(pane.info.working_interval(false));
                         // F3-13: a long command finished while the user looked elsewhere.
                         let notes = &self.config.notifications;
                         if let Some((took, exit)) =
@@ -2546,12 +2549,14 @@ impl ApplicationHandler<AppEvent> for App {
                     let focused = ui.focused_id();
                     if let Some(id) = target
                         && let Some(pane) = ui.panes.get_mut(&id)
-                        && pane.info.on_hook(&hook)
                     {
-                        if Some(id) != focused && pane.info.needs_attention() {
-                            pane.info.unseen = true;
+                        if pane.info.on_hook(&hook) {
+                            if Some(id) != focused && pane.info.needs_attention() {
+                                pane.info.unseen = true;
+                            }
+                            ui.window.request_redraw();
                         }
-                        ui.window.request_redraw();
+                        record_interval(pane.info.working_interval(false));
                     }
                     let window_focused = self.focused_window == Some(ui.window.id());
                     let notes = self.notify_candidates(window_focused);
@@ -2823,6 +2828,8 @@ pub(crate) struct UsageData {
     pricing: hv_usage::pricing::Pricing,
     /// Totals by agent session id, for the hover card (S-15).
     sessions: HashMap<String, SessionTotals>,
+    /// Agent time hivetty measured (F4-23).
+    observed: Vec<hv_usage::observed::Interval>,
     read_at: Option<Instant>,
 }
 
@@ -2853,6 +2860,9 @@ impl UsageData {
             tasks: store.tasks(),
             pricing,
             sessions,
+            observed: observed_path()
+                .map(|p| hv_usage::observed::load(&p))
+                .unwrap_or_default(),
             read_at: Some(Instant::now()),
         }
     }
@@ -2899,6 +2909,15 @@ impl UsageData {
                 )
             }
         };
+        if !self.observed.is_empty() {
+            dash.observed_seconds = Some(hv_usage::observed::seconds_in(
+                &self.observed,
+                agent,
+                dash.first_day,
+                dash.last_day,
+                &tz,
+            ));
+        }
         // Agent ids to display names ("claude-code" -> "Claude Code").
         let profiles = hv_agents::profile::builtin();
         for row in &mut dash.agents {
@@ -2933,6 +2952,25 @@ impl Default for UsageState {
             filter: None,
         }
     }
+}
+
+/// Where the agent time hivetty measures is kept.
+fn observed_path() -> Option<std::path::PathBuf> {
+    hv_config::data_dir().map(|d| d.join("agent-time.jsonl"))
+}
+
+/// Appends a finished working stretch on a background thread (F4-23).
+fn record_interval(interval: Option<hv_usage::observed::Interval>) {
+    let (Some(interval), Some(path)) = (interval, observed_path()) else {
+        return;
+    };
+    let _ = std::thread::Builder::new()
+        .name("hv-agent-time".into())
+        .spawn(move || {
+            if let Err(err) = hv_usage::observed::append(&path, &interval) {
+                log::warn!("cannot record agent time: {err}");
+            }
+        });
 }
 
 /// Usage of one agent session.
