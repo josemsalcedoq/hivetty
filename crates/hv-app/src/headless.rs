@@ -180,10 +180,10 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
     if let Some(pattern) = &opts.find {
         let status = match main.session.search(pattern) {
             Ok(true) => "",
-            Ok(false) => "  (no matches)",
-            Err(_) => "  (invalid pattern)",
+            Ok(false) => hv_ui::strings::FIND_NO_MATCHES,
+            Err(_) => hv_ui::strings::FIND_INVALID,
         };
-        renderer.set_search_bar(Some(&format!("Find: {pattern}▏{status}")));
+        renderer.set_search_bar(Some(&hv_ui::strings::find_bar(pattern, status)));
     }
     let snapshots: Vec<_> = panes.iter().map(|p| p.session.snapshot()).collect();
     let mut frame = chrome.as_mut().map(|chrome| {

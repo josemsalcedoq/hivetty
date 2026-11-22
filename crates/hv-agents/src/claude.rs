@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-use crate::{AgentState, Update};
+use crate::{Activity, AgentState, Subtitle, Update};
 
 /// Longest subtitle kept, in characters.
 const MAX_SUBTITLE: usize = 120;
@@ -23,7 +23,7 @@ pub fn from_hook(event: &str, payload: &str) -> Update {
         "SessionStart" => (Some(AgentState::Starting), None),
         "UserPromptSubmit" => (
             Some(AgentState::Working { progress: None }),
-            Some("Thinking…".to_owned()),
+            Some(Subtitle::Activity(Activity::Thinking)),
         ),
         "PreToolUse" => (
             Some(AgentState::Working { progress: None }),
@@ -43,7 +43,10 @@ pub fn from_hook(event: &str, payload: &str) -> Update {
                     .filter(|m| m.to_ascii_lowercase().contains("permission"))
                     .map(|_| "permission".to_owned()),
             };
-            (Some(AgentState::Blocked { kind }), message)
+            (
+                Some(AgentState::Blocked { kind }),
+                message.map(Subtitle::Text),
+            )
         }
         "Stop" => (Some(AgentState::Done), None),
         "SessionEnd" => (Some(AgentState::Exited), None),
@@ -51,29 +54,52 @@ pub fn from_hook(event: &str, payload: &str) -> Update {
     };
     Update {
         state,
-        subtitle: subtitle.map(|s| truncate(&s)),
+        subtitle: subtitle.map(shorten),
         agent_session,
     }
 }
 
-/// "Running tests", "Editing src/main.rs"… from the tool and its input.
-fn tool_action(tool: &str, input: Option<&Value>) -> Option<String> {
+/// What a tool call is doing, from the tool and its input. A command's own description is
+/// the agent's text; everything else is an [`Activity`] the UI words.
+fn tool_action(tool: &str, input: Option<&Value>) -> Option<Subtitle> {
     let field = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
     let file = field("file_path").or_else(|| field("notebook_path"));
-    let action = match tool {
+    let activity = |a: Activity| Some(Subtitle::Activity(a));
+    let subtitle = match tool {
         "Bash" | "PowerShell" => field("description")
-            .map(str::to_owned)
-            .or_else(|| field("command").map(|c| format!("Running {c}"))),
-        "Edit" | "MultiEdit" | "NotebookEdit" => file.map(|f| format!("Editing {}", short_path(f))),
-        "Write" => file.map(|f| format!("Writing {}", short_path(f))),
-        "Read" => file.map(|f| format!("Reading {}", short_path(f))),
-        "Grep" | "Glob" => field("pattern").map(|p| format!("Searching {p}")),
-        "WebFetch" => field("url").map(|u| format!("Fetching {u}")),
-        "WebSearch" => field("query").map(|q| format!("Searching the web for {q}")),
-        "Task" | "Agent" => field("description").map(|d| format!("Agent: {d}")),
+            .map(|d| Subtitle::Text(d.to_owned()))
+            .or_else(|| field("command").and_then(|c| activity(Activity::Running(c.to_owned())))),
+        "Edit" | "MultiEdit" | "NotebookEdit" => {
+            file.and_then(|f| activity(Activity::Editing(short_path(f))))
+        }
+        "Write" => file.and_then(|f| activity(Activity::Writing(short_path(f)))),
+        "Read" => file.and_then(|f| activity(Activity::Reading(short_path(f)))),
+        "Grep" | "Glob" => {
+            field("pattern").and_then(|p| activity(Activity::Searching(p.to_owned())))
+        }
+        "WebFetch" => field("url").and_then(|u| activity(Activity::Fetching(u.to_owned()))),
+        "WebSearch" => field("query").and_then(|q| activity(Activity::SearchingWeb(q.to_owned()))),
+        "Task" | "Agent" => {
+            field("description").and_then(|d| activity(Activity::SubAgent(d.to_owned())))
+        }
         _ => None,
     };
-    Some(action.unwrap_or_else(|| format!("Using {tool}")))
+    Some(subtitle.unwrap_or(Subtitle::Activity(Activity::Using(tool.to_owned()))))
+}
+
+/// Keeps the free text of a subtitle to one short line.
+fn shorten(subtitle: Subtitle) -> Subtitle {
+    match subtitle {
+        Subtitle::Text(t) => Subtitle::Text(truncate(&t)),
+        Subtitle::Activity(a) => Subtitle::Activity(match a {
+            Activity::Running(t) => Activity::Running(truncate(&t)),
+            Activity::Searching(t) => Activity::Searching(truncate(&t)),
+            Activity::Fetching(t) => Activity::Fetching(truncate(&t)),
+            Activity::SearchingWeb(t) => Activity::SearchingWeb(truncate(&t)),
+            Activity::SubAgent(t) => Activity::SubAgent(truncate(&t)),
+            other => other,
+        }),
+    }
 }
 
 /// The last two components of a path, which is what fits in a sidebar row.
@@ -115,7 +141,10 @@ mod tests {
         let prompt = from_hook("x", &fixture("UserPromptSubmit"));
         assert_eq!(prompt.state, Some(AgentState::Working { progress: None }));
         let tool = from_hook("x", &fixture("PreToolUse"));
-        assert_eq!(tool.subtitle.as_deref(), Some("Echo hook test string"));
+        assert_eq!(
+            tool.subtitle,
+            Some(Subtitle::Text("Echo hook test string".into()))
+        );
         assert_eq!(
             from_hook("x", &fixture("PostToolUse")).state,
             Some(AgentState::Working { progress: None })
@@ -143,8 +172,10 @@ mod tests {
             })
         );
         assert_eq!(
-            update.subtitle.as_deref(),
-            Some("Claude needs your permission to use Bash")
+            update.subtitle,
+            Some(Subtitle::Text(
+                "Claude needs your permission to use Bash".into()
+            ))
         );
     }
 
@@ -154,9 +185,15 @@ mod tests {
             "PreToolUse",
             r#"{"tool_name":"Edit","tool_input":{"file_path":"C:\\repo\\crates\\hv-ui\\src\\lib.rs"}}"#,
         );
-        assert_eq!(edit.subtitle.as_deref(), Some("Editing src/lib.rs"));
+        assert_eq!(
+            edit.subtitle,
+            Some(Subtitle::Activity(Activity::Editing("src/lib.rs".into())))
+        );
         let other = from_hook("PreToolUse", r#"{"tool_name":"mcp__x__y","tool_input":{}}"#);
-        assert_eq!(other.subtitle.as_deref(), Some("Using mcp__x__y"));
+        assert_eq!(
+            other.subtitle,
+            Some(Subtitle::Activity(Activity::Using("mcp__x__y".into())))
+        );
     }
 
     #[test]
@@ -167,13 +204,9 @@ mod tests {
             r#"{{"tool_name":"Bash","tool_input":{{"description":"{}"}}}}"#,
             "a".repeat(500)
         );
-        assert_eq!(
-            from_hook("PreToolUse", &long)
-                .subtitle
-                .unwrap()
-                .chars()
-                .count(),
-            MAX_SUBTITLE
-        );
+        let Some(Subtitle::Text(text)) = from_hook("PreToolUse", &long).subtitle else {
+            panic!("a command description stays text");
+        };
+        assert_eq!(text.chars().count(), MAX_SUBTITLE);
     }
 }

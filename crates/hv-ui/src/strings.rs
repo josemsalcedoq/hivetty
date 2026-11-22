@@ -212,3 +212,60 @@ pub const MAXIMIZE: &str = "Maximize";
 pub const RESTORE: &str = "Restore";
 /// Window buttons of the custom title bar.
 pub const CLOSE_WINDOW: &str = "Close window";
+/// What an agent is doing (hv-agents `Activity`), worded for the sidebar.
+pub const THINKING: &str = "Thinking…";
+/// Activity wording.
+pub fn running(command: &str) -> String {
+    format!("Running {command}")
+}
+/// Activity wording.
+pub fn editing(file: &str) -> String {
+    format!("Editing {file}")
+}
+/// Activity wording.
+pub fn writing(file: &str) -> String {
+    format!("Writing {file}")
+}
+/// Activity wording.
+pub fn reading(file: &str) -> String {
+    format!("Reading {file}")
+}
+/// Activity wording.
+pub fn searching(pattern: &str) -> String {
+    format!("Searching {pattern}")
+}
+/// Activity wording.
+pub fn fetching(url: &str) -> String {
+    format!("Fetching {url}")
+}
+/// Activity wording.
+pub fn searching_web(query: &str) -> String {
+    format!("Searching the web for {query}")
+}
+/// Activity wording.
+pub fn sub_agent(description: &str) -> String {
+    format!("Agent: {description}")
+}
+/// Activity wording.
+pub fn using(tool: &str) -> String {
+    format!("Using {tool}")
+}
+
+/// Scrollback search bar: `Find: <pattern>▏<status>`.
+pub fn find_bar(pattern: &str, status: &str) -> String {
+    format!("Find: {pattern}\u{258f}{status}")
+}
+/// Search bar status.
+pub const FIND_NO_MATCHES: &str = "  (no matches)";
+/// Search bar status.
+pub const FIND_INVALID: &str = "  (invalid pattern)";
+/// The pill shown when the view is scrolled up.
+pub const JUMP_TO_BOTTOM: &str = "\u{2193} Jump to bottom";
+
+/// Body of the long-command notification.
+pub fn command_finished(name: &str, exit_code: Option<i32>, took: &str) -> String {
+    match exit_code {
+        Some(code) if code != 0 => format!("{name}: exit code {code} after {took}"),
+        _ => format!("{name}: done after {took}"),
+    }
+}

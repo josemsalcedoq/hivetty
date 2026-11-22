@@ -54,13 +54,48 @@ pub enum Source {
 
 const SOURCES: usize = 6;
 
+/// What a session is doing, as data: the UI words it (hv-ui `strings.rs`), this crate never
+/// writes UI text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Activity {
+    /// The agent got a prompt and is thinking.
+    Thinking,
+    /// Running a shell command (the command).
+    Running(String),
+    /// Editing a file (short path).
+    Editing(String),
+    /// Writing a new file (short path).
+    Writing(String),
+    /// Reading a file (short path).
+    Reading(String),
+    /// Searching files for a pattern.
+    Searching(String),
+    /// Fetching a URL.
+    Fetching(String),
+    /// Searching the web for a query.
+    SearchingWeb(String),
+    /// Running a sub-agent (its description).
+    SubAgent(String),
+    /// Using some other tool (its name).
+    Using(String),
+}
+
+/// The second line of a session row: the agent's own words, or an activity to word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Subtitle {
+    /// Text that came from the agent (a command description, a notification message).
+    Text(String),
+    /// Something it is doing.
+    Activity(Activity),
+}
+
 /// One interpreted event.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Update {
     /// New state, if the event implies one.
     pub state: Option<AgentState>,
     /// New subtitle (current action or reason), if any.
-    pub subtitle: Option<String>,
+    pub subtitle: Option<Subtitle>,
     /// The agent's own session id (Claude Code `session_id`).
     pub agent_session: Option<String>,
 }
@@ -73,7 +108,7 @@ pub const SOURCE_HOLD: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, Default)]
 pub struct Tracker {
     state: Option<AgentState>,
-    subtitle: Option<String>,
+    subtitle: Option<Subtitle>,
     agent_session: Option<String>,
     last_seen: [Option<Instant>; SOURCES],
     /// When the current state was set.
@@ -123,8 +158,8 @@ impl Tracker {
     }
 
     /// Current subtitle.
-    pub fn subtitle(&self) -> Option<&str> {
-        self.subtitle.as_deref()
+    pub fn subtitle(&self) -> Option<&Subtitle> {
+        self.subtitle.as_ref()
     }
 
     /// When the current state started.
@@ -162,7 +197,7 @@ pub fn from_program_status(
         subtitle: message
             .map(str::trim)
             .filter(|m| !m.is_empty())
-            .map(str::to_owned),
+            .map(|m| Subtitle::Text(m.to_owned())),
         agent_session: None,
     })
 }
@@ -221,7 +256,7 @@ mod tests {
                 kind: Some("permission".into())
             })
         );
-        assert_eq!(blocked.subtitle.as_deref(), Some("Bash"));
+        assert_eq!(blocked.subtitle, Some(Subtitle::Text("Bash".into())));
         assert_eq!(
             from_program_status("working", None, Some(40), None)
                 .unwrap()

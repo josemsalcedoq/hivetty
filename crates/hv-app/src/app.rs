@@ -472,11 +472,11 @@ impl SearchUi {
     /// The text shown in the search bar.
     fn label(&self) -> String {
         let status = match &self.result {
-            Some(Ok(false)) => "  (no matches)",
-            Some(Err(_)) => "  (invalid pattern)",
+            Some(Ok(false)) => hv_ui::strings::FIND_NO_MATCHES,
+            Some(Err(_)) => hv_ui::strings::FIND_INVALID,
             _ => "",
         };
-        format!("Find: {}▏{status}", self.query)
+        hv_ui::strings::find_bar(&self.query, status)
     }
 }
 
@@ -607,6 +607,8 @@ impl App {
             DEFAULT_FONT_SIZE,
         )?;
         log::info!("renderer: {}", renderer.adapter_description());
+        let mut renderer = renderer;
+        renderer.set_jump_label(hv_ui::strings::JUMP_TO_BOTTOM);
         let chrome = hv_ui::Chrome::new();
         let mut egui = egui_winit::State::new(
             chrome.context().clone(),
@@ -1862,12 +1864,8 @@ impl App {
                                 .title
                                 .clone()
                                 .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned());
-                            let body = match exit {
-                                Some(code) if code != 0 => {
-                                    format!("{name}: exit code {code} after {}", took_text(took))
-                                }
-                                _ => format!("{name}: done after {}", took_text(took)),
-                            };
+                            let body =
+                                hv_ui::strings::command_finished(&name, exit, &took_text(took));
                             hv_platform::notify(title, &body);
                             if Some(*id) != focused {
                                 pane.info.unseen = true;

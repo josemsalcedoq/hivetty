@@ -157,6 +157,8 @@ pub struct Renderer {
     /// Second text pass for labels drawn on top of overlay rectangles (the jump pill).
     ui_text: TextRenderer,
     pill_label: Buffer,
+    /// Text of the pill (set by the app from hv-ui's strings).
+    jump_label: String,
     /// Scrollback search bar text (`None` = hidden) and its laid-out label.
     search_text: Option<String>,
     search_label: Buffer,
@@ -347,6 +349,7 @@ impl Renderer {
             rows: std::collections::HashMap::new(),
             ui_text,
             pill_label,
+            jump_label: JUMP_LABEL.to_owned(),
             pill_rect: None,
             search_text: None,
             search_label,
@@ -409,7 +412,7 @@ impl Renderer {
             self.relayout_font();
             let attrs = Attrs::new().family(Family::Name(&self.font_family));
             self.pill_label
-                .set_text(JUMP_LABEL, &attrs, Shaping::Advanced, None);
+                .set_text(&self.jump_label, &attrs, Shaping::Advanced, None);
             self.pill_label
                 .shape_until_scroll(&mut self.font_system, false);
         }
@@ -912,6 +915,16 @@ impl Renderer {
     }
 
     /// Adds the "Jump to bottom" pill when the view is scrolled up. Returns where its label goes.
+    /// Sets the text of the "jump to bottom" pill (the UI strings live in hv-ui).
+    pub fn set_jump_label(&mut self, text: &str) {
+        let attrs = Attrs::new().family(Family::Name(&self.font_family));
+        self.jump_label = text.to_owned();
+        self.pill_label
+            .set_text(text, &attrs, Shaping::Advanced, None);
+        self.pill_label
+            .shape_until_scroll(&mut self.font_system, false);
+    }
+
     /// Turns the visual bell flash on or off.
     pub fn set_flash(&mut self, on: bool) {
         self.flash = on;
@@ -1098,7 +1111,7 @@ impl Renderer {
             return None;
         }
         let (cw, ch) = (self.cell_w, self.cell_h);
-        let label_w = JUMP_LABEL.chars().count() as f32 * cw;
+        let label_w = self.jump_label.chars().count() as f32 * cw;
         let (w, h) = ((label_w + cw * 2.0).round(), (ch * 1.5).round());
         let [ax, ay, aw, ah] = area;
         let x = (ax + (aw - w) / 2.0).round();

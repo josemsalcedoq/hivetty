@@ -68,7 +68,9 @@ impl SessionInfo {
                 Source::Notify,
                 hv_agents::Update {
                     state: Some(AgentState::Blocked { kind: None }),
-                    subtitle: Some(body.clone()).filter(|b| !b.trim().is_empty()),
+                    subtitle: Some(body.clone())
+                        .filter(|b| !b.trim().is_empty())
+                        .map(hv_agents::Subtitle::Text),
                     agent_session: None,
                 },
                 now,
@@ -155,6 +157,27 @@ impl SessionInfo {
     }
 }
 
+/// The sidebar wording of a subtitle: the agent's own text as is, activities from
+/// `strings.rs`.
+pub(crate) fn subtitle_text(subtitle: &hv_agents::Subtitle) -> String {
+    use hv_agents::{Activity, Subtitle};
+    match subtitle {
+        Subtitle::Text(text) => text.clone(),
+        Subtitle::Activity(activity) => match activity {
+            Activity::Thinking => strings::THINKING.to_owned(),
+            Activity::Running(c) => strings::running(c),
+            Activity::Editing(f) => strings::editing(f),
+            Activity::Writing(f) => strings::writing(f),
+            Activity::Reading(f) => strings::reading(f),
+            Activity::Searching(p) => strings::searching(p),
+            Activity::Fetching(u) => strings::fetching(u),
+            Activity::SearchingWeb(q) => strings::searching_web(q),
+            Activity::SubAgent(d) => strings::sub_agent(d),
+            Activity::Using(t) => strings::using(t),
+        },
+    }
+}
+
 /// When the formatted elapsed time of a session started at `started` next changes.
 pub(crate) fn next_elapsed_change(started: Instant, now: Instant) -> Instant {
     let secs = now.saturating_duration_since(started).as_secs();
@@ -199,9 +222,10 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
             Some(AgentState::Exited) => (RowState::Done, strings::STATE_EXITED),
         }
     };
-    let subtitle = match (info.exited, info.agent.subtitle()) {
+    let detail = info.agent.subtitle().map(subtitle_text);
+    let subtitle = match (info.exited, detail) {
         (false, Some(detail)) if state == RowState::Waiting => format!("{label}: {detail}"),
-        (false, Some(detail)) => detail.to_owned(),
+        (false, Some(detail)) => detail,
         _ => label.to_owned(),
     };
     let started = info
