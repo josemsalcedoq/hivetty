@@ -1,0 +1,6 @@
+# winget version manifest for hivetty (F6-10). A template: `cargo xtask manifests` fills it.
+PackageIdentifier: Hivetty.Hivetty
+PackageVersion: "{{version}}"
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

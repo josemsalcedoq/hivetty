@@ -1,0 +1,12 @@
+# winget installer manifest for hivetty (F6-10). A template: `cargo xtask manifests` fills it.
+PackageIdentifier: Hivetty.Hivetty
+PackageVersion: "{{version}}"
+InstallerType: wix
+Scope: machine
+UpgradeBehavior: install
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/josemsalcedoq/hivetty/releases/download/v{{version}}/{{msi}}
+    InstallerSha256: "{{msi_sha256_upper}}"
+ManifestType: installer
+ManifestVersion: 1.6.0

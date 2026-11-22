@@ -1,0 +1,18 @@
+# winget default locale manifest for hivetty (F6-10). A template: `cargo xtask manifests` fills it.
+PackageIdentifier: Hivetty.Hivetty
+PackageVersion: "{{version}}"
+PackageLocale: en-US
+Publisher: hivetty contributors
+PublisherUrl: https://github.com/josemsalcedoq/hivetty
+PackageName: hivetty
+PackageUrl: https://github.com/josemsalcedoq/hivetty
+License: MIT OR Apache-2.0
+LicenseUrl: https://github.com/josemsalcedoq/hivetty#license
+ShortDescription: GPU terminal for running many coding agents side by side
+Description: hivetty is a GPU-accelerated terminal with a sidebar that shows what each coding agent session is doing and a dashboard of their token usage.
+Tags:
+  - terminal
+  - console
+  - agents
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

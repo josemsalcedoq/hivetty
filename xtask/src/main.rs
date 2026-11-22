@@ -1,6 +1,7 @@
 //! `cargo xtask <command>`: project automation that should work the same on every OS.
 
 mod conpty;
+mod manifests;
 mod notices;
 
 use std::path::{Path, PathBuf};
@@ -18,6 +19,8 @@ COMMANDS:
                     (Windows; --profile debug|release, default debug)
     dist            Build release packages                     (phase F6)
     notices         Write THIRD_PARTY_NOTICES.md (licenses of every shipped crate)
+    manifests <version> <packages-dir>
+                    Fill the Homebrew cask and winget manifests for a release
     bench           Run performance benchmarks (release build)
 ";
 
@@ -75,6 +78,13 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         }
+        Some("manifests") => match manifests::run(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                println!("xtask manifests: {err:#}");
+                ExitCode::FAILURE
+            }
+        },
         Some("conpty-fetch") => match conpty::fetch(&args[1..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
