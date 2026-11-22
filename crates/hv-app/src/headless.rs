@@ -188,8 +188,23 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             .last()
             .and_then(|p| p.info.title.clone())
             .unwrap_or_else(|| hv_ui::strings::DEFAULT_TITLE.to_owned());
+        let keymap = crate::keymap::Keymap::defaults();
+        let menu = if cfg!(target_os = "macos") {
+            Vec::new()
+        } else {
+            crate::keymap::MENU_SECTIONS
+                .iter()
+                .map(|section| {
+                    section
+                        .iter()
+                        .filter_map(|name| crate::keymap::menu_item(&keymap, name))
+                        .collect()
+                })
+                .collect()
+        };
         let model = hv_ui::ChromeModel {
             sidebar_visible: true,
+            menu,
             sessions,
             tabs: vec![{
                 let main = panes.last().expect("at least one pane");
@@ -203,20 +218,11 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             }],
         };
         if opts.palette {
+            let keymap = crate::keymap::Keymap::defaults();
             let items = crate::keymap::PALETTE_ACTIONS
                 .iter()
-                .enumerate()
-                .filter_map(|(id, name)| {
-                    let action = crate::keymap::Action::parse(name)?;
-                    Some(hv_ui::PaletteItem {
-                        id,
-                        label: hv_ui::strings::action_label(name)?.to_owned(),
-                        hint: crate::keymap::Keymap::defaults()
-                            .chord_for(&action)
-                            .map(crate::keymap::Chord::pretty)
-                            .unwrap_or_default(),
-                    })
-                })
+                .filter(|name| **name != "command_palette")
+                .filter_map(|name| crate::keymap::menu_item(&keymap, name))
                 .collect();
             chrome.open_palette(items);
             // One frame to lay the palette out and focus it.

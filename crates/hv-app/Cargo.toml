@@ -38,6 +38,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 winit = "0.30"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.21.2", default-features = false }
+
 # Packaging with cargo-packager (SP-7, docs/spikes/SP-7.md). Paths are relative to this
 # crate. The binaries come from `target/release`, built before `cargo packager --release`;
 # the formats are chosen per OS on the command line (see .github/workflows/package.yml).

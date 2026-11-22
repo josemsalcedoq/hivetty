@@ -3,13 +3,14 @@
 
 use egui::{Color32, CornerRadius, Key, Sense, Stroke, Vec2};
 
-use crate::{RowState, elide, state_color, strings, theme};
+use crate::{PaletteItem, RowState, elide, state_color, strings, theme};
 
 /// Tab bar height in points (docs/ui-spec.md 1).
 pub const TAB_BAR_HEIGHT: f32 = 36.0;
 const TAB_MIN_WIDTH: f32 = 120.0;
 const TAB_MAX_WIDTH: f32 = 240.0;
 const PLUS_WIDTH: f32 = 32.0;
+const MENU_WIDTH: f32 = 32.0;
 /// Spinner: 8 frames at 12 fps (docs/ui-spec.md 1, movement).
 const SPINNER_FPS: f64 = 12.0;
 
@@ -65,6 +66,8 @@ pub enum TabAction {
         /// New index.
         to: usize,
     },
+    /// An entry of the ☰ menu (its [`PaletteItem::id`]).
+    Menu(usize),
 }
 
 /// State kept between frames.
@@ -82,9 +85,15 @@ impl TabBar {
         self.renaming.is_some()
     }
 
-    pub(crate) fn show(&mut self, ui: &mut egui::Ui, tabs: &[TabItem]) -> Option<TabAction> {
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        tabs: &[TabItem],
+        menu: &[Vec<PaletteItem>],
+    ) -> Option<TabAction> {
         let mut action = None;
-        let available = (ui.available_width() - PLUS_WIDTH).max(TAB_MIN_WIDTH);
+        let menu_width = if menu.is_empty() { 0.0 } else { MENU_WIDTH };
+        let available = (ui.available_width() - PLUS_WIDTH - menu_width).max(TAB_MIN_WIDTH);
         let width = (available / tabs.len().max(1) as f32).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH);
         if self
             .renaming
@@ -100,6 +109,11 @@ impl TabBar {
         let mut rects = Vec::with_capacity(tabs.len());
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            if !menu.is_empty()
+                && let Some(id) = hamburger(ui, menu)
+            {
+                action = Some(TabAction::Menu(id));
+            }
             for (i, tab) in tabs.iter().enumerate() {
                 let (rect, a) = self.tab(ui, tab, width, i);
                 rects.push(rect);
@@ -318,6 +332,46 @@ impl TabBar {
         }
         (rect, action)
     }
+}
+
+/// The ☰ button and its menu (Windows and Linux; macOS uses the system menu bar).
+fn hamburger(ui: &mut egui::Ui, sections: &[Vec<PaletteItem>]) -> Option<usize> {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(MENU_WIDTH, TAB_BAR_HEIGHT - 8.0), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, strings::MENU));
+    let painter = ui.painter_at(rect);
+    if response.hovered() {
+        painter.rect_filled(rect, CornerRadius::same(6), theme::HOVER_BG);
+    }
+    // Three lines: the UI font has no ☰ glyph.
+    for dy in [-4.0, 0.0, 4.0] {
+        let y = rect.center().y + dy;
+        painter.line_segment(
+            [
+                egui::pos2(rect.center().x - 6.0, y),
+                egui::pos2(rect.center().x + 6.0, y),
+            ],
+            Stroke::new(1.5, theme::TEXT_SECONDARY),
+        );
+    }
+    let response = response.on_hover_text(strings::MENU);
+    let mut chosen = None;
+    egui::Popup::menu(&response).show(|ui| {
+        ui.set_min_width(260.0);
+        for (i, section) in sections.iter().enumerate() {
+            if i > 0 {
+                ui.separator();
+            }
+            for item in section {
+                let button = egui::Button::new(&item.label).shortcut_text(&item.hint);
+                if ui.add(button).clicked() {
+                    chosen = Some(item.id);
+                    ui.close();
+                }
+            }
+        }
+    });
+    chosen
 }
 
 /// Eight dots around a circle, one bright, rotating at 12 fps.

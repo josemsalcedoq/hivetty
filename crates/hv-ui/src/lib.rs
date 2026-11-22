@@ -52,6 +52,9 @@ pub struct ChromeModel {
     pub sidebar_visible: bool,
     /// Tabs of the window. The bar is hidden when empty.
     pub tabs: Vec<TabItem>,
+    /// Sections of the ☰ menu in the tab bar; empty = no menu button (macOS uses the system
+    /// menu bar instead).
+    pub menu: Vec<Vec<PaletteItem>>,
 }
 
 /// What the chrome produced this frame.
@@ -140,7 +143,7 @@ impl Chrome {
                             .stroke(Stroke::new(1.0, theme::BORDER)),
                     )
                     .show(ui, |ui| {
-                        tab_action = tab_bar.show(ui, &model.tabs);
+                        tab_action = tab_bar.show(ui, &model.tabs, &model.menu);
                     });
             }
             central = ui.available_rect_before_wrap();
@@ -409,6 +412,7 @@ mod tests {
         let model = ChromeModel {
             sidebar_visible: true,
             tabs: Vec::new(),
+            menu: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
                 subtitle: "Needs permission: Bash".into(),
@@ -450,6 +454,7 @@ mod tests {
         let model = ChromeModel {
             sidebar_visible: true,
             tabs: Vec::new(),
+            menu: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),
                 subtitle: "Working".into(),

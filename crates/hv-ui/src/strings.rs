@@ -30,6 +30,16 @@ pub const DEFAULT_TITLE: &str = "Shell";
 pub const NEW_TAB: &str = "New tab";
 /// Accessible name of a tab's close button.
 pub const CLOSE_TAB: &str = "Close tab";
+/// macOS menu bar titles.
+pub const MENU_SHELL: &str = "Shell";
+/// macOS menu bar titles.
+pub const MENU_EDIT: &str = "Edit";
+/// macOS menu bar titles.
+pub const MENU_VIEW: &str = "View";
+/// macOS menu bar titles.
+pub const MENU_WINDOW: &str = "Window";
+/// Tooltip and accessible name of the ☰ menu button.
+pub const MENU: &str = "Menu";
 /// Placeholder of the command palette's filter box.
 pub const PALETTE_HINT: &str = "Type a command…";
 /// Shown when no command matches.

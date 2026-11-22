@@ -103,6 +103,7 @@ Cada spike es código desechable en la rama `spike/…` y termina con una nota e
 - ✅ F2-07: paleta de comandos (`Ctrl+Shift+P` / `⇧⌘P`) con filtro difuso, flechas, Enter y Esc, y el atajo de cada acción. Mientras está abierta, el teclado y el IME van a egui (cubre el "IME en un campo de egui" de SP-3; falta probarlo a mano con japonés).
 - ✅ F2-08: al cerrar la ventana se guardan pestañas, divisiones, la carpeta de cada panel y la geometría de la ventana (`layout.json` en el directorio de datos, escritura atómica, versionado). Al abrir sin `-e` se restauran: carpetas que ya no existen caen a la de por defecto, la posición solo si sigue en un monitor conectado y como mucho 64 paneles. Opciones `[window] restore_layout` y `remember_geometry`.
 - ✅ F2-10: 10 paneles con salida continua a 1080p: p50 8,2 ms y p95 12,1 ms por frame (ver [perf.md](perf.md)). Medir en portátil con iGPU queda para la checklist de F6.
+- ✅ F2-09: menú ☰ en la barra de pestañas (Windows y Linux) con las mismas acciones y atajos que la paleta; en macOS, barra de menús nativa con `muda` (hivetty, Shell, Edit, View, Window), cuyos atajos salen del keymap y se rehacen al recargar la configuración. El de macOS solo está comprobado con `cargo clippy --target aarch64-apple-darwin`; falta probarlo en un Mac.
 - Cada panel recibe su `HIVETTY_SESSION_ID` y los hooks se enrutan a su panel. Los paneles nuevos heredan el cwd del panel con foco (adelanta F3-08 cuando la shell informa el cwd).
 - `hivetty --screenshot --ui --split` captura dos paneles con la barra de pestañas.
 

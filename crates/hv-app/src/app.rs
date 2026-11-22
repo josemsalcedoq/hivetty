@@ -45,6 +45,9 @@ pub(crate) enum AppEvent {
     Hook(hv_ipc::HookEvent),
     /// A screen reader asked for the accessibility tree or an action (SP-3, F4-25).
     AccessKit(egui_winit::accesskit_winit::Event),
+    /// A menu bar item was chosen (macOS); the id is the action name.
+    #[cfg(target_os = "macos")]
+    Menu(String),
 }
 
 impl From<egui_winit::accesskit_winit::Event> for AppEvent {
@@ -198,7 +201,7 @@ impl Ui {
     }
 
     /// The sidebar and tab bar contents.
-    fn chrome_model(&mut self, sidebar_visible: bool) -> hv_ui::ChromeModel {
+    fn chrome_model(&mut self, sidebar_visible: bool, keymap: &Keymap) -> hv_ui::ChromeModel {
         let focused = self.focused_id();
         let mut sessions = Vec::new();
         self.row_panes.clear();
@@ -247,10 +250,25 @@ impl Ui {
             }
             tabs.push(item);
         }
+        // macOS has the system menu bar; elsewhere the same entries live in the ☰ menu.
+        let menu = if cfg!(target_os = "macos") {
+            Vec::new()
+        } else {
+            crate::keymap::MENU_SECTIONS
+                .iter()
+                .map(|section| {
+                    section
+                        .iter()
+                        .filter_map(|name| crate::keymap::menu_item(keymap, name))
+                        .collect()
+                })
+                .collect()
+        };
         hv_ui::ChromeModel {
             sessions,
             sidebar_visible,
             tabs,
+            menu,
         }
     }
 }
@@ -298,6 +316,9 @@ struct App {
     restore: Option<crate::saved::SavedLayout>,
     /// Where the layout is saved on close; `None` for `hivetty -e program`.
     layout_path: Option<std::path::PathBuf>,
+    /// The macOS menu bar (kept alive while shown).
+    #[cfg(target_os = "macos")]
+    menu: Option<muda::Menu>,
 }
 
 #[derive(Debug, Default)]
@@ -369,6 +390,8 @@ impl App {
             pending_action: None,
             restore: None,
             layout_path: None,
+            #[cfg(target_os = "macos")]
+            menu: None,
         }
     }
 
@@ -423,6 +446,10 @@ impl App {
             None,
         );
         egui.init_accesskit(event_loop, &window, self.proxy.clone());
+        #[cfg(target_os = "macos")]
+        {
+            self.menu = crate::menu_mac::install(&self.keymap, self.proxy.clone());
+        }
         window.set_visible(true);
         let mut ui = Ui {
             window,
@@ -610,19 +637,8 @@ impl App {
             Action::CommandPalette => {
                 let items = crate::keymap::PALETTE_ACTIONS
                     .iter()
-                    .enumerate()
-                    .filter_map(|(id, name)| {
-                        let action = Action::parse(name)?;
-                        Some(hv_ui::PaletteItem {
-                            id,
-                            label: hv_ui::strings::action_label(name)?.to_owned(),
-                            hint: self
-                                .keymap
-                                .chord_for(&action)
-                                .map(crate::keymap::Chord::pretty)
-                                .unwrap_or_default(),
-                        })
-                    })
+                    .filter(|name| **name != "command_palette")
+                    .filter_map(|name| crate::keymap::menu_item(&self.keymap, name))
                     .collect();
                 ui.chrome.open_palette(items);
             }
@@ -1142,6 +1158,11 @@ impl App {
             apply_font(ui, &config.font);
         }
         self.keymap = keymap_from(&config);
+        #[cfg(target_os = "macos")]
+        {
+            // Shortcuts shown in the menu bar follow the keymap.
+            self.menu = crate::menu_mac::install(&self.keymap, self.proxy.clone());
+        }
         self.config = config;
     }
 
@@ -1221,7 +1242,7 @@ impl App {
             egui::CursorIcon::Text
         };
         let Some(ui) = &mut self.ui else { return };
-        let (mut frame, out) = run_chrome(ui, self.sidebar_visible, cursor);
+        let (mut frame, out) = run_chrome(ui, self.sidebar_visible, &self.keymap, cursor);
         // Clicks in the chrome.
         if let Some(row) = out.clicked_session
             && let Some(&id) = ui.row_panes.get(row)
@@ -1336,6 +1357,12 @@ impl App {
                     }
                 }
             }
+            hv_ui::TabAction::Menu(id) => {
+                self.pending_action = crate::keymap::PALETTE_ACTIONS
+                    .get(id)
+                    .and_then(|name| Action::parse(name));
+                ui.window.request_redraw();
+            }
             hv_ui::TabAction::New => {
                 let cwd = ui.focused().and_then(|p| p.session.cwd());
                 let Some(ui) = self.ui.take() else { return };
@@ -1360,10 +1387,11 @@ impl App {
 fn run_chrome(
     ui: &mut Ui,
     sidebar_visible: bool,
+    keymap: &Keymap,
     cursor: egui::CursorIcon,
 ) -> (hv_render::UiFrame, hv_ui::ChromeOutput) {
     let input = ui.egui.take_egui_input(&ui.window);
-    let model = ui.chrome_model(sidebar_visible);
+    let model = ui.chrome_model(sidebar_visible, keymap);
     let mut out = ui.chrome.run(input, &model);
     if ui.terminal_area != Some(out.terminal_area) {
         ui.terminal_area = Some(out.terminal_area);
@@ -1428,6 +1456,12 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::ConfigChanged => self.reload_config(),
+            #[cfg(target_os = "macos")]
+            AppEvent::Menu(name) => {
+                if let Some(action) = Action::parse(&name) {
+                    self.run_action(action, event_loop);
+                }
+            }
             AppEvent::AccessKit(event) => {
                 use egui_winit::accesskit_winit::WindowEvent as A11y;
                 if let Some(ui) = &mut self.ui {

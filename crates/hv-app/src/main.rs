@@ -7,6 +7,8 @@ mod app;
 mod headless;
 mod hook;
 mod keymap;
+#[cfg(target_os = "macos")]
+mod menu_mac;
 mod model;
 mod saved;
 mod workspace;

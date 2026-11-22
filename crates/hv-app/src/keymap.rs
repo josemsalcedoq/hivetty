@@ -310,7 +310,37 @@ pub(crate) const PALETTE_ACTIONS: &[&str] = &[
     "font_bigger",
     "font_smaller",
     "font_reset",
+    "command_palette",
 ];
+
+/// Sections of the menu (the ☰ menu, and the menu bar on macOS), by action name.
+pub(crate) const MENU_SECTIONS: &[&[&str]] = &[
+    &["new_tab", "split_right", "split_down", "close_pane"],
+    &["find", "copy", "paste"],
+    &[
+        "toggle_sidebar",
+        "toggle_zoom",
+        "font_bigger",
+        "font_smaller",
+        "font_reset",
+    ],
+    &["next_tab", "previous_tab"],
+    &["command_palette"],
+];
+
+/// The palette / menu entry for an action name: its id is the index in [`PALETTE_ACTIONS`].
+pub(crate) fn menu_item(keymap: &Keymap, name: &str) -> Option<hv_ui::PaletteItem> {
+    let id = PALETTE_ACTIONS.iter().position(|n| *n == name)?;
+    let action = Action::parse(name)?;
+    Some(hv_ui::PaletteItem {
+        id,
+        label: hv_ui::strings::action_label(name)?.to_owned(),
+        hint: keymap
+            .chord_for(&action)
+            .map(Chord::pretty)
+            .unwrap_or_default(),
+    })
+}
 
 /// Shortcuts in effect: the defaults with the user's overrides applied.
 #[derive(Debug, Clone)]
