@@ -1,6 +1,6 @@
 # hivetty user guide
 
-hivetty is a GPU-accelerated terminal for macOS, Linux and Windows, built for running many coding agents side by side. This guide covers what works today. hivetty is pre-release: there are no installers yet, so you build it from source.
+hivetty is a GPU-accelerated terminal for macOS, Linux and Windows, built for running many coding agents side by side. This guide covers what works today. hivetty is pre-release: build it from source, or take an unsigned test package (`.msi`, `.dmg`, `.deb`, AppImage) from the latest run of the *package* workflow in the project's GitHub Actions. Questions? See the [FAQ](faq.md).
 
 ## Install from source
 

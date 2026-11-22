@@ -52,6 +52,8 @@ Requirements:
 
 ## Documentation
 
+- [User guide](docs/user/guide.md) and [FAQ](docs/user/faq.md) (English).
+
 The design and planning documents live in [`docs/`](docs/). They are written in Spanish; the application, code and user documentation are in English. Start with [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Contributing
