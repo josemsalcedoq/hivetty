@@ -286,7 +286,7 @@ fn endpoint_name() -> io::Result<String> {
 /// A socket path in a private directory: `$XDG_RUNTIME_DIR/hivetty/` or `$TMPDIR/hivetty-$USER/`.
 #[cfg(unix)]
 fn endpoint_name() -> io::Result<String> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
     let dir = match std::env::var_os("XDG_RUNTIME_DIR") {
         Some(runtime) if !runtime.is_empty() => std::path::PathBuf::from(runtime).join("hivetty"),
         _ => {
@@ -298,7 +298,11 @@ fn endpoint_name() -> io::Result<String> {
         Ok(()) => {}
         Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
             let meta = std::fs::symlink_metadata(&dir)?;
-            if !meta.is_dir() || meta.permissions().mode() & 0o077 != 0 {
+            // Another user could have created it first (in a shared /tmp): it must be ours.
+            if !meta.is_dir()
+                || meta.permissions().mode() & 0o077 != 0
+                || meta.uid() != hv_platform::effective_uid()
+            {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     format!("{} is not a private directory", dir.display()),
@@ -320,6 +324,7 @@ fn listen(name: &str) -> io::Result<interprocess::local_socket::Listener> {
     use interprocess::os::windows::local_socket::ListenerOptionsExt;
     use interprocess::os::windows::security_descriptor::SecurityDescriptor;
     // Protected DACL with a single ACE: full access for the owner (the current user).
+    // interprocess also sets PIPE_REJECT_REMOTE_CLIENTS unless asked not to.
     let sddl = widestring::U16CString::from_str("D:P(A;;GA;;;OW)")
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
     let sd = SecurityDescriptor::deserialize(&sddl)?;

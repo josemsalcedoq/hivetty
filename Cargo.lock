@@ -1392,6 +1392,7 @@ name = "hv-ipc"
 version = "0.0.0"
 dependencies = [
  "getrandom 0.4.3",
+ "hv-platform",
  "interprocess",
  "log",
  "postcard",
@@ -1403,6 +1404,7 @@ dependencies = [
 name = "hv-platform"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "windows-sys 0.61.2",
 ]
 

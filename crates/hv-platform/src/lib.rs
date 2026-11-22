@@ -29,3 +29,10 @@ mod tests {
         super::attach_parent_console();
     }
 }
+
+/// The effective user id of this process.
+#[cfg(unix)]
+pub fn effective_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
+}
