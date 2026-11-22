@@ -5,6 +5,7 @@
 
 mod app;
 mod headless;
+mod hook;
 mod model;
 
 use std::path::PathBuf;
@@ -34,6 +35,8 @@ OPTIONS:
     --find <PATTERN>     With --screenshot, search the scrollback (regex) and show the result
     --doctor             Print diagnostic information about this system
     usage [--json]       Print Claude Code token usage per day from local transcripts
+    hook --agent <ID> --event <NAME>
+                         Forward an agent hook (stdin) to the running hivetty; always exits 0
     -V, --version        Print version
     -h, --help           Print help
 
@@ -148,11 +151,17 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
 }
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // Agent hooks come first and bypass everything else: no logging setup, no console, exit 0.
+    if args.first().map(String::as_str) == Some("hook") {
+        hook::run(&args[1..]);
+        // Exit right away: a helper thread may still be blocked on stdin or a pipe.
+        std::process::exit(0);
+    }
     env_logger::Builder::from_env(
         env_logger::Env::new().filter_or("HIVETTY_LOG", "warn,wgpu_hal=off,wgpu_core=error"),
     )
     .init();
-    let args: Vec<String> = std::env::args().skip(1).collect();
     let parsed = parse_args(&args);
     // Everything except opening the window prints to the console; in Windows release builds
     // (GUI subsystem) that needs the parent console attached first.

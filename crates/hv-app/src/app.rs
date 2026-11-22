@@ -27,12 +27,14 @@ const DEFAULT_FONT_SIZE: f32 = 14.0;
 const APP_TITLE: &str = "hivetty";
 
 /// Events sent to the UI thread from other threads.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum AppEvent {
     /// The PTY reader produced output or an event.
     Wakeup,
     /// The config file changed on disk.
     ConfigChanged,
+    /// An agent hook arrived over IPC (`hivetty hook`).
+    Hook(hv_ipc::HookEvent),
 }
 
 /// Runs the terminal window until the shell exits or the window is closed.
@@ -60,6 +62,26 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
             let _ = proxy.send_event(AppEvent::ConfigChanged);
         })
     });
+    // Agent hooks reach the app over local IPC; panes find it through the environment.
+    let ipc = {
+        let proxy = std::sync::Mutex::new(proxy.clone());
+        hv_ipc::Server::start(move |message| {
+            let hv_ipc::Message::Hook(hook) = message;
+            if let Ok(proxy) = proxy.lock() {
+                let _ = proxy.send_event(AppEvent::Hook(hook));
+            }
+        })
+    };
+    match &ipc {
+        Ok(server) => {
+            spec.env.extend(server.endpoint().env());
+            spec.env.push((
+                hv_ipc::ENV_SESSION.to_owned(),
+                crate::model::SESSION_ID.to_owned(),
+            ));
+        }
+        Err(err) => log::warn!("agent hooks disabled: cannot start IPC: {err}"),
+    }
     let mut app = App::new(spec, proxy);
     app.config = config;
     app.config_path = config_path;
@@ -694,7 +716,12 @@ impl App {
                         log::warn!("OSC 52 clipboard write failed: {err}");
                     }
                 }
-                SessionEvent::Term(term_event) => log::debug!("terminal event: {term_event:?}"),
+                SessionEvent::Term(term_event) => {
+                    log::debug!("terminal event: {term_event:?}");
+                    if ui.info.on_term_event(&term_event) {
+                        ui.window.request_redraw();
+                    }
+                }
             }
         }
     }
@@ -726,6 +753,13 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::ConfigChanged => self.reload_config(),
+            AppEvent::Hook(hook) => {
+                if let Some(ui) = &mut self.ui
+                    && ui.info.on_hook(&hook)
+                {
+                    ui.window.request_redraw();
+                }
+            }
             AppEvent::Wakeup => {
                 self.wake_pending.store(false, Ordering::Release);
                 self.handle_session_events(event_loop);

@@ -3,7 +3,12 @@
 use std::path::Path;
 use std::time::Instant;
 
+use hv_agents::{AgentState, Source, Tracker};
+use hv_term::osc::TermEvent;
 use hv_ui::{RowState, SessionRow, format_elapsed, strings};
+
+/// Value of `HIVETTY_SESSION_ID` for the (single, for now) pane.
+pub(crate) const SESSION_ID: &str = "1";
 
 /// What the app tracks about the (single, for now) session.
 #[derive(Debug, Clone)]
@@ -14,6 +19,8 @@ pub(crate) struct SessionInfo {
     pub(crate) started: Instant,
     /// Whether the program has exited.
     pub(crate) exited: bool,
+    /// Agent state from OSC 7501, hooks and notifications.
+    pub(crate) agent: Tracker,
 }
 
 impl SessionInfo {
@@ -22,7 +29,44 @@ impl SessionInfo {
             title: None,
             started: Instant::now(),
             exited: false,
+            agent: Tracker::default(),
         }
+    }
+
+    /// Feeds a terminal event. Returns true if the sidebar changed.
+    pub(crate) fn on_term_event(&mut self, event: &TermEvent) -> bool {
+        let now = Instant::now();
+        match event {
+            TermEvent::ProgramStatus(status) => hv_agents::from_program_status(
+                &status.state,
+                status.kind.as_deref(),
+                status.progress,
+                status.message.as_deref(),
+            )
+            .is_some_and(|update| self.agent.apply(Source::Osc7501, update, now)),
+            TermEvent::Notify { body, .. } => self.agent.apply(
+                Source::Notify,
+                hv_agents::Update {
+                    state: Some(AgentState::Blocked { kind: None }),
+                    subtitle: Some(body.clone()).filter(|b| !b.trim().is_empty()),
+                    agent_session: None,
+                },
+                now,
+            ),
+            _ => false,
+        }
+    }
+
+    /// Feeds a hook forwarded by `hivetty hook`. Returns true if the sidebar changed.
+    pub(crate) fn on_hook(&mut self, hook: &hv_ipc::HookEvent) -> bool {
+        if hook.session.as_deref().is_some_and(|s| s != SESSION_ID) {
+            return false; // another pane (or another hivetty window)
+        }
+        let update = match hook.agent.as_str() {
+            "claude" => hv_agents::claude::from_hook(&hook.event, &hook.payload),
+            _ => return false,
+        };
+        self.agent.apply(Source::Hook, update, Instant::now())
     }
 }
 
@@ -48,16 +92,42 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         .clone()
         .filter(|t| !t.trim().is_empty())
         .unwrap_or_else(|| strings::DEFAULT_TITLE.to_owned());
-    let (state, subtitle) = if info.exited {
+    let (state, label) = if info.exited {
         (RowState::Done, strings::STATE_EXITED)
     } else {
-        (RowState::Working, strings::STATE_RUNNING)
+        match info.agent.state() {
+            None => (RowState::Working, strings::STATE_RUNNING),
+            Some(AgentState::Starting) => (RowState::Working, strings::STATE_STARTING),
+            Some(AgentState::Working { .. }) => (RowState::Working, strings::STATE_WORKING),
+            Some(AgentState::Blocked { kind }) => (
+                RowState::Waiting,
+                match kind.as_deref() {
+                    Some("permission") => strings::STATE_NEEDS_PERMISSION,
+                    Some("auth") => strings::STATE_NEEDS_LOGIN,
+                    _ => strings::STATE_WAITING,
+                },
+            ),
+            Some(AgentState::Idle) => (RowState::Idle, strings::STATE_IDLE),
+            Some(AgentState::Done) => (RowState::Done, strings::STATE_DONE),
+            Some(AgentState::Error) => (RowState::Error, strings::STATE_ERROR),
+            Some(AgentState::Exited) => (RowState::Done, strings::STATE_EXITED),
+        }
     };
+    let subtitle = match (info.exited, info.agent.subtitle()) {
+        (false, Some(detail)) if state == RowState::Waiting => format!("{label}: {detail}"),
+        (false, Some(detail)) => detail.to_owned(),
+        _ => label.to_owned(),
+    };
+    let started = info
+        .agent
+        .since()
+        .filter(|_| !info.exited)
+        .unwrap_or(info.started);
     SessionRow {
         title,
-        subtitle: subtitle.to_owned(),
+        subtitle,
         project,
-        elapsed: format_elapsed(info.started.elapsed().as_secs()),
+        elapsed: format_elapsed(started.elapsed().as_secs()),
         state,
         focused: true,
     }
@@ -76,5 +146,42 @@ mod tests {
         assert_eq!(at(59), t0 + Duration::from_secs(60));
         assert_eq!(at(61), t0 + Duration::from_secs(120));
         assert_eq!(at(3601), t0 + Duration::from_secs(7200));
+    }
+
+    fn hook(event: &str, payload: &str) -> hv_ipc::HookEvent {
+        hv_ipc::HookEvent {
+            session: Some(SESSION_ID.into()),
+            agent: "claude".into(),
+            event: event.into(),
+            payload: payload.into(),
+        }
+    }
+
+    #[test]
+    fn hooks_drive_the_sidebar_row() {
+        let mut info = SessionInfo::new();
+        assert!(info.on_hook(&hook(
+            "PreToolUse",
+            r#"{"tool_name":"Bash","tool_input":{"description":"Running tests"}}"#
+        )));
+        let row = session_row(&info, None);
+        assert_eq!(
+            (row.state, row.subtitle.as_str()),
+            (RowState::Working, "Running tests")
+        );
+
+        assert!(info.on_hook(&hook(
+            "Notification",
+            r#"{"message":"Bash(cargo test)","notification_type":"permission_prompt"}"#
+        )));
+        let row = session_row(&info, None);
+        assert_eq!(row.state, RowState::Waiting);
+        assert_eq!(row.subtitle, "Needs permission: Bash(cargo test)");
+
+        let other_pane = hv_ipc::HookEvent {
+            session: Some("2".into()),
+            ..hook("Stop", "{}")
+        };
+        assert!(!info.on_hook(&other_pane));
     }
 }

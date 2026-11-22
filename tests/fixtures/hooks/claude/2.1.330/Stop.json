@@ -1,0 +1,15 @@
+{
+  "session_id": "ed27be5b-573d-41de-9db1-c5c2b5e16934",
+  "transcript_path": "C:\\Users\\user\\.claude\\projects\\C--Users-user-work-demo\\ed27be5b-573d-41de-9db1-c5c2b5e16934.jsonl",
+  "cwd": "C:\\Users\\user\\work\\demo",
+  "prompt_id": "9a703692-59af-486f-8f94-e57e73cecf34",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "done",
+  "background_tasks": [],
+  "session_crons": []
+}

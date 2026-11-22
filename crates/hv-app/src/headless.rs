@@ -94,8 +94,12 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
         let batch = session.drain_events();
         exited = batch.contains(&SessionEvent::Exited);
         for event in &batch {
-            if let SessionEvent::Title(title) = event {
-                info.title = Some(title.clone());
+            match event {
+                SessionEvent::Title(title) => info.title = Some(title.clone()),
+                SessionEvent::Term(term_event) => {
+                    info.on_term_event(term_event);
+                }
+                _ => {}
             }
         }
         events.extend(batch);

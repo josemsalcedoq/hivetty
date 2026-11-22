@@ -10,3 +10,13 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+getrandom = "0.4.3"
+interprocess = "2.4.9"
+log = "0.4.35"
+postcard = { version = "1.2.0", features = ["use-std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+
+[target."cfg(windows)".dependencies]
+widestring = "1"
