@@ -141,6 +141,16 @@ impl Snapshot {
             .collect()
     }
 
+    /// The visible text, one line per row, without trailing spaces or trailing blank lines
+    /// (what screen readers get, F6-05).
+    pub fn text(&self) -> String {
+        let mut lines: Vec<String> = (0..self.rows).map(|r| self.row_text(r)).collect();
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+        lines.join("\n")
+    }
+
     /// The text of one row, without trailing spaces (handy for tests).
     pub fn row_text(&self, row: usize) -> String {
         let line: String = self.cells[row * self.cols..(row + 1) * self.cols]

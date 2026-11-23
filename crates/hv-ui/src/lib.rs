@@ -134,6 +134,9 @@ pub struct ChromeModel {
     /// The latest state change that needs the user, for screen readers (F4-25): shown in the
     /// sidebar as a live region, so it is read out when it changes.
     pub announcement: Option<String>,
+    /// The focused terminal's visible text, for screen readers (F6-05). The app fills it only
+    /// while [`Chrome::accessibility_active`].
+    pub terminal_text: Option<String>,
 }
 
 /// What the chrome produced this frame.
@@ -204,6 +207,8 @@ pub struct Chrome {
     confirm_open: bool,
     /// The rename dialog's text and whether its field still needs the focus.
     rename: Option<(String, bool)>,
+    /// An assistive technology asked for the accessibility tree (the last frame had one).
+    accesskit_active: bool,
     /// The first-run wizard (F6-03).
     welcome: Option<welcome::Welcome>,
 }
@@ -228,6 +233,7 @@ impl Chrome {
             peek: None,
             confirm_open: false,
             rename: None,
+            accesskit_active: false,
             welcome: None,
         }
     }
@@ -327,6 +333,20 @@ impl Chrome {
                     });
             }
             central = ui.available_rect_before_wrap();
+            // The terminal for screen readers: a node over its area with its visible text.
+            if let Some(text) = &model.terminal_text
+                && model.usage.is_none()
+            {
+                let id = ui.make_persistent_id("terminal-text");
+                let area = ui.interact(central, id, egui::Sense::hover());
+                area.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Terminal, true, strings::TERMINAL)
+                });
+                ui.ctx().accesskit_node_builder(area.id, |node| {
+                    node.set_role(egui::accesskit::Role::Terminal);
+                    node.set_value(text.as_str());
+                });
+            }
             if let Some(view) = &model.usage {
                 usage_action = usage::show(ui.ctx(), central, view, &model.plan_limits);
             }
@@ -374,6 +394,7 @@ impl Chrome {
                 }
             }
         });
+        self.accesskit_active = full.platform_output.accesskit_update.is_some();
         let ppp = full.pixels_per_point;
         let terminal_area = [
             central.min.x * ppp,
@@ -426,6 +447,12 @@ impl Chrome {
     }
 
     /// Opens the New session dialog with an agent (profile id) and folder preselected.
+    /// Whether a screen reader is reading the window (the last frame produced an
+    /// accessibility tree). Work done only for it can be skipped otherwise.
+    pub fn accessibility_active(&self) -> bool {
+        self.accesskit_active
+    }
+
     /// Puts the keyboard in the sidebar's search field (S-03).
     pub fn focus_search(&mut self) {
         self.sidebar.focus_search = true;
@@ -782,6 +809,7 @@ mod tests {
             notice: None,
             notice_action: None,
             announcement: Some("Claude Code · hivetty — Needs permission: Bash".into()),
+            terminal_text: Some("$ cargo test\nok".into()),
             plan_limits: Vec::new(),
             sessions: Vec::new(),
         };
@@ -804,6 +832,15 @@ mod tests {
                 .is_some_and(|t| t.contains("Needs permission")),
             "{live:?}"
         );
+        // F6-05: the terminal's visible text, as a Terminal node.
+        let terminal = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.role() == egui::Role::Terminal)
+            .expect("the terminal");
+        assert_eq!(terminal.value(), Some("$ cargo test\nok"));
+        assert!(chrome.accessibility_active());
     }
 
     #[test]
@@ -833,6 +870,7 @@ mod tests {
             notice: None,
             notice_action: None,
             announcement: None,
+            terminal_text: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
@@ -898,6 +936,7 @@ mod tests {
             notice: None,
             notice_action: None,
             announcement: None,
+            terminal_text: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),

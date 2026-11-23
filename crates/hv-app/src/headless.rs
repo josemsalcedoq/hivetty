@@ -255,6 +255,7 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             notice: None,
             notice_action: None,
             announcement: None,
+            terminal_text: None,
             plan_limits,
             title_bar: if cfg!(windows) {
                 hv_ui::TitleBar::Custom { maximized: false }

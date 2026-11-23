@@ -457,3 +457,5 @@ pub const RELEASE_NOTES: &str = "Release notes";
 pub const WELCOME_UPDATES: &str = "Tell me when a new version is out";
 /// First-run wizard.
 pub const WELCOME_UPDATES_DETAIL: &str = "Once a day hivetty asks GitHub for the latest release. Nothing else is sent, and nothing is downloaded.";
+/// Accessible name of the terminal area (F6-05).
+pub const TERMINAL: &str = "Terminal";

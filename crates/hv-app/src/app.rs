@@ -425,6 +425,7 @@ impl Ui {
             notice: None,
             notice_action: None,
             announcement: None,
+            terminal_text: None,
             plan_limits: Vec::new(),
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
@@ -2793,6 +2794,10 @@ fn run_chrome(
     model.notice = extra.notice;
     model.notice_action = extra.notice_action;
     model.announcement = extra.announcement;
+    // F6-05: the focused terminal's text, only while a screen reader reads the window.
+    if ui.chrome.accessibility_active() {
+        model.terminal_text = ui.focused().map(|p| p.session.snapshot().text());
+    }
     model.confirm = ui.confirm_close.map(|(id, kind)| match kind {
         Confirm::Close => (
             hv_ui::strings::CONFIRM_CLOSE.to_owned(),

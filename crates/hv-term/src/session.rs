@@ -697,6 +697,12 @@ mod tests {
     }
 
     #[test]
+    fn visible_text_drops_trailing_blank_lines() {
+        let snap = render(b"hello  \r\nworld", 20, 4);
+        assert_eq!(snap.text(), "hello\nworld");
+    }
+
+    #[test]
     fn plain_text_and_newlines() {
         let snap = render(b"hello\r\nworld", 20, 4);
         assert_eq!(snap.row_text(0), "hello");
