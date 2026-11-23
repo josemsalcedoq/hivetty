@@ -139,12 +139,13 @@ mod tests {
             .unwrap()
             .to_owned();
         let mut stream = TcpStream::connect(addr).unwrap();
-        write!(
-            stream,
+        // One write: the server may answer a wrong path and close before reading a body sent
+        // in a second piece, and that later write would fail.
+        let request = format!(
             "POST {path} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
-        )
-        .unwrap();
+        );
+        stream.write_all(request.as_bytes()).unwrap();
         let mut answer = String::new();
         stream.read_to_string(&mut answer).unwrap();
         answer
