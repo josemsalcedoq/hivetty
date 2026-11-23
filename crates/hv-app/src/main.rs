@@ -52,7 +52,7 @@ OPTIONS:
     --preedit <TEXT>     With --screenshot, draw TEXT as input-method composition at the cursor
     --split              With --screenshot, run the program in two panes side by side
     --palette            With --screenshot --ui, show the command palette
-    --welcome            With --screenshot --ui, show the first-run wizard (sample data)
+    --welcome            With --screenshot --ui, show the first-run wizard (sample offers)
     --usage              With --screenshot --ui, show the usage dashboard (this machine's logs)
     --light              With --screenshot, use the light theme
     --high-contrast      With --screenshot, use the high-contrast palette

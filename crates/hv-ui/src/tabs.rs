@@ -94,7 +94,8 @@ pub enum TitleBar {
 }
 
 const CONTROL_WIDTH: f32 = 46.0;
-const MAC_INSET: f32 = 78.0;
+/// Room for the macOS window buttons at the left of the window.
+pub(crate) const MAC_INSET: f32 = 78.0;
 
 /// State kept between frames.
 #[derive(Debug, Default)]
@@ -119,14 +120,22 @@ impl TabBar {
         tabs: &[TabItem],
         menu: &[Vec<PaletteItem>],
         title_bar: TitleBar,
+        at_window_edge: bool,
     ) -> Option<TabAction> {
         let mut action = None;
+        // The macOS window buttons are over whatever is at the window's left edge: the tab
+        // bar keeps room for them only when the sidebar is hidden.
+        let inset = if title_bar == TitleBar::MacInset && at_window_edge {
+            MAC_INSET
+        } else {
+            0.0
+        };
         let menu_width = if menu.is_empty() { 0.0 } else { MENU_WIDTH };
         let chrome_width = match title_bar {
             TitleBar::Native => 0.0,
             // Room to grab the window, plus the three buttons.
             TitleBar::Custom { .. } => CONTROL_WIDTH * 3.0 + 80.0,
-            TitleBar::MacInset => MAC_INSET + 80.0,
+            TitleBar::MacInset => inset + 80.0,
         };
         let available =
             (ui.available_width() - PLUS_WIDTH - menu_width - chrome_width).max(TAB_MIN_WIDTH);
@@ -144,9 +153,7 @@ impl TabBar {
         let mut rects = Vec::with_capacity(tabs.len());
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            if title_bar == TitleBar::MacInset {
-                ui.add_space(MAC_INSET);
-            }
+            ui.add_space(inset);
             if !menu.is_empty()
                 && let Some(id) = hamburger(ui, menu)
             {

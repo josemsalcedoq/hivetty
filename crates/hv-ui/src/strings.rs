@@ -1,7 +1,7 @@
 //! Every user-facing UI string, in one place (the app is English-only; docs/ui-spec.md 9).
 
 /// Sidebar header.
-pub const SESSIONS: &str = "SESSIONS";
+pub const SESSIONS: &str = "Sessions";
 /// Shown when there are no sessions.
 pub const NO_SESSIONS: &str = "No sessions yet";
 /// Subtitle of a running shell.
@@ -108,6 +108,12 @@ pub const FILTER_DONE: &str = "Done";
 pub const NO_MATCHES: &str = "No matching sessions";
 /// New session button and dialog.
 pub const NEW_SESSION: &str = "New session";
+/// Tooltip of an agent in the dock.
+pub fn dock_tip(agent: &str) -> String {
+    format!("New {agent} session in the current folder")
+}
+/// The sidebar's New session button (the full name is its tooltip).
+pub const NEW_SESSION_SHORT: &str = "+ New";
 /// Dialog field labels.
 pub const FIELD_AGENT: &str = "Agent";
 /// Dialog field labels.
@@ -373,29 +379,57 @@ pub fn runs_out_in(when: &str) -> String {
 /// First-run wizard (F6-03).
 pub const WELCOME_TITLE: &str = "Welcome to hivetty";
 /// First-run wizard.
-pub const WELCOME_INTRO: &str =
-    "A few choices to start. You can change all of them later in config.toml.";
-/// First-run wizard.
-pub const WELCOME_THEME: &str = "Theme";
+pub const WELCOME_INTRO: &str = "Choose what to turn on. You can change any of it later.";
+/// First-run wizard: section.
+pub const WELCOME_APPEARANCE: &str = "Appearance";
+/// First-run wizard: section.
+pub const WELCOME_TERMINAL: &str = "Terminal";
+/// First-run wizard: section.
+pub const WELCOME_AGENTS: &str = "Agents";
 /// First-run wizard: theme options.
-pub const THEME_SYSTEM: &str = "Follow the system";
+pub const THEME_SYSTEM: &str = "System";
 /// First-run wizard: theme options.
 pub const THEME_DARK: &str = "Dark";
 /// First-run wizard: theme options.
 pub const THEME_LIGHT: &str = "Light";
 /// First-run wizard.
-pub const WELCOME_SHELL: &str = "Shell integration";
+pub const WELCOME_SHELL: &str = "Prompt marks and project chips";
 /// First-run wizard.
-pub const WELCOME_SHELL_DETAIL: &str = "Prompt marks, the current folder and project chips. hivetty loads a small script when your shell starts; your own files are not changed.";
+pub const WELCOME_SHELL_DETAIL: &str = "Jump between commands and see each prompt's folder, git branch and project type. Your shell's own files are not changed.";
 /// First-run wizard.
-pub const WELCOME_HOOKS: &str = "Live state of Claude Code sessions (hooks)";
-/// First-run wizard.
-pub const WELCOME_STATUSLINE: &str = "Context use and plan limits (Claude Code statusline)";
-/// First-run wizard.
-pub const WELCOME_ALREADY: &str = "already set up";
+pub const WELCOME_UPDATES_DETAIL: &str = "Checks GitHub once a day. Nothing is downloaded.";
+/// First-run wizard: agent options.
+pub const WELCOME_CLAUDE_HOOKS: &str = "Live status for Claude Code";
+/// First-run wizard: agent options.
+pub const WELCOME_CLAUDE_HOOKS_DETAIL: &str =
+    "The sidebar shows when a session is working, needs you or is done, and hivetty notifies you.";
+/// First-run wizard: agent options.
+pub const WELCOME_CLAUDE_STATUSLINE: &str = "Context and plan limits for Claude Code";
+/// First-run wizard: agent options.
+pub const WELCOME_CLAUDE_STATUSLINE_DETAIL: &str =
+    "Shows how full each session's context is and how much of your plan is left.";
+/// First-run wizard: agent options.
+pub const WELCOME_CODEX_HOOKS: &str = "Live status for Codex";
+/// First-run wizard: agent options.
+pub const WELCOME_CODEX_HOOKS_DETAIL: &str =
+    "The same live status for Codex sessions. Codex asks you once to trust the change.";
+/// First-run wizard: agent options.
+pub const WELCOME_GEMINI_HOOKS: &str = "Live status for Gemini CLI";
+/// First-run wizard: agent options.
+pub const WELCOME_GEMINI_HOOKS_DETAIL: &str = "The same live status for Gemini CLI sessions.";
+/// First-run wizard: an agent option that is on already.
+pub const WELCOME_ALREADY: &str = "Already on.";
+/// First-run wizard: under the agent options while none is ticked.
+pub const WELCOME_AGENTS_NOTE: &str =
+    "These add hivetty to the agents' settings. A backup of each file is kept.";
+/// First-run wizard: over the exact changes the ticked options make.
+pub fn welcome_see_changes(lines: usize) -> String {
+    let s = if lines == 1 { "" } else { "s" };
+    format!("Start adds these {lines} line{s} (a backup of each file is kept):")
+}
 /// First-run wizard: the file the agent changes go to.
 pub fn welcome_changes(path: &str) -> String {
-    format!("Changes to {path} (a backup is kept next to it):")
+    format!("In {path}:")
 }
 /// First-run wizard.
 pub const WELCOME_START: &str = "Start";
@@ -455,8 +489,6 @@ pub fn update_available(version: &str) -> String {
 pub const RELEASE_NOTES: &str = "Release notes";
 /// First-run wizard: the update check.
 pub const WELCOME_UPDATES: &str = "Tell me when a new version is out";
-/// First-run wizard.
-pub const WELCOME_UPDATES_DETAIL: &str = "Once a day hivetty asks GitHub for the latest release. Nothing else is sent, and nothing is downloaded.";
 /// Accessible name of the terminal area (F6-05).
 pub const TERMINAL: &str = "Terminal";
 /// Tasks card: what the agents' OpenTelemetry adds (F5-15): `+1.2K −300 lines · 3 commits`.

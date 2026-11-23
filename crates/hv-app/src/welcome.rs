@@ -3,10 +3,19 @@
 
 use std::path::{Path, PathBuf};
 
-use hv_ui::{WelcomeChoice, WelcomeInfo};
+use hv_agents::install::Plan;
+use hv_ui::{AgentOffer, AgentSetup, WelcomeChoice, WelcomeInfo};
 
 /// Written once the wizard was answered or skipped.
 const MARKER: &str = "welcomed";
+
+/// Every agent change the wizard knows, in the order it lists them.
+const SETUPS: [AgentSetup; 4] = [
+    AgentSetup::ClaudeHooks,
+    AgentSetup::ClaudeStatusline,
+    AgentSetup::CodexHooks,
+    AgentSetup::GeminiHooks,
+];
 
 fn marker() -> Option<PathBuf> {
     hv_config::data_dir().map(|d| d.join(MARKER))
@@ -18,45 +27,91 @@ pub(crate) fn prepare() -> Option<WelcomeInfo> {
     if marker()?.exists() || hv_config::default_path()?.exists() {
         return None;
     }
-    Some(agent_changes(claude_installed()))
+    Some(WelcomeInfo { agents: offers() })
 }
 
-/// Claude Code is on the PATH or has its settings folder.
-fn claude_installed() -> bool {
+/// The agent changes on offer: for each agent found on this machine, what installing hivetty's
+/// hooks (and Claude Code's statusline) would change. Only reads files.
+pub(crate) fn offers() -> Vec<AgentOffer> {
+    let (Ok(home), Ok(exe)) = (crate::agents_cli::home(), std::env::current_exe()) else {
+        return Vec::new();
+    };
     let profiles = hv_agents::profile::builtin();
-    let on_path = hv_agents::profile::installed(&profiles, std::env::var_os("PATH").as_deref())
-        .iter()
-        .any(|(p, _)| p.id == "claude-code");
-    on_path
-        || crate::agents_cli::settings_path()
-            .ok()
-            .and_then(|p| p.parent().map(Path::is_dir))
-            .unwrap_or(false)
+    let on_path: Vec<String> =
+        hv_agents::profile::installed(&profiles, std::env::var_os("PATH").as_deref())
+            .into_iter()
+            .map(|(p, _)| p.id.clone())
+            .collect();
+    SETUPS
+        .into_iter()
+        .filter_map(|setup| {
+            let path = settings_path(setup, &home);
+            // On the PATH, or its settings folder exists (installed some other way).
+            let found = on_path.iter().any(|id| id == agent_id(setup))
+                || path.parent().is_some_and(Path::is_dir);
+            if !found {
+                return None;
+            }
+            let text = read_or_empty(&path).ok()?;
+            // An error means the file cannot be changed safely (or, for the statusline, the
+            // user has one of their own): not offered.
+            let plan = plan(setup, &text, &exe).ok()?;
+            Some(AgentOffer {
+                setup,
+                path: shown(&path, &home),
+                changes: plan.changes,
+            })
+        })
+        .collect()
 }
 
-/// The changes installing the hooks and the statusline would make.
-fn agent_changes(installed: bool) -> WelcomeInfo {
-    let mut info = WelcomeInfo::default();
-    if !installed {
-        return info;
+fn agent_id(setup: AgentSetup) -> &'static str {
+    match setup {
+        AgentSetup::ClaudeHooks | AgentSetup::ClaudeStatusline => "claude-code",
+        AgentSetup::CodexHooks => "codex",
+        AgentSetup::GeminiHooks => "gemini-cli",
     }
-    let (Ok(path), Ok(exe)) = (crate::agents_cli::settings_path(), std::env::current_exe()) else {
-        return info;
-    };
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(_) => return info,
-    };
-    let shown = path.display().to_string();
-    if let Ok(plan) = hv_agents::install::plan_install(&text, &exe) {
-        info.hooks = Some((shown.clone(), plan.changes));
+}
+
+fn settings_path(setup: AgentSetup, home: &Path) -> PathBuf {
+    match setup {
+        AgentSetup::ClaudeHooks | AgentSetup::ClaudeStatusline => {
+            hv_agents::install::claude_settings_path(home)
+        }
+        AgentSetup::CodexHooks => hv_agents::codex::config_path(home),
+        AgentSetup::GeminiHooks => hv_agents::install::gemini_settings_path(home),
     }
-    // An error here means the user has a statusline of their own: not offered.
-    if let Ok(plan) = hv_agents::install::plan_statusline_install(&text, &exe) {
-        info.statusline = Some((shown, plan.changes));
+}
+
+/// The change `setup` makes to `text` (the settings file as it is now).
+fn plan(setup: AgentSetup, text: &str, exe: &Path) -> Result<Plan, String> {
+    match setup {
+        AgentSetup::ClaudeHooks => hv_agents::install::plan_install(text, exe),
+        AgentSetup::ClaudeStatusline => hv_agents::install::plan_statusline_install(text, exe),
+        AgentSetup::CodexHooks => hv_agents::codex::plan_install(text, exe),
+        AgentSetup::GeminiHooks => {
+            hv_agents::install::plan_install_for(hv_agents::install::GEMINI, text, exe)
+        }
     }
-    info
+}
+
+/// `path` with the home folder written as `~`, to keep it short.
+fn shown(path: &Path, home: &Path) -> String {
+    match path.strip_prefix(home) {
+        Ok(rest) => {
+            let sep = std::path::MAIN_SEPARATOR;
+            format!("~{sep}{}", rest.display())
+        }
+        Err(_) => path.display().to_string(),
+    }
+}
+
+fn read_or_empty(path: &Path) -> std::io::Result<String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(err),
+    }
 }
 
 /// The `config.toml` the choices make.
@@ -80,9 +135,9 @@ pub(crate) fn finish(choice: Option<&WelcomeChoice>) -> Result<(), String> {
             }
             std::fs::write(&path, config_text(choice)).map_err(|e| e.to_string())?;
         }
-        if choice.install_hooks || choice.install_statusline {
+        if !choice.agents.is_empty() {
             // Remember the wizard ran even if this fails, and report it.
-            problem = install_agent(choice).err();
+            problem = install_agents(&choice.agents).err();
         }
     }
     let marker = marker().ok_or("no data directory")?;
@@ -93,43 +148,73 @@ pub(crate) fn finish(choice: Option<&WelcomeChoice>) -> Result<(), String> {
     problem.map_or(Ok(()), Err)
 }
 
-/// Installs what the user ticked, planned again from the file as it is now (both changes
-/// together, one backup).
-fn install_agent(choice: &WelcomeChoice) -> Result<(), String> {
-    let path = crate::agents_cli::settings_path().map_err(|e| e.to_string())?;
+/// Makes the chosen changes, planned again from each file as it is now: one write and one
+/// backup per file. A file that fails does not stop the others.
+fn install_agents(chosen: &[AgentSetup]) -> Result<(), String> {
+    let home = crate::agents_cli::home().map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let mut text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(err) => return Err(err.to_string()),
-    };
-    let mut changed = false;
-    if choice.install_hooks {
-        let plan = hv_agents::install::plan_install(&text, &exe)?;
-        changed |= !plan.changes.is_empty();
-        text = plan.new_text;
+    let mut files: Vec<PathBuf> = Vec::new();
+    for setup in chosen {
+        let path = settings_path(*setup, &home);
+        if !files.contains(&path) {
+            files.push(path);
+        }
     }
-    // The statusline can fail on its own (the user set one up meanwhile): the hooks still go in.
-    let mut skipped = None;
-    if choice.install_statusline {
-        match hv_agents::install::plan_statusline_install(&text, &exe) {
+    let mut problems = Vec::new();
+    for path in files {
+        let setups: Vec<AgentSetup> = chosen
+            .iter()
+            .copied()
+            .filter(|s| settings_path(*s, &home) == path)
+            .collect();
+        if let Err(err) = install_file(&path, &setups, &exe) {
+            problems.push(format!("{}: {err}", shown(&path, &home)));
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("; "))
+    }
+}
+
+/// What `setup` is called in an error message.
+fn name(setup: AgentSetup) -> &'static str {
+    match setup {
+        AgentSetup::ClaudeHooks => "Claude Code hooks",
+        AgentSetup::ClaudeStatusline => "Claude Code statusline",
+        AgentSetup::CodexHooks => "Codex hooks",
+        AgentSetup::GeminiHooks => "Gemini CLI hooks",
+    }
+}
+
+/// Applies `setups` (all for `path`) together.
+fn install_file(path: &Path, setups: &[AgentSetup], exe: &Path) -> Result<(), String> {
+    let mut text = read_or_empty(path).map_err(|e| e.to_string())?;
+    let mut changed = false;
+    // One can fail on its own (the user set up a statusline meanwhile): the rest still go in.
+    let mut skipped = Vec::new();
+    for setup in setups {
+        match plan(*setup, &text, exe) {
             Ok(plan) => {
                 changed |= !plan.changes.is_empty();
                 text = plan.new_text;
             }
-            Err(err) => skipped = Some(err),
+            Err(err) => skipped.push(format!("{} not set up: {err}", name(*setup))),
         }
     }
     if changed {
-        let plan = hv_agents::install::Plan {
+        let plan = Plan {
             new_text: text,
             changes: Vec::new(),
         };
-        hv_agents::install::apply(&path, &plan).map_err(|e| e.to_string())?;
+        hv_agents::install::apply(path, &plan).map_err(|e| e.to_string())?;
     }
-    skipped.map_or(Ok(()), |err| {
-        Err(format!("statusline not installed: {err}"))
-    })
+    if skipped.is_empty() {
+        Ok(())
+    } else {
+        Err(skipped.join("; "))
+    }
 }
 
 #[cfg(test)]
@@ -141,9 +226,8 @@ mod tests {
         let choice = WelcomeChoice {
             theme: "hivetty-light".into(),
             shell_integration: false,
-            install_hooks: false,
-            install_statusline: false,
             check_updates: true,
+            agents: Vec::new(),
         };
         let (config, error) = hv_config::parse(&config_text(&choice));
         assert_eq!(error, None);
@@ -153,7 +237,40 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_offered_without_the_agent() {
-        assert_eq!(agent_changes(false), WelcomeInfo::default());
+    fn paths_under_home_are_shortened() {
+        let home = std::env::temp_dir().join("hv-home");
+        let path = home.join(".claude").join("settings.json");
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            shown(&path, &home),
+            format!("~{sep}.claude{sep}settings.json")
+        );
+        let elsewhere = std::env::temp_dir().join("other.json");
+        assert_eq!(shown(&elsewhere, &home), elsewhere.display().to_string());
+    }
+
+    #[test]
+    fn claude_changes_to_one_file_go_in_together() {
+        let dir = std::env::temp_dir().join(format!("hv-welcome-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "{}").unwrap();
+        let exe = std::env::current_exe().unwrap();
+        install_file(
+            &path,
+            &[AgentSetup::ClaudeHooks, AgentSetup::ClaudeStatusline],
+            &exe,
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("SessionStart") && text.contains("statusLine"));
+        // Planned again from the file now: no hook left to add.
+        assert!(
+            plan(AgentSetup::ClaudeHooks, &text, &exe)
+                .unwrap()
+                .changes
+                .is_empty()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

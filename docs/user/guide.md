@@ -67,7 +67,7 @@ The command palette lists actions that have no default shortcut too, such as "Co
 
 ## Configuration
 
-The first time hivetty opens (with no `config.toml` yet) it asks for a theme and whether to use shell integration, and, if Claude Code is installed, offers its hooks and statusline, listing the exact changes to `~/.claude/settings.json` first. Nothing is changed unless you tick it. **Skip** leaves everything as it is; the wizard does not come back.
+The first time hivetty opens (with no `config.toml` yet) it asks for a theme, whether to use shell integration and whether to check for new versions. For each agent it finds (Claude Code, Codex, Gemini CLI) it offers live status in the sidebar, and for Claude Code also context and plan limits. Each option says in one line what it turns on, and **See the exact changes** lists every line it would add to the agent's settings before you agree. Nothing is changed unless you tick it, and a backup of each file is kept. **Skip** leaves everything as it is; the wizard does not come back.
 
 hivetty reads `config.toml` from:
 - Windows: `%APPDATA%\hivetty\config.toml`

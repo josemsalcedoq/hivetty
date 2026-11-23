@@ -35,9 +35,21 @@ token!(
     0x4EA1FF,
     0x0969DA
 );
+token!(
+    /// Fill of a primary button, under white text.
+    ACCENT_STRONG,
+    0x1F6FEB,
+    0x0969DA
+);
 token!(SELECTED_BG, 0x232327, 0xE6E6EB);
 token!(HOVER_BG, 0x1C1C20, 0xEFEFF2);
 token!(BORDER, 0x26262B, 0xDADADF);
+token!(
+    /// Outline of controls (checkboxes, fields), stronger than [`BORDER`].
+    CONTROL_BORDER,
+    0x3A3A41,
+    0xC4C4CB
+);
 token!(TEXT_PRIMARY, 0xEDEDEF, 0x18181B);
 token!(TEXT_SECONDARY, 0x9A9AA2, 0x52525B);
 token!(TEXT_MUTED, 0x6B6B73, 0x7E7E87);
@@ -62,5 +74,43 @@ pub(crate) fn apply(ctx: &egui::Context) {
     ctx.global_style_mut(|style| {
         style.visuals.panel_fill = SIDEBAR_BG();
         style.visuals.override_text_color = Some(TEXT_PRIMARY());
+        // egui's own widgets (buttons, checkboxes, fields, menus) in the same tokens and
+        // sizes as the painted parts, so they line up with them.
+        let spacing = &mut style.spacing;
+        spacing.button_padding = egui::vec2(8.0, 3.0);
+        spacing.interact_size.y = 22.0;
+        spacing.icon_width = 16.0;
+        spacing.icon_width_inner = 9.0;
+        spacing.icon_spacing = 8.0;
+        // Thin scroll bars that stay faintly visible, so a list that scrolls looks like it.
+        spacing.scroll = egui::style::ScrollStyle::thin();
+        spacing.scroll.dormant_handle_opacity = 0.45;
+        spacing.scroll.dormant_background_opacity = 0.0;
+        spacing.scroll.foreground_color = true;
+        let visuals = &mut style.visuals;
+        visuals.extreme_bg_color = WINDOW_BG();
+        visuals.window_fill = ELEVATED_BG();
+        visuals.window_stroke = egui::Stroke::new(1.0, BORDER());
+        visuals.window_corner_radius = egui::CornerRadius::same(10);
+        visuals.menu_corner_radius = egui::CornerRadius::same(8);
+        visuals.selection.bg_fill = ACCENT_STRONG().gamma_multiply(0.6);
+        visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT());
+        let radius = egui::CornerRadius::same(6);
+        let widgets = &mut visuals.widgets;
+        widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, BORDER());
+        widgets.noninteractive.corner_radius = radius;
+        for (state, fill, stroke) in [
+            (&mut widgets.inactive, SELECTED_BG(), CONTROL_BORDER()),
+            (&mut widgets.hovered, HOVER_BG(), TEXT_MUTED()),
+            (&mut widgets.active, SELECTED_BG(), ACCENT()),
+            (&mut widgets.open, SELECTED_BG(), BORDER()),
+        ] {
+            state.weak_bg_fill = fill;
+            state.bg_fill = fill;
+            state.corner_radius = radius;
+            state.expansion = 0.0;
+            state.bg_stroke = egui::Stroke::new(1.0, stroke);
+        }
+        widgets.hovered.weak_bg_fill = SELECTED_BG();
     });
 }

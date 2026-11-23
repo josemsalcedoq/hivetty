@@ -368,7 +368,8 @@ pub(crate) fn session_row(info: &SessionInfo, cwd: Option<&Path>) -> SessionRow 
         (RowState::Done, strings::STATE_EXITED)
     } else {
         match info.agent.state() {
-            None => (RowState::Working, strings::STATE_RUNNING),
+            // A plain shell: nothing known about what it does, so no spinner.
+            None => (RowState::Idle, strings::STATE_RUNNING),
             Some(AgentState::Starting) => (RowState::Working, strings::STATE_STARTING),
             Some(AgentState::Working { .. }) => (RowState::Working, strings::STATE_WORKING),
             Some(AgentState::Blocked { kind }) => (

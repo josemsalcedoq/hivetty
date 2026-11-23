@@ -236,26 +236,80 @@ impl Dialog {
     }
 }
 
-/// The dock: one button per installed agent; a click starts it in the current folder (S-11).
+/// Narrowest a dock button gets before the dock takes another row.
+const DOCK_BUTTON_MIN: f32 = 56.0;
+/// Height of a dock button, and the gap between buttons.
+const DOCK_BUTTON: f32 = 24.0;
+const DOCK_GAP: f32 = 4.0;
+
+/// Buttons per row and rows, for `count` agents in `width` points.
+fn dock_grid(width: f32, count: usize) -> (usize, usize) {
+    let per_row = (((width + DOCK_GAP) / (DOCK_BUTTON_MIN + DOCK_GAP)) as usize).clamp(1, 4);
+    let per_row = per_row.min(count.max(1));
+    (per_row, count.div_ceil(per_row))
+}
+
+/// The height the dock needs (without the line above it).
+pub(crate) fn dock_height(width: f32, count: usize) -> f32 {
+    let (_, rows) = dock_grid(width, count);
+    rows as f32 * DOCK_BUTTON + rows.saturating_sub(1) as f32 * DOCK_GAP
+}
+
+/// The dock: one button per installed agent, in rows of equal buttons the width of the
+/// sidebar; a click starts that agent in the current folder (S-11).
 pub(crate) fn dock(ui: &mut egui::Ui, agents: &[AgentChoice]) -> Option<String> {
     let mut clicked = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-        for agent in agents.iter().filter(|a| !a.id.is_empty()) {
-            // Initials until the agent icons exist (F3-14).
-            let initials: String = agent
-                .name
-                .split_whitespace()
-                .filter_map(|w| w.chars().next())
-                .take(2)
-                .collect();
-            let button = egui::Button::new(RichText::new(initials).size(11.0))
-                .min_size(egui::vec2(28.0, 24.0))
-                .corner_radius(CornerRadius::same(6));
-            if ui.add(button).on_hover_text(&agent.name).clicked() {
-                clicked = Some(agent.id.clone());
+    let agents: Vec<&AgentChoice> = agents.iter().filter(|a| !a.id.is_empty()).collect();
+    if agents.is_empty() {
+        return None;
+    }
+    let width = ui.available_width();
+    let (per_row, _) = dock_grid(width, agents.len());
+    let button_width = (width - DOCK_GAP * (per_row - 1) as f32) / per_row as f32;
+    let font = egui::FontId::proportional(12.0);
+    let short = |agent: &AgentChoice| -> String {
+        agent
+            .name
+            .split_whitespace()
+            .next()
+            .unwrap_or(&agent.name)
+            .to_owned()
+    };
+    // A "+" before every name when all of them fit with it, so the buttons match.
+    let plus = agents
+        .iter()
+        .all(|a| text_width(ui, &format!("+ {}", short(a)), &font) + 12.0 <= button_width);
+    for row in agents.chunks(per_row) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = DOCK_GAP;
+            for agent in row {
+                // The first word of the name ("Claude", "Codex", "Gemini"); no product logos
+                // (F3-14).
+                let label = if plus {
+                    format!("+ {}", short(agent))
+                } else {
+                    crate::elide(ui, &short(agent), &font, button_width - 12.0)
+                };
+                let button = egui::Button::new(RichText::new(label).size(12.0))
+                    .min_size(egui::vec2(button_width, DOCK_BUTTON))
+                    .corner_radius(CornerRadius::same(6));
+                if ui
+                    .add_sized([button_width, DOCK_BUTTON], button)
+                    .on_hover_text(strings::dock_tip(&agent.name))
+                    .clicked()
+                {
+                    clicked = Some(agent.id.clone());
+                }
             }
-        }
-    });
+        });
+    }
     clicked
+}
+
+fn text_width(ui: &egui::Ui, text: &str, font: &egui::FontId) -> f32 {
+    ui.fonts_mut(|f| {
+        f.layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::WHITE)
+            .size()
+            .x
+    })
 }

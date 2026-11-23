@@ -351,8 +351,10 @@ fn card(ui: &mut egui::Ui, width: f32, min_height: f32, content: impl FnOnce(&mu
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::same(14))
         .show(ui, |ui| {
-            ui.set_width(width - 28.0);
-            ui.set_min_height((min_height - 28.0).max(0.0));
+            // The frame adds its margin and its 1-point stroke on each side: the card is
+            // exactly `width` wide, so cards in a row end where the header does.
+            ui.set_width(width - 30.0);
+            ui.set_min_height((min_height - 30.0).max(0.0));
             ui.vertical(content);
         });
 }

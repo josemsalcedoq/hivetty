@@ -145,7 +145,7 @@ pub(crate) fn settings_path() -> Result<std::path::PathBuf> {
     Ok(hv_agents::install::claude_settings_path(&home()?))
 }
 
-fn home() -> Result<std::path::PathBuf> {
+pub(crate) fn home() -> Result<std::path::PathBuf> {
     std::env::var_os("USERPROFILE")
         .filter(|_| cfg!(windows))
         .or_else(|| std::env::var_os("HOME"))

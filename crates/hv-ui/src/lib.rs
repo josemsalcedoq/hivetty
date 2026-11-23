@@ -16,7 +16,7 @@ pub use palette::PaletteItem;
 pub use peek::{PeekAction, PeekView};
 pub use tabs::{TAB_BAR_HEIGHT, TabAction, TabItem, TitleBar};
 pub use usage::{UsageAction, UsageRange, UsageView};
-pub use welcome::{WelcomeChoice, WelcomeInfo};
+pub use welcome::{AgentOffer, AgentSetup, WelcomeChoice, WelcomeInfo};
 
 use egui::{Color32, Margin, Stroke};
 
@@ -293,18 +293,27 @@ impl Chrome {
                     .frame(
                         egui::Frame::new()
                             .fill(theme::SIDEBAR_BG())
-                            .inner_margin(Margin::symmetric(10, 12))
+                            // No top margin: the header lines up with the tab bar.
+                            .inner_margin(Margin {
+                                left: 10,
+                                right: 10,
+                                top: 0,
+                                bottom: 10,
+                            })
                             .stroke(Stroke::new(1.0, theme::BORDER())),
                     )
                     .show(ui, |ui| {
-                        let out = sidebar_state.show(
-                            ui,
-                            &model.sessions,
-                            &model.archived,
-                            &model.new_session_hint,
-                            &model.search_hint,
-                            model.announcement.as_deref(),
-                        );
+                        // The line above the dock and its spacing, plus the dock.
+                        let dock_height = if model.agents.iter().any(|a| !a.id.is_empty()) {
+                            new_session::dock_height(
+                                ui.available_width(),
+                                model.agents.iter().filter(|a| !a.id.is_empty()).count(),
+                            ) + 2.0 * ui.spacing().item_spacing.y
+                                + 8.0
+                        } else {
+                            0.0
+                        };
+                        let out = sidebar_state.show(ui, model, dock_height);
                         clicked_session = out.clicked;
                         new_session_clicked = out.new_session;
                         peek_request = out.peek;
@@ -314,8 +323,10 @@ impl Chrome {
                         archive_restore = out.archive_restore;
                         archive_delete = out.archive_delete;
                         // The dock sits under the list (which leaves room for it).
-                        ui.separator();
-                        dock_choice = new_session::dock(ui, &model.agents);
+                        if dock_height > 0.0 {
+                            ui.separator();
+                            dock_choice = new_session::dock(ui, &model.agents);
+                        }
                     });
             }
             if !model.tabs.is_empty() {
@@ -329,7 +340,13 @@ impl Chrome {
                             .stroke(Stroke::new(1.0, theme::BORDER())),
                     )
                     .show(ui, |ui| {
-                        tab_action = tab_bar.show(ui, &model.tabs, &model.menu, model.title_bar);
+                        tab_action = tab_bar.show(
+                            ui,
+                            &model.tabs,
+                            &model.menu,
+                            model.title_bar,
+                            !model.sidebar_visible,
+                        );
                     });
             }
             central = ui.available_rect_before_wrap();

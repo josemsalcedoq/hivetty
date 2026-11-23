@@ -298,15 +298,22 @@ pub(crate) fn screenshot(spec: &SpawnSpec, opts: &Capture, out: &Path) -> Result
             pending_textures.append(warm.full.textures_delta);
         }
         if opts.welcome {
+            // Sample offers, the same on every machine.
+            let sample = |setup, path: &str| hv_ui::AgentOffer {
+                setup,
+                path: path.into(),
+                changes: vec!["+ Stop: 'hivetty' hook --event Stop".into()],
+            };
             chrome.open_welcome(hv_ui::WelcomeInfo {
-                hooks: Some((
-                    "~/.claude/settings.json".into(),
-                    vec![
-                        "+ SessionStart: 'hivetty' hook --agent claude-code --event SessionStart"
-                            .into(),
-                    ],
-                )),
-                statusline: Some(("~/.claude/settings.json".into(), Vec::new())),
+                agents: vec![
+                    sample(hv_ui::AgentSetup::ClaudeHooks, "~/.claude/settings.json"),
+                    sample(
+                        hv_ui::AgentSetup::ClaudeStatusline,
+                        "~/.claude/settings.json",
+                    ),
+                    sample(hv_ui::AgentSetup::CodexHooks, "~/.codex/config.toml"),
+                    sample(hv_ui::AgentSetup::GeminiHooks, "~/.gemini/settings.json"),
+                ],
             });
             let warm = chrome.run(raw_input(width, height), &model);
             pending_textures.append(warm.full.textures_delta);
