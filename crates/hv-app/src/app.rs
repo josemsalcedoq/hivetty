@@ -424,6 +424,7 @@ impl Ui {
             rename: None,
             notice: None,
             notice_action: None,
+            announcement: None,
             plan_limits: Vec::new(),
             new_session_hint: keymap
                 .chord_for(&Action::NewAgentSession)
@@ -511,6 +512,8 @@ struct App {
     badge: usize,
     /// A newer release, until the notice is closed (F6-11).
     update: Option<crate::update::Available>,
+    /// The latest state change that needs the user, and when (F4-25: read by screen readers).
+    announcement: Option<(String, Instant)>,
     /// Folders sessions were started in, newest first (F4-13).
     recent_folders: Vec<String>,
     /// The worktree of the session being started (F4-22).
@@ -606,6 +609,7 @@ impl App {
             config_notice: None,
             badge: 0,
             update: None,
+            announcement: None,
             next_worktree: None,
             recent_folders: Vec::new(),
             #[cfg(target_os = "macos")]
@@ -1438,6 +1442,8 @@ impl App {
                 .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "~".to_owned());
             if let Some((kind, title, body)) = pane.info.take_notification(&project) {
+                // Screen readers hear every one, also for the pane in front (F4-25).
+                self.announcement = Some((format!("{title} — {body}"), Instant::now()));
                 // Never for the pane the user is looking at.
                 if !(window_focused && Some(*id) == focused) {
                     out.push((*id, kind, title, body));
@@ -2425,6 +2431,11 @@ impl App {
                 }),
                 notice_action: (self.config_notice.is_none() && self.update.is_some())
                     .then(|| hv_ui::strings::RELEASE_NOTES.to_owned()),
+                announcement: self
+                    .announcement
+                    .as_ref()
+                    .filter(|(_, at)| at.elapsed() < ANNOUNCEMENT_SHOWN)
+                    .map(|(text, _)| text.clone()),
             },
             cursor,
         );
@@ -2758,6 +2769,7 @@ struct ChromeExtra<'a> {
     plan_limits: Vec<String>,
     notice: Option<String>,
     notice_action: Option<String>,
+    announcement: Option<String>,
 }
 
 fn run_chrome(
@@ -2775,6 +2787,7 @@ fn run_chrome(
     model.plan_limits = extra.plan_limits;
     model.notice = extra.notice;
     model.notice_action = extra.notice_action;
+    model.announcement = extra.announcement;
     model.confirm = ui.confirm_close.map(|(id, kind)| match kind {
         Confirm::Close => (
             hv_ui::strings::CONFIRM_CLOSE.to_owned(),
@@ -3605,6 +3618,9 @@ fn wslenv(current: Option<&str>) -> String {
     parts.extend(ours);
     parts.join(":")
 }
+
+/// How long the latest announcement stays in the sidebar.
+const ANNOUNCEMENT_SHOWN: Duration = Duration::from_secs(60);
 
 /// A desktop notification with its sound and click action, also forwarded to the phone when
 /// configured (F4-33).

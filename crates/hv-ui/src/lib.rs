@@ -131,6 +131,9 @@ pub struct ChromeModel {
     pub notice: Option<String>,
     /// A button in the notice (its label), e.g. "Release notes".
     pub notice_action: Option<String>,
+    /// The latest state change that needs the user, for screen readers (F4-25): shown in the
+    /// sidebar as a live region, so it is read out when it changes.
+    pub announcement: Option<String>,
 }
 
 /// What the chrome produced this frame.
@@ -294,6 +297,7 @@ impl Chrome {
                             &model.archived,
                             &model.new_session_hint,
                             &model.search_hint,
+                            model.announcement.as_deref(),
                         );
                         clicked_session = out.clicked;
                         new_session_clicked = out.new_session;
@@ -752,6 +756,57 @@ mod tests {
     }
 
     #[test]
+    fn announcements_are_a_live_region() {
+        let mut chrome = Chrome::new();
+        chrome.context().enable_accesskit();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(800.0, 400.0),
+            )),
+            ..Default::default()
+        };
+        let model = ChromeModel {
+            sidebar_visible: true,
+            tabs: Vec::new(),
+            menu: Vec::new(),
+            agents: Vec::new(),
+            new_session_hint: String::new(),
+            search_hint: String::new(),
+            usage: None,
+            peek: None,
+            title_bar: TitleBar::Native,
+            archived: Vec::new(),
+            confirm: None,
+            rename: None,
+            notice: None,
+            notice_action: None,
+            announcement: Some("Claude Code · hivetty — Needs permission: Bash".into()),
+            plan_limits: Vec::new(),
+            sessions: Vec::new(),
+        };
+        let mut out = chrome.run(input, &model);
+        out.full.textures_delta.clear();
+        let update = out
+            .full
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree");
+        let live = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.live() == Some(egui::accesskit::Live::Polite))
+            .expect("a live region");
+        assert!(
+            live.value()
+                .or(live.label())
+                .is_some_and(|t| t.contains("Needs permission")),
+            "{live:?}"
+        );
+    }
+
+    #[test]
     fn screen_readers_get_each_row_as_a_labelled_button() {
         let mut chrome = Chrome::new();
         chrome.context().enable_accesskit();
@@ -777,6 +832,7 @@ mod tests {
             rename: None,
             notice: None,
             notice_action: None,
+            announcement: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the login bug".into(),
@@ -841,6 +897,7 @@ mod tests {
             rename: None,
             notice: None,
             notice_action: None,
+            announcement: None,
             plan_limits: Vec::new(),
             sessions: vec![SessionRow {
                 title: "Fix the logo layout".into(),

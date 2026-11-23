@@ -61,6 +61,7 @@ impl Sidebar {
         archived: &[ArchivedRow],
         new_session_hint: &str,
         search_hint: &str,
+        announcement: Option<&str>,
     ) -> SidebarOutput {
         let mut out = SidebarOutput::default();
         let mut clicked = None;
@@ -218,6 +219,15 @@ impl Sidebar {
                             RowClick::None => {}
                         }
                     }
+                }
+                // The latest change that needs the user, as a live region: screen readers read
+                // it out when it changes (F4-25).
+                if let Some(text) = announcement {
+                    ui.add_space(8.0);
+                    let label = ui.label(RichText::new(text).size(11.0).color(theme::TEXT_MUTED()));
+                    ui.ctx().accesskit_node_builder(label.id, |node| {
+                        node.set_live(egui::accesskit::Live::Polite);
+                    });
                 }
                 if sessions.is_empty() {
                     ui.label(RichText::new(strings::NO_SESSIONS).color(theme::TEXT_MUTED()));
