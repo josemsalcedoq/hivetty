@@ -1147,9 +1147,8 @@ impl App {
                     .get(&id)
                     .and_then(|p| p.info.transcript.as_deref())
                     .and_then(std::path::Path::parent)
-                    && let Err(err) = opener::open(dir)
                 {
-                    log::warn!("cannot open {}: {err}", dir.display());
+                    open_folder(dir);
                 }
             }
             hv_ui::SessionMenu::OpenInEditor => {
@@ -1170,10 +1169,8 @@ impl App {
                 }
             }
             hv_ui::SessionMenu::ShowFolder => {
-                if let Some(dir) = ui.panes.get(&id).and_then(|p| p.session.cwd())
-                    && let Err(err) = opener::open(&dir)
-                {
-                    log::warn!("cannot open {}: {err}", dir.display());
+                if let Some(dir) = ui.panes.get(&id).and_then(|p| p.session.cwd()) {
+                    open_folder(&dir);
                 }
             }
             hv_ui::SessionMenu::Close => ui.confirm_close = Some((id, Confirm::Close)),
@@ -1281,11 +1278,7 @@ impl App {
             hv_ui::ProjectMenu::NewSession => {
                 self.open_new_session_dialog_in(Some(dir));
             }
-            hv_ui::ProjectMenu::ShowFolder => {
-                if let Err(err) = opener::open(&dir) {
-                    log::warn!("cannot open {}: {err}", dir.display());
-                }
-            }
+            hv_ui::ProjectMenu::ShowFolder => open_folder(&dir),
             hv_ui::ProjectMenu::ArchiveFinished => {
                 let finished: Vec<PaneId> = ui
                     .row_panes
@@ -4195,6 +4188,27 @@ fn link_at(
     Some((row, link.start, link.end, link.target))
 }
 
+/// Whether `path` may be handed to the file manager: a local folder that exists. The path can
+/// come from a program's output (OSC 7) or a hook, and the system handler *runs* a `.bat`,
+/// `.exe`, `.lnk` or `.app` instead of showing it; a network path (`\\server\share`) would
+/// also send the user's credentials to that server.
+fn safe_folder(path: &std::path::Path) -> bool {
+    let text = path.to_string_lossy();
+    let network = text.starts_with("\\\\") || text.starts_with("//");
+    !network && path.is_absolute() && std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
+}
+
+/// Shows a folder in the file manager, if it is a safe one (see [`safe_folder`]).
+fn open_folder(path: &std::path::Path) {
+    if !safe_folder(path) {
+        log::warn!("not opening {}: not a local folder", path.display());
+        return;
+    }
+    if let Err(err) = opener::open(path) {
+        log::warn!("cannot open {}: {err}", path.display());
+    }
+}
+
 /// Opens a link with the system handler, or a file reference in the editor at its line.
 fn open_link(target: &LinkTarget, cwd: Option<&std::path::Path>) {
     let result = match target {
@@ -4290,6 +4304,20 @@ fn translate_key(event: &KeyEvent, mods: Mods) -> Option<TermKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_local_folders_are_shown_in_the_file_manager() {
+        let dir = std::env::temp_dir().join(format!("hv-folder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("run.bat");
+        std::fs::write(&script, "echo pwned").unwrap();
+        assert!(safe_folder(&dir));
+        assert!(!safe_folder(&script), "a file would be run");
+        assert!(!safe_folder(std::path::Path::new("relative")));
+        assert!(!safe_folder(std::path::Path::new(r"\\attacker\share")));
+        assert!(!safe_folder(std::path::Path::new("//attacker/share")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn wsl_distribution_names_cannot_make_paths() {

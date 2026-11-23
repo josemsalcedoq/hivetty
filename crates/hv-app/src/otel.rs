@@ -75,7 +75,8 @@ pub(crate) fn user_has_otel() -> bool {
 /// One request: `POST <path>` with a JSON body. Always answers, then closes.
 fn serve(stream: TcpStream, path: &str, store: &std::path::Path) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let mut reader = BufReader::new(stream.try_clone()?);
+    // No line may be longer than the whole header block allows.
+    let mut reader = BufReader::new(stream.try_clone()?.take((MAX_HEADERS + MAX_BODY) as u64));
     let mut request = String::new();
     reader.read_line(&mut request)?;
     let mut length = 0usize;
