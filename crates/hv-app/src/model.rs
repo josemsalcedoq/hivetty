@@ -450,8 +450,14 @@ pub(crate) fn chips(info: &hv_shell::detect::ProjectInfo) -> Vec<hv_render::Chip
         });
     }
     if let Some(branch) = &info.branch {
+        // A dot when tracked files changed since the last commit (F3-11).
+        let label = if info.dirty == Some(true) {
+            format!("{branch} ●")
+        } else {
+            branch.clone()
+        };
         out.push(Chip {
-            label: branch.clone(),
+            label,
             color: Rgb8::hex(0xBC8CFF),
         });
     }

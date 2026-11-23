@@ -6,6 +6,7 @@
 //! ([`install`]); [`integrate`] turns a shell command line into one that loads them.
 
 pub mod detect;
+pub mod git_index;
 mod service;
 
 pub use service::ChipService;

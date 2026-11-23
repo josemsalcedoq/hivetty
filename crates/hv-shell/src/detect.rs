@@ -71,6 +71,8 @@ pub struct ProjectInfo {
     pub versions: Vec<(String, String)>,
     /// Root of the enclosing git repository (names the project in the sidebar).
     pub root: Option<PathBuf>,
+    /// Tracked files changed since the last commit (F3-11), when that could be told.
+    pub dirty: Option<bool>,
 }
 
 /// Inspects `dir`: technology from `dir` or, if nothing matches there, from the repository
@@ -89,6 +91,9 @@ pub fn inspect(dir: &Path, home: Option<&Path>) -> ProjectInfo {
         tech,
         branch: repo.as_ref().and_then(|r| branch(&r.git_dir)),
         versions: versions(&from),
+        dirty: repo
+            .as_ref()
+            .and_then(|r| crate::git_index::is_dirty(&r.root, &r.git_dir)),
         root: repo.map(|r| r.root),
     }
 }
