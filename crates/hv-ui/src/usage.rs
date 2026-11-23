@@ -246,7 +246,20 @@ fn body(ui: &mut egui::Ui, d: &Dashboard) -> Option<UsageAction> {
         (
             strings::KPI_TASKS,
             group_thousands(d.tasks),
-            format!("{} {}", group_thousands(d.turns), strings::TURNS),
+            match d.code {
+                Some(code) => format!(
+                    "{} {} · {}",
+                    group_thousands(d.turns),
+                    strings::TURNS,
+                    strings::code_stats(
+                        code.lines_added,
+                        code.lines_removed,
+                        code.commits,
+                        code.pull_requests
+                    )
+                ),
+                None => format!("{} {}", group_thousands(d.turns), strings::TURNS),
+            },
             d.delta_tasks,
             d.daily.iter().map(|x| x.tasks).collect(),
         ),

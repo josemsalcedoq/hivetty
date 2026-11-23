@@ -14,6 +14,7 @@ mod keymap;
 #[cfg(target_os = "macos")]
 mod menu_mac;
 mod model;
+mod otel;
 mod recent;
 mod saved;
 mod statusline;

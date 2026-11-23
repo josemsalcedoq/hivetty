@@ -103,6 +103,7 @@ remember_geometry = true
 restore_layout = true         # reopen tabs, splits and directories
 
 [usage]
+otlp = false                  # Claude Code sessions started in hivetty report lines of code, commits and PRs to it
 wsl_distros = []              # Windows: also read agents' logs inside these WSL distributions ("Ubuntu")
 
 [accessibility]

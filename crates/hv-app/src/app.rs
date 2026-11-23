@@ -127,6 +127,23 @@ pub(crate) fn run(spec: SpawnSpec, record: Option<std::path::PathBuf>) -> Result
         Ok(server) => spec.env.extend(server.endpoint().env()),
         Err(err) => log::warn!("agent hooks disabled: cannot start IPC: {err}"),
     }
+    // F5-15: the agents' OpenTelemetry metrics, when asked for and the user does not already
+    // send them elsewhere.
+    let _otel = if config.usage.otlp && !safe && !crate::otel::user_has_otel() {
+        match metrics_path().map(crate::otel::Receiver::start) {
+            Some(Ok(receiver)) => {
+                spec.env.extend(receiver.env());
+                Some(receiver)
+            }
+            Some(Err(err)) => {
+                log::warn!("agent metrics disabled: {err}");
+                None
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
     // Restore and save the layout only for a plain launch (not `hivetty -e program`).
     let mut app = App::new(spec, proxy);
     // Safe mode must not overwrite the user's layout with its one default pane.
@@ -3360,6 +3377,8 @@ pub(crate) struct UsageData {
     observed: Vec<hv_usage::observed::Interval>,
     /// Codex's plan windows, from its newest log (F5-19).
     codex_limits: Vec<hv_usage::codex::RateWindow>,
+    /// Lines of code, commits and pull requests from OpenTelemetry (F5-15).
+    code_points: Vec<hv_usage::otel::Point>,
     read_at: Option<Instant>,
 }
 
@@ -3420,6 +3439,9 @@ impl UsageData {
             sessions,
             observed: observed_path()
                 .map(|p| hv_usage::observed::load(&p))
+                .unwrap_or_default(),
+            code_points: metrics_path()
+                .map(|p| hv_usage::otel::load(&p))
                 .unwrap_or_default(),
             codex_limits: hv_usage::codex::default_root()
                 .map(|root| hv_usage::codex::latest_rate_limits(&root))
@@ -3490,6 +3512,20 @@ impl UsageData {
                 )
             }
         };
+        // Only Claude Code exports these; not shown when the panel is filtered to another agent.
+        if !self.code_points.is_empty() && agent.is_none_or(|a| a == "claude-code") {
+            let start = |d: jiff::civil::Date| {
+                d.to_zoned_datetime(tz.clone())
+                    .map(|z| z.timestamp().as_second())
+                    .ok()
+            };
+            if let (Some(from), Some(to)) = (
+                start(dash.first_day),
+                dash.last_day.tomorrow().ok().and_then(start),
+            ) {
+                dash.code = Some(hv_usage::otel::totals(&self.code_points, from, to));
+            }
+        }
         if !self.observed.is_empty() {
             dash.observed_seconds = Some(hv_usage::observed::seconds_in(
                 &self.observed,
@@ -3672,6 +3708,11 @@ fn focus_on_click(
             let _ = proxy.send_event(event);
         }),
     )
+}
+
+/// Where the agents' OpenTelemetry numbers are kept (F5-15).
+fn metrics_path() -> Option<std::path::PathBuf> {
+    hv_config::data_dir().map(|d| d.join("agent-metrics.jsonl"))
 }
 
 /// Where the agent time hivetty measures is kept.

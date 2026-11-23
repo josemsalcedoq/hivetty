@@ -111,6 +111,7 @@ Con los tres agentes:
 - [ ] Clic en un agente: el panel se filtra a ese agente.
 - [ ] Con un `pricing.toml` (ver la guía de usuario): aparece "≈ $X API equivalent".
 - [ ] `hivetty usage`, `hivetty usage --csv`, `hivetty usage --days 7`.
+- [ ] Con `[usage] otlp = true`, una sesión de Claude Code abierta en hivetty que edita archivos: la tarjeta TASKS muestra las líneas añadidas y quitadas (tarda hasta 30 s).
 - [ ] **Windows con WSL:** con `[usage] wsl_distros = ["Ubuntu"]`, el uso de los agentes que corren dentro de WSL aparece en el panel.
 
 ## 9. Temas y accesibilidad

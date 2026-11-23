@@ -459,3 +459,26 @@ pub const WELCOME_UPDATES: &str = "Tell me when a new version is out";
 pub const WELCOME_UPDATES_DETAIL: &str = "Once a day hivetty asks GitHub for the latest release. Nothing else is sent, and nothing is downloaded.";
 /// Accessible name of the terminal area (F6-05).
 pub const TERMINAL: &str = "Terminal";
+/// Tasks card: what the agents' OpenTelemetry adds (F5-15): `+1.2K −300 lines · 3 commits`.
+pub fn code_stats(added: u64, removed: u64, commits: u64, pull_requests: u64) -> String {
+    let mut out = format!(
+        "+{} \u{2212}{} lines",
+        hv_compact(added),
+        hv_compact(removed)
+    );
+    if commits > 0 {
+        out.push_str(&format!(" · {commits} commits"));
+    }
+    if pull_requests > 0 {
+        out.push_str(&format!(" · {pull_requests} PRs"));
+    }
+    out
+}
+
+fn hv_compact(n: u64) -> String {
+    match n {
+        0..=999 => n.to_string(),
+        1_000..=999_999 => format!("{:.1}K", n as f64 / 1e3),
+        _ => format!("{:.1}M", n as f64 / 1e6),
+    }
+}

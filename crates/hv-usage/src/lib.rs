@@ -8,6 +8,7 @@ pub mod codex;
 pub mod dashboard;
 pub mod gemini;
 pub mod observed;
+pub mod otel;
 pub mod pricing;
 pub mod store;
 

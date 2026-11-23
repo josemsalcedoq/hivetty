@@ -408,6 +408,11 @@
             "type": "string"
           },
           "default": []
+        },
+        "otlp": {
+          "description": "Receive the OpenTelemetry metrics of the Claude Code sessions hivetty starts (lines of\ncode, commits, pull requests) on a local endpoint (F5-15).",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false

@@ -302,6 +302,9 @@ pub struct Usage {
     /// Windows: WSL distributions whose agents' logs are read too (F5-05), by name
     /// (`wsl -l`). Reading them starts the distribution, so none are read unless listed.
     pub wsl_distros: Vec<String>,
+    /// Receive the OpenTelemetry metrics of the Claude Code sessions hivetty starts (lines of
+    /// code, commits, pull requests) on a local endpoint (F5-15).
+    pub otlp: bool,
 }
 
 /// `[accessibility]`

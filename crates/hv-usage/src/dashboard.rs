@@ -94,6 +94,8 @@ pub struct Dashboard {
     /// Estimated API-equivalent cost in USD of the turns whose model has a price (U-60), and
     /// the share of input tokens that had one.
     pub cost: Option<(f64, f64)>,
+    /// Lines of code, commits and pull requests from the agents' OpenTelemetry (F5-15).
+    pub code: Option<crate::otel::CodeStats>,
 }
 
 /// A timestamp in local time: day, Monday-based weekday index and hour.
@@ -415,6 +417,7 @@ pub fn build(
         agents,
         cost: None,
         observed_seconds: None,
+        code: None,
     }
 }
 

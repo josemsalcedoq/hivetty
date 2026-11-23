@@ -112,6 +112,7 @@ url = ""                         # tema de ntfy, sendMessage de Telegram o URL d
 chat_id = ""                     # solo Telegram
 
 [usage]
+otlp = false                   # receptor OTLP local para las sesiones de Claude Code que abre hivetty (F5-15)
 wsl_distros = []               # Windows: distros de WSL cuyos logs de agentes también se leen (F5-05)
 
 [accessibility]
