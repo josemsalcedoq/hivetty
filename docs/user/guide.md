@@ -102,6 +102,9 @@ scrollback_lines = 10000
 remember_geometry = true
 restore_layout = true         # reopen tabs, splits and directories
 
+[usage]
+wsl_distros = []              # Windows: also read agents' logs inside these WSL distributions ("Ubuntu")
+
 [accessibility]
 speak = false                 # say out loud when a session needs you or finishes (system voice)
 

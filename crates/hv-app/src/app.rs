@@ -3388,6 +3388,22 @@ impl UsageData {
         if let Some(root) = hv_usage::gemini::default_root() {
             add(store.ingest_gemini(&root));
         }
+        // F5-05: the same logs inside the WSL distributions the user listed.
+        for home in wsl_homes() {
+            for (dir, kind) in [
+                (home.join(".claude").join("projects"), 0),
+                (home.join(".codex").join("sessions"), 1),
+                (home.join(".gemini").join("tmp"), 2),
+            ] {
+                if dir.is_dir() {
+                    add(match kind {
+                        0 => store.ingest_claude(&dir),
+                        1 => store.ingest_codex(&dir),
+                        _ => store.ingest_gemini(&dir),
+                    });
+                }
+            }
+        }
         if added != (0, 0)
             && let Some(cache) = &cache
             && let Err(err) = store.save(cache)
@@ -3684,6 +3700,38 @@ fn record_interval(interval: Option<hv_usage::observed::Interval>) {
                 log::warn!("cannot record agent time: {err}");
             }
         });
+}
+
+/// A WSL distribution name as `wsl -l` shows it; anything else could make a path.
+fn valid_distro(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && name != "."
+        && name != ".."
+}
+
+/// The home folders inside the WSL distributions listed in `[usage] wsl_distros` (Windows
+/// only; not in safe mode). Blocking: it may start the distributions.
+fn wsl_homes() -> Vec<std::path::PathBuf> {
+    if !cfg!(windows) || hv_config::safe_mode() {
+        return Vec::new();
+    }
+    let Some(path) = hv_config::default_path() else {
+        return Vec::new();
+    };
+    let (config, _) = hv_config::load(&path);
+    let mut homes = Vec::new();
+    for distro in config.usage.wsl_distros.iter().filter(|d| valid_distro(d)) {
+        let base = std::path::PathBuf::from(format!(r"\\wsl.localhost\{distro}"));
+        homes.push(base.join("root"));
+        if let Ok(users) = std::fs::read_dir(base.join("home")) {
+            homes.extend(users.flatten().map(|u| u.path()));
+        }
+    }
+    homes
 }
 
 /// Usage of one agent session.
@@ -4201,6 +4249,15 @@ fn translate_key(event: &KeyEvent, mods: Mods) -> Option<TermKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wsl_distribution_names_cannot_make_paths() {
+        assert!(valid_distro("Ubuntu-24.04"));
+        assert!(!valid_distro(".."));
+        assert!(!valid_distro("a\\b"));
+        assert!(!valid_distro("a/b"));
+        assert!(!valid_distro(""));
+    }
 
     #[test]
     fn wslenv_keeps_the_users_entries_once() {

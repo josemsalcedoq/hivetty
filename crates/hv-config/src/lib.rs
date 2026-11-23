@@ -48,6 +48,8 @@ pub struct Config {
     pub updates: Updates,
     /// Accessibility options.
     pub accessibility: Accessibility,
+    /// Usage dashboard sources.
+    pub usage: Usage,
 }
 
 /// One `[[keybindings]]` entry.
@@ -291,6 +293,15 @@ impl Theme {
             _ => system_light.unwrap_or(false),
         }
     }
+}
+
+/// `[usage]`
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Usage {
+    /// Windows: WSL distributions whose agents' logs are read too (F5-05), by name
+    /// (`wsl -l`). Reading them starts the distribution, so none are read unless listed.
+    pub wsl_distros: Vec<String>,
 }
 
 /// `[accessibility]`

@@ -50,6 +50,10 @@
     "accessibility": {
       "description": "Accessibility options.",
       "$ref": "#/$defs/Accessibility"
+    },
+    "usage": {
+      "description": "Usage dashboard sources.",
+      "$ref": "#/$defs/Usage"
     }
   },
   "additionalProperties": false,
@@ -389,6 +393,21 @@
           "description": "Say out loud, with the system's voice, when a session needs you or finishes (F6-06).",
           "type": "boolean",
           "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "Usage": {
+      "description": "`[usage]`",
+      "type": "object",
+      "properties": {
+        "wsl_distros": {
+          "description": "Windows: WSL distributions whose agents' logs are read too (F5-05), by name\n(`wsl -l`). Reading them starts the distribution, so none are read unless listed.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false

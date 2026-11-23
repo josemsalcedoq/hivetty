@@ -111,6 +111,9 @@ service = ""                     # "ntfy", "telegram" o "webhook"
 url = ""                         # tema de ntfy, sendMessage de Telegram o URL del webhook
 chat_id = ""                     # solo Telegram
 
+[usage]
+wsl_distros = []               # Windows: distros de WSL cuyos logs de agentes también se leen (F5-05)
+
 [accessibility]
 speak = false                  # narrador: decir en voz alta los cambios que piden atención (F6-06)
 
