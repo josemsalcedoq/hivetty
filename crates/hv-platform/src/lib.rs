@@ -212,6 +212,90 @@ pub fn effective_uid() -> u32 {
     unsafe { libc::geteuid() }
 }
 
+/// Says `text` with the system's voice (F6-06), on a background thread; one phrase at a time.
+/// The text is handed over as data (an environment variable or an argument after `--`), never
+/// as part of a script. Failures are logged.
+///
+/// - Windows: `System.Speech` through Windows PowerShell.
+/// - macOS: `say`.
+/// - Linux: `spd-say` (speech-dispatcher), else `espeak`.
+pub fn speak(text: &str) {
+    static SPEAKING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let text: String = text.chars().filter(|c| !c.is_control()).take(300).collect();
+    if text.trim().is_empty() {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("speak".into())
+        .spawn(move || {
+            let _turn = SPEAKING.lock();
+            if let Err(err) = say(&text) {
+                log::warn!("cannot speak: {err}");
+            }
+        });
+}
+
+fn run_quietly(command: &mut std::process::Command) -> std::io::Result<std::process::ExitStatus> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+}
+
+#[cfg(windows)]
+fn say(text: &str) -> Result<(), String> {
+    run_quietly(
+        std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Add-Type -AssemblyName System.Speech; \
+                 (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak($env:HIVETTY_SPEAK)",
+            ])
+            .env("HIVETTY_SPEAK", text),
+    )
+    .map_err(|e| e.to_string())
+    .and_then(|s| {
+        s.success()
+            .then_some(())
+            .ok_or_else(|| format!("powershell: {s}"))
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn say(text: &str) -> Result<(), String> {
+    run_quietly(std::process::Command::new("say").arg("--").arg(text))
+        .map_err(|e| e.to_string())
+        .and_then(|s| s.success().then_some(()).ok_or_else(|| format!("say: {s}")))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn say(text: &str) -> Result<(), String> {
+    let spd = run_quietly(
+        std::process::Command::new("spd-say")
+            .args(["--wait", "--"])
+            .arg(text),
+    );
+    match spd {
+        Ok(status) if status.success() => Ok(()),
+        _ => run_quietly(std::process::Command::new("espeak").arg("--").arg(text))
+            .map_err(|e| format!("no spd-say or espeak: {e}"))
+            .and_then(|s| {
+                s.success()
+                    .then_some(())
+                    .ok_or_else(|| format!("espeak: {s}"))
+            }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

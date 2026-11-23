@@ -118,6 +118,7 @@ Con los tres agentes:
 - [ ] `[theme] high_contrast = true` en `config.toml`: negro y blanco con colores saturados, al guardar.
 - [ ] `hivetty theme import <archivo>` con un tema de iTerm2 (`.itermcolors`) o de Alacritty: imprime el bloque `[theme.colors]`; pegarlo en `config.toml` cambia los colores.
 - [ ] Un error a propósito en `config.toml` (por ejemplo `size = "grande"`): aparece una barra de aviso sobre el terminal y hivetty sigue con la configuración anterior.
+- [ ] `[accessibility] speak = true`: cuando una sesión pide permiso o termina, se oye con la voz del sistema (en Linux hace falta `spd-say` o `espeak`).
 - [ ] Lector de pantalla (VoiceOver, NVDA u Orca): lee las filas de la barra lateral y anuncia en voz alta cuando una sesión pide permiso o termina.
 
 ## 10. Notificaciones al móvil (opcional)

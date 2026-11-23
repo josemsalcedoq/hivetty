@@ -1442,8 +1442,13 @@ impl App {
                 .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "~".to_owned());
             if let Some((kind, title, body)) = pane.info.take_notification(&project) {
-                // Screen readers hear every one, also for the pane in front (F4-25).
-                self.announcement = Some((format!("{title} — {body}"), Instant::now()));
+                // Screen readers hear every one, also for the pane in front (F4-25), and so
+                // does the user when they asked hivetty to speak (F6-06).
+                let text = format!("{title} — {body}");
+                if self.config.accessibility.speak {
+                    hv_platform::speak(&text);
+                }
+                self.announcement = Some((text, Instant::now()));
                 // Never for the pane the user is looking at.
                 if !(window_focused && Some(*id) == focused) {
                     out.push((*id, kind, title, body));

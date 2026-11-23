@@ -102,6 +102,9 @@ scrollback_lines = 10000
 remember_geometry = true
 restore_layout = true         # reopen tabs, splits and directories
 
+[accessibility]
+speak = false                 # say out loud when a session needs you or finishes (system voice)
+
 [updates]
 check = false                 # true: once a day, ask GitHub for the latest release and say when there is a newer one
 

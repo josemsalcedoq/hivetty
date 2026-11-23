@@ -111,6 +111,9 @@ service = ""                     # "ntfy", "telegram" o "webhook"
 url = ""                         # tema de ntfy, sendMessage de Telegram o URL del webhook
 chat_id = ""                     # solo Telegram
 
+[accessibility]
+speak = false                  # narrador: decir en voz alta los cambios que piden atención (F6-06)
+
 [updates]
 check = false                  # avisar de versiones nuevas (consulta GitHub una vez al día; F6-11)
 

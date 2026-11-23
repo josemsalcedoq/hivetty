@@ -46,6 +46,8 @@ pub struct Config {
     pub editor: Editor,
     /// Looking for new versions.
     pub updates: Updates,
+    /// Accessibility options.
+    pub accessibility: Accessibility,
 }
 
 /// One `[[keybindings]]` entry.
@@ -289,6 +291,14 @@ impl Theme {
             _ => system_light.unwrap_or(false),
         }
     }
+}
+
+/// `[accessibility]`
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Accessibility {
+    /// Say out loud, with the system's voice, when a session needs you or finishes (F6-06).
+    pub speak: bool,
 }
 
 /// `[updates]`: whether hivetty looks for new versions (F6-11). Off unless the user turns it

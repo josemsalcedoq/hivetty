@@ -46,6 +46,10 @@
     "updates": {
       "description": "Looking for new versions.",
       "$ref": "#/$defs/Updates"
+    },
+    "accessibility": {
+      "description": "Accessibility options.",
+      "$ref": "#/$defs/Accessibility"
     }
   },
   "additionalProperties": false,
@@ -371,6 +375,18 @@
       "properties": {
         "check": {
           "description": "Once a day, ask GitHub for the latest release and say when there is a newer one.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "Accessibility": {
+      "description": "`[accessibility]`",
+      "type": "object",
+      "properties": {
+        "speak": {
+          "description": "Say out loud, with the system's voice, when a session needs you or finishes (F6-06).",
           "type": "boolean",
           "default": false
         }
